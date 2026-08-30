@@ -10,6 +10,7 @@ from typing import Iterable, Optional
 
 from .analysis.avoidable import AvoidableData
 from .analysis.run_analyzer import analyze_run
+from .chapters import write_chapter_files
 from .combatlog.parser import parse_file
 from .combatlog.segmenter import RunSegment, segment_runs
 from .mdt.decode import MDTDecodeError, decode_mdt_string
@@ -356,6 +357,47 @@ def cmd_index(args: argparse.Namespace) -> int:
     return 0
 
 
+def _write_recorded_reports(run, route, store, pull_gap_seconds: float = 5.0) -> None:
+    """Analyze one recorded run's log slice and write its JSON/HTML/text
+    reports, plus the chapters sidecars (``<run>.chapters.json`` /
+    ``<run>.vtt`` -- see :mod:`mythic_analyzer.chapters`, WP-D2) next to
+    the recorded ``.txt`` slice. ``run.started_at`` (the wall-clock moment
+    the recorder started this run, essentially simultaneous with a shell
+    hook or native OBS actually starting to record -- see
+    ``recorder.RecordedRun``) is used as the chapters' video-start
+    reference.
+
+    Chapters/VTT are written unconditionally alongside the other
+    ``--analyze`` outputs (not gated on ``--obs``/``--on-run-start`` being
+    configured): they're harmless even with no matching video, consistent
+    with how JSON/HTML/text are already all written together with no
+    individual opt-out, and a later per-pull clip-cutting work package
+    needs this file regardless of how (or whether, at record time) the
+    video was actually produced.
+
+    Kept as a standalone module-level function (rather than inline in
+    ``cmd_record``) so it can be exercised directly in tests without
+    driving the recorder's blocking ``watch()`` loop through a full CLI
+    invocation -- see ``TestRecorder`` in ``tests/test_cli_and_tools.py``.
+    """
+    # list(...) is fine here: run.path is a per-run recorded slice
+    # (Recorder opens a fresh file per CHALLENGE_MODE_START), so this
+    # never holds more than one run's events regardless.
+    segments = list(segment_runs(parse_file(run.path)))
+    if not segments:
+        return
+    report = analyze_run(segments[-1], route=route, store=store,
+                         pull_gap_seconds=pull_gap_seconds)
+    base = run.path.with_suffix("")
+    Path(f"{base}.json").write_text(json.dumps(report, indent=1),
+                                    encoding="utf-8")
+    Path(f"{base}.html").write_text(render_html(report), encoding="utf-8")
+    write_chapter_files(report, run.started_at, base)
+    print(render_text(report))
+    print(f"wrote {base}.json / {base}.html / {base}.chapters.json / {base}.vtt",
+          file=sys.stderr)
+
+
 def cmd_record(args: argparse.Namespace) -> int:
     route = _load_route(args.route) if args.route else None
     store = _load_store(args.dungeon_data)
@@ -365,20 +407,7 @@ def cmd_record(args: argparse.Namespace) -> int:
         if not args.analyze:
             return
         try:
-            # list(...) is fine here: run.path is a per-run recorded slice
-            # (Recorder opens a fresh file per CHALLENGE_MODE_START), so this
-            # never holds more than one run's events regardless.
-            segments = list(segment_runs(parse_file(run.path)))
-            if not segments:
-                return
-            report = analyze_run(segments[-1], route=route, store=store,
-                                 pull_gap_seconds=args.pull_gap)
-            base = run.path.with_suffix("")
-            Path(f"{base}.json").write_text(json.dumps(report, indent=1),
-                                            encoding="utf-8")
-            Path(f"{base}.html").write_text(render_html(report), encoding="utf-8")
-            print(render_text(report))
-            print(f"wrote {base}.json / {base}.html", file=sys.stderr)
+            _write_recorded_reports(run, route, store, pull_gap_seconds=args.pull_gap)
         except Exception as exc:  # keep recording even if analysis hiccups
             print(f"warning: auto-analysis failed: {exc}", file=sys.stderr)
 
