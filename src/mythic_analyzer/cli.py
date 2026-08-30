@@ -389,6 +389,9 @@ def cmd_record(args: argparse.Namespace) -> int:
         on_run_complete=analyze_recorded,
         on_start_cmd=args.on_run_start,
         on_end_cmd=args.on_run_end,
+        obs_url=args.obs,
+        obs_password=args.obs_password,
+        obs_replay_on_death=args.obs_replay_on_death,
     )
     recorder.watch()
     return 0
@@ -509,6 +512,27 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--on-run-end", metavar="CMD",
                    help="shell command to run when the key ends "
                         "(e.g. 'obs-cmd recording stop')")
+    p.add_argument("--obs", nargs="?", const="ws://127.0.0.1:4455", default=None,
+                   metavar="URL",
+                   help="natively drive OBS via its own WebSocket v5 API "
+                        "(no obs-cmd/third-party tool needed) -- start/stop "
+                        "recording with each key. Pass a URL (e.g. "
+                        "ws://127.0.0.1:4455, OBS's default) or just '--obs' "
+                        "alone to use that same default. If --on-run-start/"
+                        "--on-run-end are ALSO given, those shell hooks take "
+                        "precedence for that event and the native client is "
+                        "not additionally invoked for it, to avoid "
+                        "double-triggering OBS; any native-OBS failure is "
+                        "only ever a warning, recording continues regardless")
+    p.add_argument("--obs-password", metavar="PASSWORD",
+                   help="OBS WebSocket server password, if one is set "
+                        "(Tools -> WebSocket Server Settings in OBS)")
+    p.add_argument("--obs-replay-on-death", action="store_true",
+                   help="save the OBS replay buffer (SaveReplayBuffer) every "
+                        "time a player death is detected; independent of "
+                        "shell-hook precedence -- always uses the native OBS "
+                        "client when --obs is set (there's no equivalent "
+                        "shell hook for this event to conflict with)")
     p.set_defaults(func=cmd_record)
 
     p = sub.add_parser(
