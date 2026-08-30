@@ -71,9 +71,35 @@ WoW only writes `WoWCombatLog.txt` while combat logging is on:
   spells that never landed in the run honestly get no number.
 - **Timelines** — bloodlust, battle resses, kicks and dispels; the full
   per-cast timeline is included in the JSON report.
+- **Kick efficiency** — every enemy hard-cast is tracked from
+  `SPELL_CAST_START` to its outcome: kicked, got through, or died
+  mid-cast; per-spell table plus an overall efficiency percentage.
+- **Boss attempts** — encounter table with kills, wipes and durations.
+- **Per-player extras** — killing blows, casts per minute, purges vs.
+  dispels, boss-damage share, potions/healthstones used, approximate
+  distance traveled, and buff uptimes (Bloodlust included).
+- **Death cost** — deaths priced in timer seconds (`--death-penalty`,
+  default 15 s), plus biggest hit and last-5-seconds burst per death.
 - **Forces** — enemy-forces count progress over time vs. the required
   total (needs the extracted dungeon data).
 - **Downtime** — the gaps between pulls where the timer kept running.
+- **Positions** — per-player position samples in the JSON (advanced
+  logging), groundwork for route-vs-actual map overlays.
+- **Run history** — `mythic-analyzer index reports/` builds a static
+  history webpage over all saved reports: filterable, sortable, with
+  per-dungeon best keys and links into each run's HTML report.
+- **Raider.io** — `analyze --raiderio us` (or eu/kr/tw/cn) adds each
+  player's current M+ score and season best from the public Raider.io
+  API; optional and failure-tolerant.
+- **Video capture hooks** — `record --on-run-start/--on-run-end CMD`
+  fires shell commands exactly at key start/end (with `MA_ZONE`,
+  `MA_LEVEL`, `MA_PATH` in the environment). Point them at
+  [obs-cmd](https://github.com/grigio/obs-cmd) and every key records its
+  own video: `--on-run-start "obs-cmd recording start" --on-run-end
+  "obs-cmd recording stop"`.
+
+See [ROADMAP.md](ROADMAP.md) for where this is headed (hosted history,
+deeper Raider.io integration, native OBS control, map overlays).
 - **Reports** — terminal text, machine-readable JSON, and a self-contained
   dark-mode HTML page with a pull timeline (deviations outlined, deaths and
   lust marked).

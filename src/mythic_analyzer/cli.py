@@ -122,7 +122,13 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         store=store,
         pull_gap_seconds=args.pull_gap,
         full_cast_timeline=not args.no_cast_timeline,
+        death_penalty_s=args.death_penalty,
     )
+
+    if args.raiderio:
+        from .raiderio import enrich_report
+        n = enrich_report(report, args.raiderio)
+        print(f"raider.io: enriched {n} players", file=sys.stderr)
 
     formats = [f.strip() for f in args.format.split(",") if f.strip()]
     out_dir = Path(args.out) if args.out else None
@@ -171,6 +177,18 @@ def _report_basename(report: dict) -> str:
     return f"{stamp}_{zone}_{level}"
 
 
+def cmd_index(args: argparse.Namespace) -> int:
+    from .report.index import build_index, collect_reports
+
+    rows = collect_reports(args.directory)
+    out = build_index(args.directory, args.output)
+    print(f"indexed {len(rows)} runs -> {out}")
+    if not rows:
+        print("(no report JSON files found — analyze runs with "
+              "--format json,html first)", file=sys.stderr)
+    return 0
+
+
 def cmd_record(args: argparse.Namespace) -> int:
     route = _load_route(args.route) if args.route else None
     store = _load_store(args.dungeon_data)
@@ -199,6 +217,8 @@ def cmd_record(args: argparse.Namespace) -> int:
         out_dir=out_dir,
         from_start=args.from_start,
         on_run_complete=analyze_recorded,
+        on_start_cmd=args.on_run_start,
+        on_end_cmd=args.on_run_end,
     )
     recorder.watch()
     return 0
@@ -243,7 +263,21 @@ def build_parser() -> argparse.ArgumentParser:
                    help="seconds of no-combat that separates two pulls (default 5)")
     p.add_argument("--no-cast-timeline", action="store_true",
                    help="omit the full per-cast timeline from JSON output")
+    p.add_argument("--death-penalty", type=float, default=15.0,
+                   help="seconds the keystone timer loses per death (default 15)")
+    p.add_argument("--raiderio", metavar="REGION",
+                   help="enrich players with Raider.io scores (us/eu/kr/tw/cn); "
+                        "needs internet access")
     p.set_defaults(func=cmd_analyze)
+
+    p = sub.add_parser(
+        "index",
+        help="build a historical index.html over a directory of saved reports",
+    )
+    p.add_argument("directory", help="directory containing report .json/.html files")
+    p.add_argument("-o", "--output",
+                   help="where to write the page (default: <directory>/index.html)")
+    p.set_defaults(func=cmd_index)
 
     p = sub.add_parser("record", help="watch the combat log live and record each run")
     p.add_argument("log", help="path to WoWCombatLog.txt")
@@ -255,6 +289,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--from-start", action="store_true",
                    help="also process runs already in the log, not just new ones")
     p.add_argument("--pull-gap", type=float, default=5.0)
+    p.add_argument("--on-run-start", metavar="CMD",
+                   help="shell command to run when a key starts (e.g. "
+                        "'obs-cmd recording start' for video capture); "
+                        "MA_ZONE/MA_LEVEL/MA_PATH are set in its environment")
+    p.add_argument("--on-run-end", metavar="CMD",
+                   help="shell command to run when the key ends "
+                        "(e.g. 'obs-cmd recording stop')")
     p.set_defaults(func=cmd_record)
 
     return parser

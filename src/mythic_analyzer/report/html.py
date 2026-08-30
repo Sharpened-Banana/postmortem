@@ -113,6 +113,8 @@ function render() {
     ${R.route ? stat(R.route.pull_count, "planned pulls") : ""}
     ${R.comparison && R.comparison.adherence_pct != null ? stat(R.comparison.adherence_pct + "%", "route adherence") : ""}
     ${R.kick_value && R.kick_value.total_estimated_prevented_damage ? stat("~" + num(R.kick_value.total_estimated_prevented_damage), "dmg prevented by kicks (est.)") : ""}
+    ${R.enemy_casts && R.enemy_casts.kick_efficiency_pct != null ? stat(R.enemy_casts.kick_efficiency_pct + "%", "kick efficiency") : ""}
+    ${R.death_cost && R.death_cost.deaths ? stat("-" + mmss(R.death_cost.total_s), "timer lost to deaths") : ""}
   </div>`;
 
   html += timeline();
@@ -120,6 +122,8 @@ function render() {
   if (R.comparison && !R.comparison.error) html += comparison();
   else if (R.route) html += `<h2>Route</h2><div class="dim">${esc((R.comparison||{}).error || "")}</div>` + routeOnly();
   html += pullsTable();
+  html += enemyCasts();
+  html += encounters();
   html += deaths();
   html += utility();
   html += downtime();
@@ -169,7 +173,7 @@ function playersTable() {
   players.sort((a, b) => b.damage_done - a.damage_done);
   const rows = players.map(p => `<tr>
     <td>${esc(p.name || p.guid)}</td>
-    <td class="dim">${esc([p.spec, p.class].filter(Boolean).join(" ") || "?")}</td>
+    <td class="dim">${esc([p.spec, p.class].filter(Boolean).join(" ") || "?")}${p.raiderio && p.raiderio.score ? ` <span title="Raider.io M+ score">· ${Math.round(p.raiderio.score)} io</span>` : ""}</td>
     <td class="num">${num(p.dps)}</td><td class="num">${num(p.hps)}</td>
     <td class="num">${num(p.damage_done)}</td>
     <td class="num">${num(p.healing_done)}</td>
@@ -177,20 +181,27 @@ function playersTable() {
     <td class="num">${num(p.damage_taken)}</td>
     <td class="num">${p.interrupts}</td>
     <td class="num" title="estimated damage + healing prevented by this player's interrupts">${(p.kick_prevented_damage || p.kick_prevented_healing) ? "~" + num((p.kick_prevented_damage||0) + (p.kick_prevented_healing||0)) : ""}</td>
-    <td class="num">${p.dispels}</td>
+    <td class="num">${(p.dispels||0) + (p.purges||0)}</td>
+    <td class="num">${p.killing_blows ?? ""}</td>
+    <td class="num">${p.cpm ?? ""}</td>
     <td class="num${p.deaths ? ' dev-off' : ''}">${p.deaths}</td></tr>
-    <tr><td colspan="12" style="border-bottom:1px solid var(--line)">
-      <details><summary class="dim">top abilities</summary>
+    <tr><td colspan="14" style="border-bottom:1px solid var(--line)">
+      <details><summary class="dim">top abilities & buffs</summary>
       <div class="dim">Damage: ${(p.top_damage_spells||[]).slice(0,8).map(s => `${esc(s.name)} ${num(s.total)}`).join(" · ")}</div>
       ${(p.top_healing_spells||[]).length ? `<div class="dim">Healing: ${(p.top_healing_spells||[]).slice(0,8).map(s => `${esc(s.name)} ${num(s.total)}`).join(" · ")}</div>` : ""}
       <div class="dim">Damage taken: ${(p.top_damage_taken||[]).slice(0,8).map(s => `${esc(s.name)} ${num(s.total)}`).join(" · ")}</div>
+      ${(p.buff_uptimes||[]).length ? `<div class="dim">Buff uptime: ${(p.buff_uptimes||[]).slice(0,10).map(b => `${esc(b.name)} ${b.uptime_pct}%`).join(" · ")}</div>` : ""}
+      ${(p.damage_to_bosses ? `<div class="dim">Boss damage: ${num(p.damage_to_bosses)} (${p.damage_done ? Math.round(100*p.damage_to_bosses/p.damage_done) : 0}% of total)</div>` : "")}
+      ${(p.potions_used || p.healthstones_used || p.distance_traveled) ? `<div class="dim">${p.potions_used ? p.potions_used + " potions · " : ""}${p.healthstones_used ? p.healthstones_used + " healthstones · " : ""}${p.distance_traveled ? "~" + num(p.distance_traveled) + " yd traveled" : ""}</div>` : ""}
       </details></td></tr>`).join("");
   return `<h2>Players</h2><div class="wrap"><table>
     <tr><th>Player</th><th>Spec</th><th class="num">DPS</th><th class="num">HPS</th>
     <th class="num">Damage</th><th class="num">Healing</th><th class="num">Absorbs</th>
     <th class="num">Taken</th><th class="num">Kicks</th>
     <th class="num" title="estimated damage/healing prevented by kicks">Kick prev.</th>
-    <th class="num">Dispels</th>
+    <th class="num" title="dispels + purges">Dispels</th>
+    <th class="num" title="killing blows">KB</th>
+    <th class="num" title="casts per minute">CPM</th>
     <th class="num">Deaths</th></tr>${rows}</table></div>`;
 }
 
@@ -243,6 +254,35 @@ function pullsTable() {
     <tr><th class="num">#</th><th>Window</th><th class="num">Length</th>
     <th class="num">Mobs</th><th class="num">Forces</th><th class="num">Group dmg</th>
     <th class="num">Deaths</th><th>Boss</th><th>Pack</th></tr>${rows}</table></div>`;
+}
+
+function enemyCasts() {
+  const spells = ((R.enemy_casts||{}).spells||[]).filter(s => s.got_through + s.kicked > 0);
+  if (!spells.length) return "";
+  spells.sort((a, b) => b.got_through - a.got_through);
+  return `<h2>Enemy casts — kicked vs got through</h2><div class="wrap"><table>
+    <tr><th>Spell</th><th class="num">Got through</th><th class="num">Kicked</th>
+    <th class="num">Died mid-cast</th><th>Kick rate</th></tr>
+    ${spells.slice(0, 15).map(s => {
+      const total = s.got_through + s.kicked;
+      const pct = total ? Math.round(100 * s.kicked / total) : 0;
+      const cls = pct >= 70 ? "ok" : pct >= 30 ? "dev-early" : "dev-off";
+      return `<tr><td>${esc(s.name)}</td>
+        <td class="num${s.got_through ? " dev-off" : ""}">${s.got_through}</td>
+        <td class="num">${s.kicked}</td><td class="num">${s.expired || ""}</td>
+        <td><span class="${cls}">${pct}%</span></td></tr>`;
+    }).join("")}</table></div>`;
+}
+
+function encounters() {
+  const list = R.encounters || [];
+  if (!list.some(e => !e.kill)) return "";
+  return `<h2>Boss attempts</h2><div class="wrap"><table>
+    <tr><th>Time</th><th>Boss</th><th>Result</th><th class="num">Length</th></tr>
+    ${list.map(e => `<tr><td>${mmss(e.t)}</td><td>${esc(e.name)}</td>
+      <td>${e.kill ? '<span class="ok">kill</span>' : '<span class="dev-off">wipe</span>'}</td>
+      <td class="num">${Math.round(e.duration_s)}s</td></tr>`).join("")}
+    </table></div>`;
 }
 
 function deaths() {
