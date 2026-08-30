@@ -641,8 +641,8 @@ class TestAvoidableDataLoad:
         example = Path(__file__).resolve().parents[1] / "docs" / "avoidable_spells.example.json"
         data = AvoidableData.load(example)
         assert 1216538 in data.spells
-        assert data.spells[1216538]["name"] == "Dark Bolt"
-        assert data.dungeons.get(160) == {1216538}
+        assert data.spells[1216538]["name"] == "Fel Detonation"
+        assert data.dungeons.get(160) == {1216538, 1217099}
 
     def test_missing_file_raises(self, tmp_path):
         with pytest.raises(OSError):
