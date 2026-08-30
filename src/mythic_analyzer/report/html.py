@@ -107,6 +107,8 @@ function render() {
     wall clock ${mmss(dur)}
     ${run.affixes && run.affixes.length ? " · affixes " + run.affixes.join(", ") : ""}</div>`;
 
+  html += timerInfo();
+
   html += `<div class="grid">
     ${stat(num(forces.killed), "forces killed" + (forces.required ? ` / ${num(forces.required)} (${forces.pct}%)` : ""))}
     ${stat((R.deaths||[]).length, "player deaths")}
@@ -136,6 +138,19 @@ function render() {
 }
 
 const stat = (v, l) => `<div class="stat"><div class="v">${v}</div><div class="l">${esc(l)}</div></div>`;
+
+function timerInfo() {
+  const t = R.timer;
+  if (!t) return "";
+  const parLabel = `par ${mmss(t.par_ms/1000)} (+2 at ${mmss(t.threshold_2_ms/1000)}`
+    + ` · +3 at ${mmss(t.threshold_3_ms/1000)})`;
+  if (t.margin_ms == null) return `<div class="sub">${esc(parLabel)}</div>`;
+  const cls = t.margin_ms >= 0 ? "ok" : "dev-off";
+  const verb = t.margin_ms >= 0 ? "beat timer by" : "over timer by";
+  const thr = t.threshold ? ` (+${t.threshold})` : "";
+  return `<div class="sub"><span class="${cls}">${verb} ${mmss(Math.abs(t.margin_ms)/1000)}${thr}</span>`
+    + ` · ${esc(parLabel)}</div>`;
+}
 
 function timeline() {
   const pulls = R.pulls || [];
