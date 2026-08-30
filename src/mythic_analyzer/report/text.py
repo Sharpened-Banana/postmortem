@@ -64,18 +64,29 @@ def render_text(report: dict[str, Any]) -> str:
     downtime = report.get("downtime") or {}
     add(f"Combat time: {_fmt_time(downtime.get('combat_s'))}"
         f"  |  Downtime between pulls: {_fmt_time(downtime.get('total_s'))}")
+    death_cost = report.get("death_cost") or {}
+    if death_cost.get("deaths"):
+        add(f"Death cost: {death_cost['deaths']} deaths ≈ "
+            f"-{_fmt_time(death_cost['total_s'])} on the timer"
+            f" ({death_cost['per_death_s']:.0f}s each)")
+    enemy_casts = report.get("enemy_casts") or {}
+    if enemy_casts.get("kick_efficiency_pct") is not None:
+        add(f"Kick efficiency: {enemy_casts['kick_efficiency_pct']}% of kickable "
+            f"enemy casts were interrupted")
 
     # --- players ---
     add("")
     add("-- PLAYERS " + "-" * 61)
     add(f"{'Player':<24}{'Spec':<22}{'DPS':>8}{'HPS':>8}{'Dmg':>8}"
-        f"{'Taken':>8}{'Int':>5}{'Dis':>5}{'Dth':>5}")
+        f"{'Taken':>8}{'CPM':>6}{'KB':>4}{'Int':>5}{'Dis':>5}{'Dth':>5}")
     for p in sorted(report["players"], key=lambda p: -p["damage_done"]):
         spec = " ".join(x for x in (p.get("spec"), p.get("class")) if x) or "?"
         add(f"{(p['name'] or p['guid'])[:23]:<24}{spec[:21]:<22}"
             f"{_fmt_num(p.get('dps')):>8}{_fmt_num(p.get('hps')):>8}"
             f"{_fmt_num(p['damage_done']):>8}{_fmt_num(p['damage_taken']):>8}"
-            f"{p['interrupts']:>5}{p['dispels']:>5}{p['deaths']:>5}")
+            f"{p.get('cpm', 0):>6.0f}{p.get('killing_blows', 0):>4}"
+            f"{p['interrupts']:>5}{p['dispels'] + p.get('purges', 0):>5}"
+            f"{p['deaths']:>5}")
 
     # --- route comparison ---
     comparison = report.get("comparison")
@@ -130,6 +141,79 @@ def render_text(report: dict[str, Any]) -> str:
                 f"  (pull {d.get('pull', '?')})"
                 + (f"  killed by {kb.get('spell')} from {kb.get('source')}"
                    f" for {_fmt_num(kb.get('amount'))}" if kb else ""))
+
+    # --- enemy casts / kick efficiency ---
+    spells = (report.get("enemy_casts") or {}).get("spells") or []
+    through = [s for s in spells if s["got_through"]]
+    if through:
+        add("")
+        add("-- ENEMY CASTS THAT GOT THROUGH " + "-" * 40)
+        for s in sorted(through, key=lambda s: -s["got_through"])[:12]:
+            total = s["got_through"] + s["kicked"]
+            add(f"  {s['name']:<32}{s['got_through']:>3} landed / {total:>3} casts"
+                + (f"  ({s['kicked']} kicked)" if s["kicked"] else "  (never kicked)"))
+
+    # --- encounters (only interesting when there were wipes) ---
+    encounters = report.get("encounters") or []
+    wipes = [e for e in encounters if not e.get("kill")]
+    if wipes:
+        add("")
+        add("-- BOSS ATTEMPTS " + "-" * 55)
+        for e in encounters:
+            result = "kill" if e.get("kill") else "WIPE"
+            add(f"  {_fmt_time(e.get('t'))}  {e['name']:<32}{result:>5}"
+                f"  ({e['duration_s']:.0f}s)")
+
+    # --- consumables ---
+    consumers = [p for p in report["players"]
+                 if p.get("potions_used") or p.get("healthstones_used")]
+    if consumers:
+        add("")
+        add("-- CONSUMABLES " + "-" * 57)
+        for p in consumers:
+            bits = []
+            if p.get("potions_used"):
+                bits.append(f"{p['potions_used']} potions")
+            if p.get("healthstones_used"):
+                bits.append(f"{p['healthstones_used']} healthstones")
+            add(f"  {p['name']:<24}{', '.join(bits)}")
+
+    # --- kick value ---
+    kicks = report.get("kick_value") or {}
+    if kicks.get("by_player"):
+        add("")
+        add("-- KICKS (estimated damage/healing prevented) " + "-" * 26)
+        for entry in kicks["by_player"]:
+            parts = [f"{entry['kicks']} kicks"]
+            if entry["estimated_prevented_damage"]:
+                parts.append(f"~{_fmt_num(entry['estimated_prevented_damage'])} dmg prevented")
+            if entry["estimated_prevented_healing"]:
+                parts.append(f"~{_fmt_num(entry['estimated_prevented_healing'])} healing prevented")
+            add(f"  {entry['name']:<24}{'  |  '.join(parts)}")
+        for i in report.get("interrupts") or []:
+            est = i.get("estimated_prevented_damage")
+            est_h = i.get("estimated_prevented_healing")
+            what = []
+            if est:
+                dot = i.get("prevented_dot_damage") or 0
+                dot_s = f" ({_fmt_num(dot)} of it DoT)" if dot else ""
+                what.append(f"~{_fmt_num(est)} dmg{dot_s}")
+            if est_h:
+                what.append(f"~{_fmt_num(est_h)} healing")
+            if i.get("prevented_debuff_applications"):
+                what.append(
+                    f"a debuff application (seen "
+                    f"{i['prevented_debuff_applications']}x elsewhere, no damage)"
+                )
+            if est or est_h:
+                basis = f" (avg of {i['observed_casts']} landed casts)"
+            elif i.get("prevented_debuff_applications"):
+                basis = ""
+            else:
+                basis = " (never landed — no estimate)"
+            add(f"    {_fmt_time(i.get('t'))}  {i['player']} kicked "
+                f"{i.get('interrupted_spell') or '?'} on {i['target']}"
+                + (f": {' + '.join(what)} prevented{basis}" if what else basis))
 
     # --- big moments ---
     lust = report.get("lust") or []

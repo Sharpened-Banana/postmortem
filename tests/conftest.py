@@ -146,6 +146,29 @@ class LogBuilder:
         self.spell_damage(t, npc_guid, npc_name, HOSTILE, guid, name, flags,
                           spell_id, spell_name, amount, hp=hp)
 
+    def npc_debuff(self, t, src_guid, src_name, dst_player, spell_id, spell_name):
+        dguid, dname, dflags, _ = dst_player
+        self.raw(t, f'SPELL_AURA_APPLIED,{src_guid},"{src_name}",{HOSTILE:#06x},0x0,'
+                    f'{dguid},"{dname}",{dflags:#06x},0x0,'
+                    f'{spell_id},"{spell_name}",0x20,DEBUFF')
+
+    def npc_periodic_damage(self, t, src_guid, src_name, dst_player, spell_id,
+                            spell_name, amount, hp=400000):
+        dguid, dname, dflags, _ = dst_player
+        adv = self._advanced(dguid, hp=hp)
+        self.raw(t, f'SPELL_PERIODIC_DAMAGE,{src_guid},"{src_name}",{HOSTILE:#06x},0x0,'
+                    f'{dguid},"{dname}",{dflags:#06x},0x0,'
+                    f'{spell_id},"{spell_name}",0x20,{adv},'
+                    f'{amount},{amount},0,0x20,0,0,0,nil,nil,nil,nil')
+
+    def npc_heal(self, t, src_guid, src_name, dst_guid, dst_name, spell_id,
+                 spell_name, amount):
+        adv = self._advanced(dst_guid)
+        self.raw(t, f'SPELL_HEAL,{src_guid},"{src_name}",{HOSTILE:#06x},0x0,'
+                    f'{dst_guid},"{dst_name}",{HOSTILE:#06x},0x0,'
+                    f'{spell_id},"{spell_name}",0x8,{adv},'
+                    f'{amount},{amount},0,0,nil')
+
     def heal(self, t, src_player, dst_player, spell_id, spell_name, amount,
              overheal=0):
         sguid, sname, sflags, _ = src_player
@@ -157,12 +180,44 @@ class LogBuilder:
                     f'{amount},{amount},{overheal},0,nil')
 
     def cast(self, t, player, spell_id, spell_name, target_guid="0000000000000000",
-             target_name="nil", target_flags=0x80000000):
+             target_name="nil", target_flags=0x80000000, x=100.0, y=-200.0):
         guid, name, flags, _ = player
-        adv = self._advanced(guid)
+        adv = self._advanced(guid, x=x, y=y)
         self.raw(t, f'SPELL_CAST_SUCCESS,{guid},"{name}",{flags:#06x},0x0,'
                     f'{target_guid},{target_name},{target_flags:#010x},0x0,'
                     f'{spell_id},"{spell_name}",0x1,{adv}')
+
+    def npc_cast_start(self, t, src_guid, src_name, spell_id, spell_name):
+        self.raw(t, f'SPELL_CAST_START,{src_guid},"{src_name}",{HOSTILE:#06x},0x0,'
+                    f'0000000000000000,nil,0x80000000,0x0,'
+                    f'{spell_id},"{spell_name}",0x20')
+
+    def npc_cast_success(self, t, src_guid, src_name, spell_id, spell_name):
+        adv = self._advanced(src_guid)
+        self.raw(t, f'SPELL_CAST_SUCCESS,{src_guid},"{src_name}",{HOSTILE:#06x},0x0,'
+                    f'0000000000000000,nil,0x80000000,0x0,'
+                    f'{spell_id},"{spell_name}",0x20,{adv}')
+
+    def party_kill(self, t, player, dst_guid, dst_name):
+        guid, name, flags, _ = player
+        self.raw(t, f'PARTY_KILL,{guid},"{name}",{flags:#06x},0x0,'
+                    f'{dst_guid},"{dst_name}",{HOSTILE:#06x},0x0,0')
+
+    def aura_removed(self, t, src_player, dst_player, spell_id, spell_name,
+                     kind="BUFF"):
+        sguid, sname, sflags, _ = src_player
+        dguid, dname, dflags, _ = dst_player
+        self.raw(t, f'SPELL_AURA_REMOVED,{sguid},"{sname}",{sflags:#06x},0x0,'
+                    f'{dguid},"{dname}",{dflags:#06x},0x0,'
+                    f'{spell_id},"{spell_name}",0x1,{kind}')
+
+    def dispel(self, t, player, dst_guid, dst_name, dst_flags, spell_id,
+               spell_name, removed_id, removed_name, kind="BUFF"):
+        guid, name, flags, _ = player
+        self.raw(t, f'SPELL_DISPEL,{guid},"{name}",{flags:#06x},0x0,'
+                    f'{dst_guid},"{dst_name}",{dst_flags:#010x},0x0,'
+                    f'{spell_id},"{spell_name}",0x1,'
+                    f'{removed_id},"{removed_name}",0x1,{kind}')
 
     def interrupt(self, t, player, dst, dst_name, kick_id, kick_name,
                   stopped_id, stopped_name):
@@ -210,11 +265,17 @@ def build_run_log() -> LogBuilder:
     b.player_damage(15, DPS1, dA, "Duskblade", 133, "Fireball", 40000)  # early!
     b.heal(16, HEALER, TANK, 8004, "Healing Surge", 25000, overheal=5000)
     b.cast(13, DPS1, 133, "Fireball", fA, '"Felwyrm"', HOSTILE)
+    # movement: two more casts from new positions (+10 yd, then +30 yd)
+    b.cast(20, DPS1, 133, "Fireball", fA, '"Felwyrm"', HOSTILE, x=110.0)
+    b.cast(30, DPS1, 133, "Fireball", fA, '"Felwyrm"', HOSTILE, x=110.0, y=-230.0)
+    b.party_kill(37.9, DPS1, fA, "Felwyrm")
     b.unit_died(38, fA, "Felwyrm", HOSTILE)
     b.player_damage(38.5, TANK, fB, "Felwyrm", 31935, "Avenger's Shield", 60000,
                     overkill=1000)
+    b.party_kill(38.9, TANK, fB, "Felwyrm")
     b.unit_died(39, fB, "Felwyrm", HOSTILE)
     b.player_damage(39.5, DPS1, dA, "Duskblade", 133, "Fireball", 90000)
+    b.party_kill(39.9, DPS1, dA, "Duskblade")
     b.unit_died(40, dA, "Duskblade", HOSTILE)
 
     # --- downtime 40..60 ---
@@ -223,18 +284,55 @@ def build_run_log() -> LogBuilder:
     b.player_damage(60, TANK, dB, "Duskblade", 31935, "Avenger's Shield", 30000)
     b.player_damage(61, DPS1, sh, "Shadeling", 133, "Fireball", 30000)
     b.player_damage(62, DPS1, add, "Summoned Thing", 133, "Fireball", 10000)
+    # a pure-DoT spell: one application on the tank, three 15k ticks;
+    # the healer kicks its next cast -> ~45k DoT damage prevented
+    b.npc_cast_start(62.0, sh, "Shadeling", 777001, "Creeping Rot")
+    b.npc_cast_success(62.5, sh, "Shadeling", 777001, "Creeping Rot")
+    b.npc_debuff(62.5, sh, "Shadeling", TANK, 777001, "Creeping Rot")
+    b.npc_cast_start(62.6, dB, "Duskblade", 1216538, "Dark Bolt")
     b.interrupt(63, TANK, dB, "Duskblade", 96231, "Rebuke", 1216538, "Dark Bolt")
+    b.npc_cast_start(63.0, sh, "Shadeling", 777001, "Creeping Rot")
+    b.interrupt(63.2, HEALER, sh, "Shadeling", 57994, "Wind Shear",
+                777001, "Creeping Rot")
+    b.npc_periodic_damage(63.5, sh, "Shadeling", TANK, 777001, "Creeping Rot", 15000)
+    b.npc_cast_start(63.7, dB, "Duskblade", 1216538, "Dark Bolt")
+    # a zero-damage debuff (pure CC): kicking it prevents an application
+    b.npc_debuff(63.8, sh, "Shadeling", DPS1, 777002, "Nasty Hex")
+    b.npc_cast_success(64, dB, "Duskblade", 1216538, "Dark Bolt")
     b.npc_damage(64, dB, "Duskblade", HEALER, 1216538, "Dark Bolt", 150000, hp=200000)
+    # kick of an enemy heal (observed once at t=67), and one of a spell that
+    # never lands in this run (no basis for an estimate)
+    b.npc_cast_start(64.8, sh, "Shadeling", 888001, "Void Mending")
+    b.interrupt(65, DPS1, sh, "Shadeling", 2139, "Counterspell", 888001, "Void Mending")
+    b.npc_periodic_damage(65.5, sh, "Shadeling", TANK, 777001, "Creeping Rot", 15000)
+    b.npc_cast_start(65.7, dB, "Duskblade", 1216538, "Dark Bolt")
+    b.npc_cast_success(66, dB, "Duskblade", 1216538, "Dark Bolt")
     b.npc_damage(66, dB, "Duskblade", HEALER, 1216538, "Dark Bolt", 250000, hp=0)
     b.unit_died(66.5, HEALER[0], HEALER[1], HEALER[2])
+    b.npc_cast_start(66.8, sh, "Shadeling", 888001, "Void Mending")
+    b.npc_cast_success(67, sh, "Shadeling", 888001, "Void Mending")
+    b.npc_heal(67, sh, "Shadeling", dB, "Duskblade", 888001, "Void Mending", 80000)
+    b.npc_periodic_damage(67.5, sh, "Shadeling", TANK, 777001, "Creeping Rot", 15000)
     b.cast(68, TANK, 391054, "Intercession", HEALER[0], f'"{HEALER[1]}"', HEALER[2])
+    b.interrupt(69, DPS1, sh, "Shadeling", 2139, "Counterspell", 999, "Mystery Bolt")
+    b.interrupt(69.5, DPS1, sh, "Shadeling", 2139, "Counterspell", 777002, "Nasty Hex")
     b.player_damage(70, DPS1, dB, "Duskblade", 133, "Fireball", 90000)
+    # purge an enemy buff, then dispel the leftover hex off the mage
+    b.dispel(70.5, TANK, dB, "Duskblade", HOSTILE, 32375, "Mass Dispel",
+             888003, "Enrage", kind="BUFF")
+    b.party_kill(70.9, DPS1, dB, "Duskblade")
     b.unit_died(71, dB, "Duskblade", HOSTILE)
+    b.dispel(71.5, TANK, DPS1[0], DPS1[1], DPS1[2], 4987, "Cleanse",
+             777002, "Nasty Hex", kind="DEBUFF")
     b.player_damage(72, TANK, sh, "Shadeling", 31935, "Avenger's Shield", 50000)
+    # one last heal attempt that dies with the caster -> "expired"
+    b.npc_cast_start(73.5, sh, "Shadeling", 888001, "Void Mending")
+    b.party_kill(73.9, TANK, sh, "Shadeling")
     b.unit_died(74, sh, "Shadeling", HOSTILE)
 
-    # --- pull 3 (t=100..130): the boss, with bloodlust ---
+    # --- pull 3 (t=100..130): the boss, with bloodlust and consumables ---
     b.encounter_start(100)
+    b.cast(100.5, DPS1, 431932, "Tempered Potion", x=110.0, y=-230.0)
     b.cast(101, HEALER, 2825, "Bloodlust")
     for p in PLAYERS:
         b.aura(101.5, HEALER, p, 2825, "Bloodlust")
@@ -242,9 +340,13 @@ def build_run_log() -> LogBuilder:
         b.player_damage(float(t), DPS1, boss, "Big Boss", 133, "Fireball", 80000)
         b.player_damage(t + 1.0, TANK, boss, "Big Boss", 31935, "Avenger's Shield",
                         25000)
+    b.cast(105, HEALER, 6262, "Healthstone")
     b.npc_damage(110, boss, "Big Boss", TANK, 1221063, "Boss Smash", 90000)
+    b.party_kill(128.9, DPS1, boss, "Big Boss")
     b.unit_died(129, boss, "Big Boss", HOSTILE)
     b.encounter_end(130)
+    for p in PLAYERS:
+        b.aura_removed(131.5, HEALER, p, 2825, "Bloodlust")
 
     b.end(140, success=1, ms=600000)
     return b

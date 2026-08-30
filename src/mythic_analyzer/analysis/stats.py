@@ -55,8 +55,17 @@ class PlayerStats:
     overhealing: int = 0
     absorbs_granted: int = 0
     interrupts: int = 0
-    dispels: int = 0
+    kick_prevented_damage: int = 0  # estimated, see RunStats.enemy_cast_observations
+    kick_prevented_healing: int = 0
+    dispels: int = 0      # dispels on friendly targets
+    purges: int = 0       # dispels/steals of enemy buffs
     death_count: int = 0
+    killing_blows: int = 0
+    casts_total: int = 0
+    potions_used: int = 0
+    healthstones_used: int = 0
+    damage_to_bosses: int = 0
+    distance_traveled: float = 0.0
     casts: Counter = field(default_factory=Counter)  # (spell_id, spell_name) -> n
     damage_by_spell: Counter = field(default_factory=Counter)
     healing_by_spell: Counter = field(default_factory=Counter)
@@ -81,8 +90,17 @@ class PlayerStats:
             "overhealing": self.overhealing,
             "absorbs_granted": self.absorbs_granted,
             "interrupts": self.interrupts,
+            "kick_prevented_damage": self.kick_prevented_damage,
+            "kick_prevented_healing": self.kick_prevented_healing,
             "dispels": self.dispels,
+            "purges": self.purges,
             "deaths": self.death_count,
+            "killing_blows": self.killing_blows,
+            "casts_total": self.casts_total,
+            "potions_used": self.potions_used,
+            "healthstones_used": self.healthstones_used,
+            "damage_to_bosses": self.damage_to_bosses,
+            "distance_traveled": round(self.distance_traveled),
             "top_damage_spells": _top(self.damage_by_spell, 15),
             "top_healing_spells": _top(self.healing_by_spell, 15),
             "top_damage_taken": _top(self.damage_taken_by_spell, 15),
@@ -112,10 +130,21 @@ class RunStats:
     forces_timeline: list[dict[str, Any]] = field(default_factory=list)
     forces_total: float = 0.0
     enemy_damage_taken: Counter = field(default_factory=Counter)  # npc name -> dmg dealt to group
+    # spell_id -> {name, total, instances, avg} for enemy casts that landed;
+    # the basis for the "damage prevented by kicks" estimates
+    enemy_cast_observations: dict[int, dict[str, Any]] = field(default_factory=dict)
+    enemy_heal_observations: dict[int, dict[str, Any]] = field(default_factory=dict)
     pull_stats: list[dict[str, Any]] = field(default_factory=list)
     downtime: list[dict[str, Any]] = field(default_factory=list)
     total_downtime_s: float = 0.0
     total_combat_s: float = 0.0
+    # spell_id -> {name, kicked, landed, expired}: outcome of every enemy
+    # hard-cast (SPELL_CAST_START) — the basis for kick efficiency
+    enemy_cast_outcomes: dict[int, dict[str, Any]] = field(default_factory=dict)
+    encounters: list[dict[str, Any]] = field(default_factory=list)
+    consumable_events: list[dict[str, Any]] = field(default_factory=list)
+    buff_uptimes: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    position_samples: dict[str, list[list[float]]] = field(default_factory=dict)
 
 
 class _PullLocator:
@@ -144,6 +173,81 @@ def compute_stats(
     recent_damage: dict[str, deque] = {}
     locator = _PullLocator(pulls)
     killed_guids: set[str] = set()
+    # (source_guid, spell_id, kind) -> ts of the last observed hit, so
+    # multi-target hits/applications within a short window count as one cast
+    last_obs_hit: dict[tuple[str, int, str], float] = {}
+    _AOE_WINDOW = 1.0
+
+    def _obs_entry(obs: dict[int, dict[str, Any]], sp) -> dict[str, Any]:
+        return obs.setdefault(sp.spell_id, {
+            "name": sp.spell_name,
+            "direct_total": 0, "direct_casts": 0,     # up-front hit / heal
+            "dot_total": 0, "dot_casts": 0,           # periodic ticks / casts
+            "aura_applications": 0,                   # raw per-target debuffs
+        })
+
+    def _new_cast_instance(src: str, spell_id: int, kind: str, ts: float) -> bool:
+        key = (src, spell_id, kind)
+        last = last_obs_hit.get(key)
+        last_obs_hit[key] = ts
+        return last is None or ts - last > _AOE_WINDOW
+
+    def observe_direct(obs, src: str, sp, amount: int, ts: float) -> None:
+        entry = _obs_entry(obs, sp)
+        entry["direct_total"] += amount
+        if _new_cast_instance(src, sp.spell_id, "direct", ts):
+            entry["direct_casts"] += 1
+
+    def observe_periodic(obs, sp, amount: int) -> None:
+        _obs_entry(obs, sp)["dot_total"] += amount
+
+    def observe_aura(obs, src: str, sp, ts: float) -> None:
+        entry = _obs_entry(obs, sp)
+        entry["aura_applications"] += 1
+        if _new_cast_instance(src, sp.spell_id, "aura", ts):
+            entry["dot_casts"] += 1
+
+    # enemy hard-casts in flight: caster guid -> (spell_id, spell_name, ts)
+    open_enemy_casts: dict[str, tuple[int, str, float]] = {}
+    # buff uptime windows: (player_guid, spell_id) -> window start ts
+    open_buffs: dict[tuple[str, int], float] = {}
+    buff_totals: dict[tuple[str, int], dict[str, Any]] = {}
+    last_position: dict[str, tuple[float, float, float]] = {}  # guid -> (ts, x, y)
+    open_encounter: Optional[dict[str, Any]] = None
+    boss_npc_ids: set[int] = (
+        {e.npc_id for e in data.enemies if e.is_boss} if data is not None else set()
+    )
+    run_start_ts = events[0].ts if events else 0.0
+    run_end_ts = events[-1].ts if events else 0.0
+
+    def close_enemy_cast(caster_guid: str, outcome: str) -> None:
+        cast = open_enemy_casts.pop(caster_guid, None)
+        if cast is None:
+            return
+        spell_id, spell_name, _ = cast
+        entry = stats.enemy_cast_outcomes.setdefault(spell_id, {
+            "name": spell_name, "kicked": 0, "landed": 0, "expired": 0,
+        })
+        entry[outcome] += 1
+
+    def track_movement(guid: str, ts: float, x: float, y: float) -> None:
+        prev = last_position.get(guid)
+        if prev is not None:
+            dt = ts - prev[0]
+            dist = ((x - prev[1]) ** 2 + (y - prev[2]) ** 2) ** 0.5
+            # ignore teleports/graveyard runs masquerading as sprints
+            if dist < 150:
+                player = stats.players.get(guid)
+                if player is not None:
+                    player.distance_traveled += dist
+            samples = stats.position_samples.setdefault(guid, [])
+            if not samples or ts - samples[-1][0] >= 2.0:
+                samples.append([round(ts - run_start_ts, 1), round(x, 1), round(y, 1)])
+        else:
+            stats.position_samples.setdefault(guid, []).append(
+                [round(ts - run_start_ts, 1), round(x, 1), round(y, 1)]
+            )
+        last_position[guid] = (ts, x, y)
 
     def get_player(guid: str, name: str = "") -> PlayerStats:
         p = stats.players.get(guid)
@@ -184,6 +288,22 @@ def compute_stats(
                 player.spec_id = spec_id
             continue
 
+        if name == "ENCOUNTER_START" and params:
+            open_encounter = {
+                "encounter_id": to_int(params[0]),
+                "name": unquote(params[1]) if len(params) > 1 else "",
+                "start_ts": event.ts,
+            }
+            continue
+        if name == "ENCOUNTER_END" and params:
+            if open_encounter is not None:
+                open_encounter["end_ts"] = event.ts
+                open_encounter["duration_s"] = round(event.ts - open_encounter["start_ts"], 1)
+                open_encounter["kill"] = len(params) > 4 and to_int(params[4]) == 1
+                stats.encounters.append(open_encounter)
+                open_encounter = None
+            continue
+
         if len(params) < 8:
             continue
 
@@ -219,6 +339,7 @@ def compute_stats(
                 ))
             elif g.is_npc and dst_guid not in killed_guids:
                 killed_guids.add(dst_guid)
+                close_enemy_cast(dst_guid, "expired")
                 if data is not None and g.npc_id is not None:
                     count = data.npc_count(g.npc_id)
                     if count > 0:
@@ -231,17 +352,35 @@ def compute_stats(
                         })
             continue
 
+        if name == "PARTY_KILL":
+            source_player = resolve_source(src_guid, src_name, src_flags)
+            if source_player is not None and source_player.guid != PET_BUCKET:
+                source_player.killing_blows += 1
+            continue
+
         damage = parse_damage(event)
         if damage is not None and name != "SWING_DAMAGE_LANDED":
             source_player = resolve_source(src_guid, src_name, src_flags)
             if source_player is not None and is_hostile_npc(dst_flags):
                 source_player.damage_done += damage.amount
                 source_player.damage_overkill += damage.overkill
+                if boss_npc_ids and parse_guid(dst_guid).npc_id in boss_npc_ids:
+                    source_player.damage_to_bosses += damage.amount
                 sp = spell_info(event)
                 key = (sp.spell_id, sp.spell_name) if sp else (0, "Melee")
                 source_player.damage_by_spell[key] += damage.amount
                 if pull_idx is not None:
                     source_player.damage_by_pull[pull_idx] += damage.amount
+            if is_hostile_npc(src_flags) \
+                    and (is_group_player(dst_flags) or is_group_owned(dst_flags)):
+                sp = spell_info(event)
+                if sp is not None:
+                    if name in ("SPELL_DAMAGE", "RANGE_DAMAGE"):
+                        observe_direct(stats.enemy_cast_observations, src_guid,
+                                       sp, damage.amount + damage.absorbed, event.ts)
+                    elif name == "SPELL_PERIODIC_DAMAGE":
+                        observe_periodic(stats.enemy_cast_observations, sp,
+                                         damage.amount + damage.absorbed)
             if is_group_player(dst_flags):
                 target = get_player(dst_guid, dst_name)
                 target.damage_taken += damage.amount
@@ -268,6 +407,15 @@ def compute_stats(
 
         heal = parse_heal(event)
         if heal is not None:
+            if is_hostile_npc(src_flags):
+                sp = spell_info(event)
+                if sp is not None:
+                    if name == "SPELL_PERIODIC_HEAL":
+                        observe_periodic(stats.enemy_heal_observations, sp,
+                                         heal.amount)
+                    else:
+                        observe_direct(stats.enemy_heal_observations, src_guid,
+                                       sp, heal.amount, event.ts)
             source_player = resolve_source(src_guid, src_name, src_flags)
             if source_player is not None and (
                 is_group_player(dst_flags) or is_group_owned(dst_flags)
@@ -296,11 +444,13 @@ def compute_stats(
             source_player = resolve_source(src_guid, src_name, src_flags)
             if source_player is not None:
                 source_player.interrupts += 1
+                close_enemy_cast(dst_guid, "kicked")
                 extra = extra_spell_info(event)
                 stats.interrupt_events.append({
                     "ts": event.ts,
                     "pull": pull_idx,
                     "player": source_player.name or src_name,
+                    "player_guid": source_player.guid,
                     "target": dst_name,
                     "interrupted_spell": extra.spell_name if extra else None,
                     "interrupted_spell_id": extra.spell_id if extra else None,
@@ -310,25 +460,61 @@ def compute_stats(
         if name in ("SPELL_DISPEL", "SPELL_STOLEN"):
             source_player = resolve_source(src_guid, src_name, src_flags)
             if source_player is not None:
-                source_player.dispels += 1
+                purge = name == "SPELL_STOLEN" or is_hostile_npc(dst_flags)
+                if purge:
+                    source_player.purges += 1
+                else:
+                    source_player.dispels += 1
                 extra = extra_spell_info(event)
                 stats.dispel_events.append({
                     "ts": event.ts,
                     "pull": pull_idx,
                     "player": source_player.name or src_name,
                     "target": dst_name,
+                    "kind": "purge" if purge else "dispel",
                     "dispelled_spell": extra.spell_name if extra else None,
                 })
+            continue
+
+        if name == "SPELL_CAST_START":
+            if is_hostile_npc(src_flags):
+                sp = spell_info(event)
+                if sp is not None:
+                    # a new hard-cast supersedes any stale open one
+                    close_enemy_cast(src_guid, "expired")
+                    open_enemy_casts[src_guid] = (sp.spell_id, sp.spell_name, event.ts)
             continue
 
         if name == "SPELL_CAST_SUCCESS":
             sp = spell_info(event)
             if sp is None:
                 continue
+            if is_hostile_npc(src_flags):
+                cast = open_enemy_casts.get(src_guid)
+                if cast is not None and cast[0] == sp.spell_id:
+                    close_enemy_cast(src_guid, "landed")
+                continue
             source_player = resolve_source(src_guid, src_name, src_flags)
             if source_player is None or source_player.guid == PET_BUCKET:
                 continue
             source_player.casts[(sp.spell_id, sp.spell_name)] += 1
+            source_player.casts_total += 1
+            if adv is not None and adv.info_guid == src_guid \
+                    and src_guid.startswith("Player-") and (adv.pos_x or adv.pos_y):
+                track_movement(src_guid, event.ts, adv.pos_x, adv.pos_y)
+            lowered = sp.spell_name.lower()
+            if "potion" in lowered:
+                source_player.potions_used += 1
+                stats.consumable_events.append({
+                    "ts": event.ts, "pull": pull_idx, "kind": "potion",
+                    "player": source_player.name or src_name, "spell": sp.spell_name,
+                })
+            elif "healthstone" in lowered:
+                source_player.healthstones_used += 1
+                stats.consumable_events.append({
+                    "ts": event.ts, "pull": pull_idx, "kind": "healthstone",
+                    "player": source_player.name or src_name, "spell": sp.spell_name,
+                })
             if sp.spell_id in BREZ_SPELLS:
                 stats.brez_events.append({
                     "ts": event.ts,
@@ -350,6 +536,25 @@ def compute_stats(
 
         if name == "SPELL_AURA_APPLIED":
             sp = spell_info(event)
+            if sp is not None and is_hostile_npc(src_flags):
+                aura_kind = event.params[11] if len(event.params) > 11 else ""
+                if aura_kind == "DEBUFF" and (
+                    is_group_player(dst_flags) or is_group_owned(dst_flags)
+                ):
+                    observe_aura(stats.enemy_cast_observations, src_guid, sp,
+                                 event.ts)
+                elif aura_kind == "BUFF" and is_hostile_npc(dst_flags):
+                    # enemy buffing an ally (HoTs, empowerments): heal-side
+                    observe_aura(stats.enemy_heal_observations, src_guid, sp,
+                                 event.ts)
+            if sp is not None and is_group_player(dst_flags):
+                aura_kind = event.params[11] if len(event.params) > 11 else ""
+                if aura_kind == "BUFF":
+                    key = (dst_guid, sp.spell_id)
+                    open_buffs.setdefault(key, event.ts)
+                    buff_totals.setdefault(key, {
+                        "name": sp.spell_name, "uptime_s": 0.0, "applications": 0,
+                    })["applications"] += 1
             if sp is not None and sp.spell_id in LUST_SPELLS and is_group_player(dst_flags):
                 if not any(
                     abs(l["ts"] - event.ts) < 1.0 and l["spell_id"] == sp.spell_id
@@ -364,8 +569,79 @@ def compute_stats(
                     })
             continue
 
+        if name == "SPELL_AURA_REMOVED":
+            sp = spell_info(event)
+            if sp is not None and is_group_player(dst_flags):
+                key = (dst_guid, sp.spell_id)
+                start = open_buffs.pop(key, None)
+                if start is not None:
+                    buff_totals[key]["uptime_s"] += event.ts - start
+            continue
+
+    # buffs still up when the run ends count until the last event
+    for key, start in open_buffs.items():
+        buff_totals[key]["uptime_s"] += run_end_ts - start
+
+    duration = max(1.0, run_end_ts - run_start_ts)
+    per_player: dict[str, list[dict[str, Any]]] = {}
+    for (guid, spell_id), entry in buff_totals.items():
+        per_player.setdefault(guid, []).append({
+            "spell_id": spell_id,
+            "name": entry["name"],
+            "uptime_s": round(entry["uptime_s"], 1),
+            "uptime_pct": round(100.0 * entry["uptime_s"] / duration, 1),
+            "applications": entry["applications"],
+        })
+    for guid, entries in per_player.items():
+        entries.sort(key=lambda e: -e["uptime_s"])
+        stats.buff_uptimes[guid] = entries[:15]
+
+    _estimate_kick_value(stats)
     _finish_pull_stats(stats, pulls, data)
     return stats
+
+
+def _estimate_kick_value(stats: RunStats) -> None:
+    """Estimate the damage/healing each kick prevented.
+
+    Basis: the average amount per completed cast of the interrupted spell,
+    observed elsewhere in this same run — the up-front hit plus the full
+    periodic (DoT/HoT) component per application. Multi-target hits and
+    debuff applications within 1 s count as one cast. Spells that never
+    landed in the run still contribute nothing; a debuff that carries no
+    damage at all is reported as a prevented application instead.
+    """
+    for obs in (stats.enemy_cast_observations, stats.enemy_heal_observations):
+        for entry in obs.values():
+            direct_casts = entry["direct_casts"]
+            # ticks seen without any observed aura application (e.g. applied
+            # before the run slice) fall back to the direct-cast count
+            dot_casts = entry["dot_casts"] or direct_casts
+            avg_direct = entry["direct_total"] / direct_casts if direct_casts else 0
+            avg_dot = entry["dot_total"] / dot_casts if dot_casts else 0
+            entry["avg_direct"] = round(avg_direct)
+            entry["avg_dot"] = round(avg_dot)
+            entry["avg"] = round(avg_direct + avg_dot)
+            entry["observed_casts"] = max(direct_casts, entry["dot_casts"])
+
+    for ev in stats.interrupt_events:
+        spell_id = ev.get("interrupted_spell_id")
+        dmg = stats.enemy_cast_observations.get(spell_id) if spell_id else None
+        heal = stats.enemy_heal_observations.get(spell_id) if spell_id else None
+        ev["estimated_prevented_damage"] = (dmg["avg"] or None) if dmg else None
+        ev["estimated_prevented_healing"] = (heal["avg"] or None) if heal else None
+        ev["prevented_dot_damage"] = dmg["avg_dot"] if dmg else 0
+        ev["observed_casts"] = (dmg or heal or {}).get("observed_casts", 0)
+        # a zero-damage debuff (CC, snare, heal absorb...): no number to put
+        # on it, but the kick still visibly prevented an application
+        ev["prevented_debuff_applications"] = (
+            dmg["aura_applications"]
+            if dmg and not dmg["avg"] and dmg["aura_applications"] else 0
+        )
+        player = stats.players.get(ev.get("player_guid", ""))
+        if player is not None:
+            player.kick_prevented_damage += (dmg or {}).get("avg") or 0
+            player.kick_prevented_healing += (heal or {}).get("avg") or 0
 
 
 def _finish_pull_stats(
@@ -400,6 +676,7 @@ def _finish_pull_stats(
             "forces": forces,
             "player_deaths": deaths_in_pull,
             "group_damage": damage,
+            "group_dps": round(damage / pull.duration) if pull.duration > 0 else 0,
             "npcs": _pull_npcs(pull, data),
         })
         stats.pull_stats.append(entry)
