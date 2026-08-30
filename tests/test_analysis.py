@@ -680,3 +680,165 @@ class TestAvoidableDamage:
 
         html = render_html(report)
         assert '"avoidable_damage"' not in html
+
+
+class TestDeathDefensives:
+    """WP-A3: personal defensive usage on deaths (gamedata.DEFENSIVES)."""
+
+    BIG_HIT_SPELL = 900001
+
+    @staticmethod
+    def _minimal_log():
+        b = LogBuilder()
+        npc = b.npc_guid(FELWYRM, "0001")
+        b.start(0)
+        return b, npc
+
+    def _kill(self, b, npc, player, t=50.0):
+        b.npc_damage(t, npc, "Felwyrm", player, self.BIG_HIT_SPELL, "Big Hit",
+                     500000, hp=0)
+        b.unit_died(t + 0.5, player[0], player[1], player[2])
+        b.end(t + 10)
+
+    @staticmethod
+    def _one_death(b):
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        pulls = detect_pulls(run.events)
+        return compute_stats(run.events, pulls)
+
+    def test_defensive_cast_shortly_before_death(self):
+        # Protection Paladin (spec 66): Divine Shield cast 5s before death,
+        # well inside the 10s cast_timeline window.
+        b, npc = self._minimal_log()
+        b.combatant(0.5, TANK)
+        b.cast(45, TANK, 642, "Divine Shield")
+        self._kill(b, npc, TANK)
+
+        (death,) = self._one_death(b).deaths
+        assert death.died_without_defensive is False
+        (used,) = death.defensives_used_before_death
+        assert used["spell_id"] == 642
+        assert used["name"] == "Divine Shield"
+        # log ts values are absolute (see LogBuilder._stamp); death was
+        # built to land 5.5s after the cast (t=45 cast, t=50.5 death)
+        assert death.ts - used["ts"] == pytest.approx(5.5, abs=0.01)
+
+    def test_no_defensive_used(self):
+        # same spec, same death, but no defensive cast anywhere in the log
+        b, npc = self._minimal_log()
+        b.combatant(0.5, TANK)
+        self._kill(b, npc, TANK)
+
+        (death,) = self._one_death(b).deaths
+        assert death.died_without_defensive is True
+        assert death.defensives_used_before_death == []
+
+    def test_defensive_still_active_beyond_10s_cast_window(self):
+        # Divine Shield goes up 15s before death and is never removed --
+        # still active at death, but outside the naive 10s cast window, so
+        # only the retained buff-window path can catch it.
+        b, npc = self._minimal_log()
+        b.combatant(0.5, TANK)
+        b.aura(35, TANK, TANK, 642, "Divine Shield")
+        self._kill(b, npc, TANK)  # dies at t=50.5
+
+        (death,) = self._one_death(b).deaths
+        assert death.died_without_defensive is False
+        (used,) = death.defensives_used_before_death
+        assert used["spell_id"] == 642
+        # aura applied at t=35, death at t=50.5 -- 15.5s gap, well outside
+        # the 10s cast-timeline window, only found via the buff-window path
+        assert death.ts - used["ts"] == pytest.approx(15.5, abs=0.01)
+
+    def test_unrecognized_spec_reports_none(self):
+        # Devastation Evoker (spec 1467): a real, known spec_id, but one
+        # gamedata.DEFENSIVES intentionally doesn't cover -- must never be
+        # reported as "died without a defensive" since we don't actually
+        # know whether that's true.
+        mystery = ("Player-1403-0000000D", "Mysteryman-Area52", 0x511, 1467)
+        b, npc = self._minimal_log()
+        b.combatant(0.5, mystery)
+        self._kill(b, npc, mystery)
+
+        (death,) = self._one_death(b).deaths
+        assert death.died_without_defensive is None
+        assert death.defensives_used_before_death == []
+
+    def test_missing_spec_info_reports_none(self):
+        # no COMBATANT_INFO at all for this player -> spec_id stays None
+        ghost = ("Player-1403-0000000E", "Ghosty-Area52", 0x511, 66)
+        b, npc = self._minimal_log()
+        self._kill(b, npc, ghost)
+
+        (death,) = self._one_death(b).deaths
+        assert death.died_without_defensive is None
+
+    def test_no_cast_timeline_falls_back_to_none_not_false_true(self):
+        # --no-cast-timeline (full_cast_timeline=False): cast_timeline is
+        # empty, so the cast-based half of detection has no data. Must not
+        # be reported as a confident "died without a defensive".
+        b, npc = self._minimal_log()
+        b.combatant(0.5, TANK)
+        self._kill(b, npc, TANK)
+
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        pulls = detect_pulls(run.events)
+        stats = compute_stats(run.events, pulls, full_cast_timeline=False)
+
+        assert stats.cast_timeline == []
+        (death,) = stats.deaths
+        assert death.died_without_defensive is None
+
+    def test_no_cast_timeline_still_finds_active_buff_window(self):
+        # the buff-window path doesn't depend on full_cast_timeline, so an
+        # active defensive is still caught even with casts untracked
+        b, npc = self._minimal_log()
+        b.combatant(0.5, TANK)
+        b.aura(35, TANK, TANK, 642, "Divine Shield")
+        self._kill(b, npc, TANK)
+
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        pulls = detect_pulls(run.events)
+        stats = compute_stats(run.events, pulls, full_cast_timeline=False)
+
+        (death,) = stats.deaths
+        assert death.died_without_defensive is False
+        assert death.defensives_used_before_death[0]["spell_id"] == 642
+
+    def test_cast_timeline_carries_player_guid(self):
+        # the name/GUID mismatch fix: cast_timeline entries must carry
+        # player_guid (matching interrupt_events' existing pattern), since
+        # death matching joins on GUID, not the fragile name string
+        b, npc = self._minimal_log()
+        b.combatant(0.5, TANK)
+        b.cast(45, TANK, 642, "Divine Shield")
+        stats = self._one_death(b)
+        assert stats.cast_timeline[0]["player_guid"] == TANK[0]
+
+    def test_renderers_show_biggest_hit_damage_last_5s_and_defensive_status(
+        self, run_segment, route, dungeon_data_file
+    ):
+        from mythic_analyzer.report.html import render_html
+        from mythic_analyzer.report.text import render_text
+
+        store = DungeonDataStore.load(dungeon_data_file)
+        report = analyze_run(run_segment, route=route, store=store)
+        # the log's one death (Bigheals-Area52, Restoration Shaman) never
+        # casts its known defensive (Astral Shift, spell id 108271)
+        assert report["deaths"][0]["biggest_hit"] == 250000
+        assert report["deaths"][0]["damage_last_5s"] == 400000
+        assert report["deaths"][0]["died_without_defensive"] is True
+
+        text = render_text(report)
+        assert "biggest hit: 250.0k" in text
+        assert "last 5s: 400.0k" in text
+        assert "no defensive used" in text
+
+        html = render_html(report)
+        assert '"biggest_hit": 250000' in html
+        assert '"damage_last_5s": 400000' in html
+        assert '"died_without_defensive": true' in html
+
+        # JSON round-trippable end to end, new fields included
+        payload = json.loads(json.dumps(report))
+        assert payload["deaths"][0]["died_without_defensive"] is True
