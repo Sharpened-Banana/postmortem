@@ -8,6 +8,9 @@ containing literal tables:
     MDT.mapInfo[dungeonIndex] = { teleportId = ..., mapID = 587, ... }
     MDT.dungeonTotalCount[dungeonIndex] = { normal = 655 }
     MDT.dungeonEnemies[dungeonIndex] = { [1] = { name = ..., id = ..., ... } }
+    MDT.dungeonSubLevels[dungeonIndex] = { [1] = "Murder Row" }
+    MDT.dungeonMaps[dungeonIndex] = { [1] = { customTextures = '...' } }
+    MDT.mapPOIs[dungeonIndex] = { [1] = { [1] = { type=..., x=..., y=... } } }
 
 These are data-only literals, so a small tolerant Lua-literal parser is
 enough — no Lua runtime needed. Anything that isn't a literal (function
@@ -312,6 +315,9 @@ def extract_dungeon_file(path: Path) -> Optional[dict[str, Any]]:
     map_info = parse_after(r"MDT\.mapInfo\[dungeonIndex\]\s*=\s*")
     total_count = parse_after(r"MDT\.dungeonTotalCount\[dungeonIndex\]\s*=\s*")
     enemies_table = parse_after(r"MDT\.dungeonEnemies\[dungeonIndex\]\s*=\s*")
+    sublevels_table = parse_after(r"MDT\.dungeonSubLevels\[dungeonIndex\]\s*=\s*")
+    maps_table = parse_after(r"MDT\.dungeonMaps\[dungeonIndex\]\s*=\s*")
+    pois_table = parse_after(r"MDT\.mapPOIs\[dungeonIndex\]\s*=\s*")
 
     zone_ids = [int(z) for z in re.findall(r"MDT\.zoneIdToDungeonIdx\[(\d+)\]", text)]
     zones_m = re.search(r"local\s+zones\s*=\s*\{([\d,\s]*)\}", text)
@@ -362,6 +368,62 @@ def extract_dungeon_file(path: Path) -> Optional[dict[str, Any]]:
         result["total_count"] = {
             str(k): v for k, v in total_count.items() if isinstance(v, (int, float))
         }
+
+    # dungeonSubLevels[dungeonIndex] = { [1] = "Murder Row", ... } -- sublevel
+    # index -> display name. Every current-season dungeon has exactly one
+    # sublevel; still extracted so nothing is silently thrown away.
+    if isinstance(sublevels_table, dict):
+        sublevels = {
+            str(k): v for k, v in sublevels_table.items()
+            if isinstance(k, int) and isinstance(v, str)
+        }
+        if sublevels:
+            result["sublevels"] = sublevels
+
+    # dungeonMaps[dungeonIndex] = { [1] = { customTextures = '...' }, ... } --
+    # sublevel index -> map texture path. Not renderable (it's a WoW client
+    # texture, not an image we have), kept for round-trip completeness only.
+    if isinstance(maps_table, dict):
+        map_textures: dict[str, Any] = {}
+        for k, v in maps_table.items():
+            if not isinstance(k, int):
+                continue
+            texture = None
+            if isinstance(v, dict):
+                texture = v.get("customTextures") or v.get("textures") \
+                    or v.get("texture")
+            elif isinstance(v, str):
+                texture = v
+            if isinstance(texture, str):
+                map_textures[str(k)] = texture
+        if map_textures:
+            result["map_textures"] = map_textures
+
+    # mapPOIs[dungeonIndex] = { [1] = { [1] = { type=..., x=..., y=...,
+    # sizeMult=... }, ... }, ... } -- sublevel index -> list of POIs
+    # (dungeon entrance, boss markers, etc).
+    if isinstance(pois_table, dict):
+        pois: dict[str, list[dict[str, Any]]] = {}
+        for k, v in pois_table.items():
+            if not isinstance(k, int):
+                continue
+            entries = []
+            for poi in _lua_array(v):
+                if not isinstance(poi, dict) or "x" not in poi or "y" not in poi:
+                    continue
+                entry: dict[str, Any] = {
+                    "type": poi.get("type") if isinstance(poi.get("type"), str) else "unknown",
+                    "x": poi.get("x"),
+                    "y": poi.get("y"),
+                }
+                if isinstance(poi.get("sizeMult"), (int, float)):
+                    entry["size_mult"] = poi["sizeMult"]
+                entries.append(entry)
+            if entries:
+                pois[str(k)] = entries
+        if pois:
+            result["pois"] = pois
+
     if warnings:
         result["warnings"] = warnings
     return result

@@ -352,6 +352,44 @@ def build_run_log() -> LogBuilder:
     return b
 
 
+def build_three_run_log() -> LogBuilder:
+    """Three M+ runs in one log: an abandoned key, then two completed ones.
+
+    Used to exercise streaming run-selection (WP-A0): `runs` must list all
+    three, `analyze --run N` must pick the right one without needing to
+    hold every run's events in memory, and 'last' must skip past the
+    abandoned first run to land on the true last completed run.
+    """
+    b = LogBuilder()
+    fA = b.npc_guid(FELWYRM, "0001")
+    dA = b.npc_guid(DUSKBLADE, "0002")
+    boss = b.npc_guid(BOSS, "0003")
+
+    # run 1 (t=0..10): abandoned - no CHALLENGE_MODE_END. The next START
+    # is for a different key (different challenge_map_id/level), so
+    # segment_runs yields this one as an incomplete/abandoned segment.
+    b.start(0, zone="Cave One", instance=1001, cm=100, lvl=5)
+    b.player_damage(5, DPS1, fA, "Felwyrm", 133, "Fireball", 50000)
+    b.party_kill(6, DPS1, fA, "Felwyrm")
+    b.unit_died(6.5, fA, "Felwyrm", HOSTILE)
+
+    # run 2 (t=50..60): completed, timed
+    b.start(50, zone="Cave Two", instance=1002, cm=200, lvl=10)
+    b.player_damage(55, TANK, dA, "Duskblade", 31935, "Avenger's Shield", 40000)
+    b.party_kill(56, TANK, dA, "Duskblade")
+    b.unit_died(56.5, dA, "Duskblade", HOSTILE)
+    b.end(60, success=1, lvl=10, ms=500000, instance=1002)
+
+    # run 3 (t=100..110): completed, over timer
+    b.start(100, zone="Cave Three", instance=1003, cm=300, lvl=15)
+    b.player_damage(105, DPS1, boss, "Big Boss", 133, "Fireball", 90000)
+    b.party_kill(106, DPS1, boss, "Big Boss")
+    b.unit_died(106.5, boss, "Big Boss", HOSTILE)
+    b.end(110, success=0, lvl=15, ms=900000, instance=1003)
+
+    return b
+
+
 @pytest.fixture()
 def dungeon_data_file(tmp_path) -> Path:
     path = tmp_path / "mdt_data.json"
@@ -368,4 +406,11 @@ def route_string() -> str:
 def log_file(tmp_path) -> Path:
     path = tmp_path / "WoWCombatLog.txt"
     path.write_text(build_run_log().text(), encoding="utf-8")
+    return path
+
+
+@pytest.fixture()
+def three_run_log_file(tmp_path) -> Path:
+    path = tmp_path / "WoWCombatLog3.txt"
+    path.write_text(build_three_run_log().text(), encoding="utf-8")
     return path

@@ -7,7 +7,9 @@ from typing import Any, Optional
 from ..combatlog.segmenter import RunSegment
 from ..mdt.dungeon_data import DungeonData, DungeonDataStore
 from ..mdt.route import Route
+from .avoidable import AvoidableData
 from .compare import compare_route
+from .mapping import build_map_report
 from .pulls import detect_pulls
 from .stats import compute_stats
 
@@ -97,10 +99,51 @@ def _enemy_cast_summary(stats) -> dict[str, Any]:
     }
 
 
+def _avoidable_damage_summary(stats, avoidable: AvoidableData) -> dict[str, Any]:
+    """Per-player/per-spell breakdown of damage taken from spells tagged as
+    avoidable ("stand in the fire" mechanics) by the loaded avoidable-
+    damage file. Built from each player's full damage_taken_by_spell
+    Counter (see stats._tag_avoidable_damage), not the top-15-truncated
+    top_damage_taken report field, so a low-frequency but tagged spell
+    isn't silently dropped.
+    """
+    by_player = []
+    total_damage = 0
+    for p in stats.players.values():
+        if not p.avoidable_damage_taken:
+            continue
+        by_spell = sorted((
+            {
+                "spell_id": spell_id,
+                "name": avoidable.spells.get(spell_id, {}).get("name") or spell_name,
+                "amount": total,
+                "hits": p.damage_taken_hits_by_spell[(spell_id, spell_name)],
+            }
+            for (spell_id, spell_name), total in p.damage_taken_by_spell.items()
+            if spell_id in avoidable.spells
+        ), key=lambda s: -s["amount"])
+        by_player.append({
+            "name": p.name or p.guid,
+            "avoidable_damage_taken": p.avoidable_damage_taken,
+            "avoidable_hits": p.avoidable_hits,
+            "by_spell": by_spell,
+        })
+        total_damage += p.avoidable_damage_taken
+    by_player.sort(key=lambda e: -e["avoidable_damage_taken"])
+    return {
+        "note": "damage taken from spell ids tagged as avoidable in the "
+                "loaded --avoidable-data file; post-absorb amounts",
+        "tagged_spell_count": len(avoidable.spells),
+        "total_damage": total_damage,
+        "by_player": by_player,
+    }
+
+
 def analyze_run(
     segment: RunSegment,
     route: Optional[Route] = None,
     store: Optional[DungeonDataStore] = None,
+    avoidable: Optional[AvoidableData] = None,
     pull_gap_seconds: float = 5.0,
     full_cast_timeline: bool = True,
     death_penalty_s: float = 15.0,
@@ -114,7 +157,8 @@ def analyze_run(
 
     pulls = detect_pulls(segment.events, gap_seconds=pull_gap_seconds)
     stats = compute_stats(
-        segment.events, pulls, data, full_cast_timeline=full_cast_timeline
+        segment.events, pulls, data, full_cast_timeline=full_cast_timeline,
+        avoidable=avoidable,
     )
 
     start = segment.start_ts
@@ -141,6 +185,8 @@ def analyze_run(
                 "damage_last_5s": sum(
                     r["amount"] for r in d.recap if r["ts"] >= d.ts - 5.0
                 ),
+                "defensives_used_before_death": d.defensives_used_before_death,
+                "died_without_defensive": d.died_without_defensive,
                 "recap": d.recap,
             }
             for d in stats.deaths
@@ -191,6 +237,9 @@ def analyze_run(
         if uptimes:
             player["buff_uptimes"] = uptimes
 
+    if avoidable is not None:
+        report["avoidable_damage"] = _avoidable_damage_summary(stats, avoidable)
+
     if route is not None:
         report["route"] = route.summary(data)
         if data is not None:
@@ -202,6 +251,13 @@ def analyze_run(
                          "`mythic-analyzer extract-data` and pass --dungeon-data "
                          "to resolve planned pulls to NPCs"
             }
+
+    if data is not None:
+        player_names = {g: (p.name or g) for g, p in stats.players.items()}
+        report["map"] = build_map_report(
+            data, route, report.get("comparison"), pulls,
+            stats.position_samples, player_names, stats.deaths, start,
+        )
 
     for key in ("pulls", "deaths", "interrupts", "dispels", "lust", "brez",
                 "cast_timeline", "consumables"):

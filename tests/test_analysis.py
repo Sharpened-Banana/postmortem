@@ -1,6 +1,7 @@
 """Pull detection, route comparison and stats on the synthetic run."""
 
 import json
+from pathlib import Path
 
 import pytest
 from conftest import (
@@ -9,6 +10,7 @@ from conftest import (
     DUSKBLADE,
     FELWYRM,
     HEALER,
+    LogBuilder,
     ROUTE_PRESET,
     SHADELING,
     SUMMONED,
@@ -16,14 +18,15 @@ from conftest import (
     build_run_log,
 )
 
+from mythic_analyzer.analysis.avoidable import AvoidableData
 from mythic_analyzer.analysis.compare import compare_route
-from mythic_analyzer.analysis.pulls import detect_pulls
+from mythic_analyzer.analysis.pulls import ActualPull, UnitEngagement, detect_pulls
 from mythic_analyzer.analysis.run_analyzer import analyze_run
 from mythic_analyzer.analysis.stats import compute_stats
 from mythic_analyzer.combatlog.parser import iter_events
 from mythic_analyzer.combatlog.segmenter import segment_runs
-from mythic_analyzer.mdt.dungeon_data import DungeonData, DungeonDataStore
-from mythic_analyzer.mdt.route import Route
+from mythic_analyzer.mdt.dungeon_data import DungeonData, DungeonDataStore, Enemy
+from mythic_analyzer.mdt.route import Pull, Route
 
 
 @pytest.fixture()
@@ -40,6 +43,31 @@ def dungeon() -> DungeonData:
 @pytest.fixture()
 def route() -> Route:
     return Route.from_preset(ROUTE_PRESET)
+
+
+class TestDungeonDataMapExtras:
+    """sublevels/map_textures/pois round-trip through the extracted-JSON
+    shape (see extract.py) via DungeonData.from_dict."""
+
+    def test_round_trips_from_extracted_dict(self):
+        d = dict(DUNGEON_DATA["dungeons"]["160"])
+        d["sublevels"] = {"1": "Murder Row"}
+        d["map_textures"] = {"1": "Interface\\AddOns\\MythicDungeonTools\\MurderRow"}
+        d["pois"] = {
+            "1": [{"type": "dungeonEntrance", "x": 779.77, "y": -509.6, "size_mult": 1.5}]
+        }
+        dungeon = DungeonData.from_dict(d)
+        assert dungeon.sublevels == {1: "Murder Row"}
+        assert dungeon.map_textures[1].endswith("MurderRow")
+        (poi,) = dungeon.pois[1]
+        assert poi.type == "dungeonEntrance"
+        assert poi.x == 779.77 and poi.y == -509.6
+        assert poi.size_mult == 1.5
+
+    def test_missing_extras_default_empty(self, dungeon):
+        assert dungeon.sublevels == {}
+        assert dungeon.map_textures == {}
+        assert dungeon.pois == {}
 
 
 class TestPullDetection:
@@ -102,6 +130,161 @@ class TestRouteComparison:
         early = summary["pulls"][0]["pulled_early"]
         assert early == [{"npc_id": DUSKBLADE, "n": 1, "name": "Duskblade"}]
 
+    def test_match_confidence(self, run_segment, route, dungeon):
+        pulls = detect_pulls(run_segment.events)
+        comp = compare_route(route, pulls, dungeon)
+        m1, m2, m3 = comp.matches
+        # m1 has 3 matched units total: 2x Felwyrm at its primary (plan #1)
+        # plus the 1x Duskblade pulled early from plan #2 -> 2/3 at primary.
+        assert m1.match_confidence == pytest.approx(2 / 3, abs=0.001)
+        # m2 (leftover Duskblade at plan #2) and m3 (boss at plan #4) have
+        # every matched unit at their primary pull.
+        assert m2.match_confidence == 1.0
+        assert m3.match_confidence == 1.0
+
+        summary = comp.summary(dungeon)
+        assert summary["pulls"][0]["match_confidence"] == pytest.approx(2 / 3, abs=0.001)
+
+    def test_match_confidence_none_for_pure_off_route_pull(self):
+        # A pull whose only unit isn't in the plan at all should have no
+        # match_confidence — nothing matched, so there's no fraction to
+        # report (and no divide-by-zero).
+        dungeon = DungeonData(
+            dungeon_idx=1,
+            name="Test Dungeon",
+            total_count={"normal": 10},
+            enemies=[
+                Enemy(enemy_idx=1, npc_id=700001, name="Planned Mob", count=1),
+                Enemy(enemy_idx=2, npc_id=700002, name="Unplanned Mob", count=1),
+            ],
+        )
+        route = Route(
+            name="Test",
+            dungeon_idx=1,
+            week=None,
+            difficulty=None,
+            pulls=[Pull(index=1, enemies={1: [1]})],
+        )
+        actual = [
+            ActualPull(
+                index=1,
+                units=[
+                    UnitEngagement(
+                        guid="Creature-0-1-1-1-700002-0001",
+                        npc_id=700002,
+                        name="Unplanned Mob",
+                        first_ts=0.0,
+                        last_ts=1.0,
+                        died_at=1.0,
+                    )
+                ],
+            )
+        ]
+        comp = compare_route(route, actual, dungeon)
+        (m,) = comp.matches
+        assert m.off_route == {700002: 1}
+        assert m.primary_plan_pull is None
+        assert m.match_confidence is None
+
+
+class TestRouteComparisonDPAlignment:
+    """The greedy per-unit matcher can misattribute a whole actual pull to
+    the wrong planned pull when two planned pulls share an NPC type and the
+    group runs them in a different order than planned. The windowed DP
+    alignment in compare_route fixes this by weighing the whole actual/plan
+    pull sequences together instead of consuming mobs unit-by-unit from
+    wherever's cheapest at that instant."""
+
+    OGRE = 800001
+    GOBLIN = 800002
+
+    @pytest.fixture()
+    def dungeon(self) -> DungeonData:
+        return DungeonData(
+            dungeon_idx=2,
+            name="Swap Test Dungeon",
+            total_count={"normal": 10},
+            enemies=[
+                Enemy(enemy_idx=1, npc_id=self.OGRE, name="Ogre", count=1),
+                Enemy(enemy_idx=2, npc_id=self.GOBLIN, name="Goblin", count=1),
+            ],
+        )
+
+    @pytest.fixture()
+    def route(self) -> Route:
+        # plan pull A: 2x Ogre.  plan pull B: 1x Ogre + 1x Goblin.
+        # A and B share the Ogre npc type -- that overlap is exactly what
+        # trips up the greedy per-unit matcher (see the test below).
+        return Route(
+            name="Swap Test",
+            dungeon_idx=2,
+            week=None,
+            difficulty=None,
+            pulls=[
+                Pull(index=1, enemies={1: [1, 2]}),       # A: 2x Ogre
+                Pull(index=2, enemies={1: [3], 2: [1]}),  # B: 1x Ogre, 1x Goblin
+            ],
+        )
+
+    def _unit(self, npc_id: int, spawn: str) -> UnitEngagement:
+        return UnitEngagement(
+            guid=f"Creature-0-1-1-1-{npc_id}-{spawn}",
+            npc_id=npc_id,
+            name="",
+            first_ts=0.0,
+            last_ts=1.0,
+            died_at=1.0,
+        )
+
+    def test_greedy_alone_misattributes_the_swap(self, route, dungeon):
+        # Sanity check on the documented bug: run the same per-unit search
+        # the greedy pass uses (bypassing the DP entirely) against an
+        # actual pull shaped like plan pull B (1x Ogre + 1x Goblin), and
+        # confirm it pulls the Ogre from plan pull A instead of B -- a 1-1
+        # tie that would make greedy's most_common() primary default to A,
+        # even though the pull's composition is an exact match for B. This
+        # is *why* compare_route needs the DP correction; the fix itself is
+        # asserted in test_reordered_pulls_get_correct_primary below.
+        from mythic_analyzer.analysis.compare import _find_plan_pull
+
+        plan_order = [p.index for p in route.pulls]
+        remaining = {p.index: p.npc_counter(dungeon) for p in route.pulls}
+
+        pos_ogre = _find_plan_pull(self.OGRE, remaining, plan_order, 0)
+        remaining[plan_order[pos_ogre]][self.OGRE] -= 1
+        pos_goblin = _find_plan_pull(self.GOBLIN, remaining, plan_order, 0)
+
+        assert pos_ogre == 0    # taken from plan pull A (wrong: this is B's pack)
+        assert pos_goblin == 1  # taken from plan pull B
+
+    def test_reordered_pulls_get_correct_primary(self, route, dungeon):
+        # Actual order is reversed relative to the plan: the group kills
+        # B's mobs (1x Ogre + 1x Goblin) first, then A's mobs (2x Ogre).
+        pull_b_first = ActualPull(
+            index=1,
+            units=[self._unit(self.OGRE, "0001"), self._unit(self.GOBLIN, "0002")],
+        )
+        pull_a_second = ActualPull(
+            index=2,
+            units=[self._unit(self.OGRE, "0003"), self._unit(self.OGRE, "0004")],
+        )
+
+        comp = compare_route(route, [pull_b_first, pull_a_second], dungeon)
+        m_first, m_second = comp.matches
+
+        # The DP alignment recognizes pull_b_first's composition matches
+        # plan pull B (index 2) exactly, and pull_a_second's matches plan
+        # pull A (index 1) exactly -- a perfect, deviation-free assignment
+        # the greedy per-unit matcher alone does not find (see the test
+        # above).
+        assert m_first.primary_plan_pull == 2
+        assert m_second.primary_plan_pull == 1
+        assert m_first.deviation_count == 0
+        assert m_second.deviation_count == 0
+        assert m_first.match_confidence == 1.0
+        assert m_second.match_confidence == 1.0
+        assert comp.missed == {}
+
 
 class TestStats:
     @pytest.fixture()
@@ -137,6 +320,7 @@ class TestStats:
         assert death.player_name == "Bigheals-Area52"
         assert death.pull_index == 2
         assert death.killing_blow["spell"] == "Dark Bolt"
+        assert death.killing_blow["spell_id"] == 1216538
         assert death.killing_blow["amount"] == 250000
         assert death.killing_blow["hp_after"] == 0
 
@@ -232,9 +416,28 @@ class TestExpandedStats:
         dps = next(p for p in stats.players.values() if p.name == "Zappyboi-Area52")
         assert dps.distance_traveled == pytest.approx(40.0, abs=0.1)
         samples = stats.position_samples[dps.guid]
+        # unaffected by the throttle-bug fix: every cast in this fixture is
+        # already >=2s apart, so all 4 casts still produce a sample -- the
+        # bug (comparing an absolute ts against an already-relative stored
+        # value) meant the throttle never actually applied before either,
+        # so this specific count doesn't change, only each sample's shape.
         assert len(samples) == 4
-        assert samples[0][1:] == [100.0, -200.0]
-        assert samples[2][1:] == [110.0, -230.0]
+        assert samples[0][1:3] == [100.0, -200.0]
+        assert samples[2][1:3] == [110.0, -230.0]
+        # 4th element is ui_map_id, now carried alongside each sample
+        assert samples[0][3] == 2200
+
+    def test_movement_throttles_samples_less_than_2s_apart(self, stats):
+        # a death now also samples position (see stats.py's damage-taken
+        # branch) -- the healer takes two hits 2.0s apart (t=64, t=66) at
+        # the fixed (100,-200) advanced-block position build_run_log()
+        # always uses for npc_damage(), plus a later cast sample at t=101.
+        healer = next(p for p in stats.players.values() if p.name == "Bigheals-Area52")
+        samples = stats.position_samples[healer.guid]
+        times = [s[0] for s in samples]
+        assert times == sorted(times)
+        # no two samples closer together than the 2.0s throttle
+        assert all(b - a >= 2.0 - 1e-6 for a, b in zip(times, times[1:]))
 
     def test_buff_uptime(self, stats):
         dps = next(p for p in stats.players.values() if p.name == "Zappyboi-Area52")
@@ -301,11 +504,25 @@ class TestAnalyzeRun:
         assert lust and lust[0]["uptime_pct"] == pytest.approx(21.4, abs=0.1)
         assert len(payload["positions"]["Zappyboi-Area52"]) == 4
         assert payload["pulls"][0]["group_dps"] > 0
+        # "map" block: present whenever dungeon data is present, with the
+        # geometry-only planned map even though this run's synthetic
+        # dungeon data doesn't have enough single-clone npcs to calibrate
+        # a player-path overlay (see TestCalibrate for the calibration
+        # math itself, tested in isolation).
+        m = payload["map"]
+        assert m["canvas"] == {"width": 840, "height": 555}
+        assert len(m["enemies"]) == 4 + 3 + 1 + 4  # Felwyrm/Duskblade/Boss/Shadeling clones
+        assert m["calibration"]["ok"] is False
+        assert m["calibration"]["reason"] == "insufficient anchors"
+        assert m["players"] == []
+        assert m["deaths"] == []
 
     def test_report_without_dungeon_data(self, run_segment, route):
         report = analyze_run(run_segment, route=route, store=None)
         assert "error" in report["comparison"]
         assert report["forces"]["required"] is None
+        # no dungeon data -> no map block at all (not an empty/broken one)
+        assert "map" not in report
 
     def test_renderers(self, run_segment, route, dungeon_data_file):
         from mythic_analyzer.report.html import render_html
@@ -331,3 +548,412 @@ class TestAnalyzeRun:
         html = render_html(report)
         assert "<html" in html and "Murder Row" in html
         assert "</script>" in html
+        # no --avoidable-data passed: no section in either renderer (the
+        # HTML template's JS source always defines avoidableDamage(), but
+        # without avoidable_damage data in the embedded JSON it renders "")
+        assert "AVOIDABLE DAMAGE" not in text
+        assert '"avoidable_damage"' not in html
+        # map block present (plan-only, since this fixture can't calibrate):
+        # the SVG-rendering JS is always defined in the template (like
+        # avoidableDamage() above), so what actually distinguishes "the
+        # section has data" is the embedded report JSON, not raw
+        # substring-presence of "<svg" in the page's JS source text.
+        assert "<svg" in html
+        assert '"map":' in html
+
+    def test_renderer_omits_map_without_dungeon_data(self, run_segment, route):
+        from mythic_analyzer.report.html import render_html
+
+        report = analyze_run(run_segment, route=route, store=None)
+        assert "map" not in report
+        html = render_html(report)
+        assert "<html" in html
+        # no dungeon data -> no "map" key in the embedded report JSON, so
+        # the JS guard (`if (!m ...) return "";`) renders nothing for it
+        assert '"map":' not in html
+
+    def test_html_renders_calibrated_path_and_death_markers(
+        self, run_segment, route, dungeon_data_file
+    ):
+        # Exercise the calibrated-overlay branch directly (the synthetic
+        # fixture's dungeon data doesn't have enough single-clone npcs to
+        # calibrate for real -- see TestAnalyzeRun.test_full_report) by
+        # building a report whose "map" block already reflects a
+        # successful calibration, and confirming the renderer draws a
+        # player path and a death marker rather than just the dim
+        # fallback note.
+        from mythic_analyzer.report.html import render_html
+
+        store = DungeonDataStore.load(dungeon_data_file)
+        report = analyze_run(run_segment, route=route, store=store)
+        report["map"]["calibration"] = {
+            "ok": True, "anchor_count": 5, "residual": 1.2,
+            "scale": 4.0, "rotation": 0.1, "reflected": False,
+            "translation": {"x": 10.0, "y": -5.0},
+        }
+        report["map"]["players"] = [
+            {"name": "Zappyboi-Area52", "guid": "Player-x",
+             "path": [[0.0, 100.0, -100.0], [5.0, 110.0, -120.0]]}
+        ]
+        report["map"]["deaths"] = [
+            {"player": "Bigheals-Area52", "t": 66.5, "x": 105.0, "y": -110.0}
+        ]
+        html = render_html(report)
+        assert "<svg" in html
+        # the calibrated-overlay data actually made it into the embedded
+        # report JSON the page's JS reads (the JS source text itself
+        # always contains e.g. "polyline"/"No player-path overlay" as
+        # literal strings regardless of data, so those aren't meaningful
+        # substring checks -- see test_renderers above for the same point)
+        assert '"ok": true' in html
+        assert '"anchor_count": 5' in html
+        assert '"insufficient anchors"' not in html
+        assert '"path": [[0.0, 100.0, -100.0]' in html
+        assert '"player": "Bigheals-Area52"' in html
+
+
+class TestAvoidableDataLoad:
+    """AvoidableData.load: schema parsing, with and without 'dungeons'."""
+
+    def test_loads_example_schema(self, tmp_path):
+        path = tmp_path / "avoidable.json"
+        path.write_text(json.dumps({
+            "spells": [
+                {"id": 1216538, "name": "Dark Bolt", "note": "easily dodged"},
+            ],
+            "dungeons": {"160": [1216538]},
+        }), encoding="utf-8")
+        data = AvoidableData.load(path)
+        assert data.spells[1216538] == {"name": "Dark Bolt", "note": "easily dodged"}
+        assert data.dungeons == {160: {1216538}}
+
+    def test_loads_without_dungeons_key(self, tmp_path):
+        path = tmp_path / "avoidable.json"
+        path.write_text(json.dumps({
+            "spells": [{"id": 1216538, "name": "Dark Bolt"}],
+        }), encoding="utf-8")
+        data = AvoidableData.load(path)
+        assert data.spells[1216538]["name"] == "Dark Bolt"
+        assert data.spells[1216538]["note"] is None
+        assert data.dungeons == {}
+
+    def test_loads_the_shipped_example_file(self):
+        example = Path(__file__).resolve().parents[1] / "docs" / "avoidable_spells.example.json"
+        data = AvoidableData.load(example)
+        assert 1216538 in data.spells
+        assert data.spells[1216538]["name"] == "Fel Detonation"
+        assert data.dungeons.get(160) == {1216538, 1217099}
+
+    def test_missing_file_raises(self, tmp_path):
+        with pytest.raises(OSError):
+            AvoidableData.load(tmp_path / "does-not-exist.json")
+
+    def test_malformed_json_raises(self, tmp_path):
+        path = tmp_path / "bad.json"
+        path.write_text("{not valid json", encoding="utf-8")
+        with pytest.raises(json.JSONDecodeError):
+            AvoidableData.load(path)
+
+    def test_missing_spells_key_raises(self, tmp_path):
+        path = tmp_path / "bad.json"
+        path.write_text(json.dumps({"dungeons": {}}), encoding="utf-8")
+        with pytest.raises(KeyError):
+            AvoidableData.load(path)
+
+
+class TestAvoidableDamage:
+    """Avoidable-damage tagging: PlayerStats totals/hits, the full report
+    block, and the top-15-truncation regression the WP brief calls out."""
+
+    DARK_BOLT = 1216538
+    LOW_FREQ_SPELL = 900001
+
+    @pytest.fixture()
+    def avoidable(self) -> AvoidableData:
+        return AvoidableData(spells={
+            self.DARK_BOLT: {"name": "Dark Bolt", "note": "test fixture"},
+        })
+
+    def test_player_totals_and_hits(self, run_segment, dungeon, avoidable):
+        pulls = detect_pulls(run_segment.events)
+        stats = compute_stats(run_segment.events, pulls, dungeon, avoidable=avoidable)
+        by_name = {p.name: p for p in stats.players.values()}
+
+        healer = by_name["Bigheals-Area52"]
+        # Dark Bolt hit the healer twice: 150000 (t=64) and 250000 (t=66)
+        assert healer.avoidable_damage_taken == 400000
+        assert healer.avoidable_hits == 2
+        assert healer.damage_taken_hits_by_spell[(self.DARK_BOLT, "Dark Bolt")] == 2
+
+        # players never hit by a tagged spell stay at zero
+        tank = by_name["Thicktank-Area52"]
+        assert tank.avoidable_damage_taken == 0
+        assert tank.avoidable_hits == 0
+
+    def test_hit_counter_tracks_all_damage_taken_spells(self, run_segment, dungeon):
+        # damage_taken_hits_by_spell is populated regardless of tagging
+        pulls = detect_pulls(run_segment.events)
+        stats = compute_stats(run_segment.events, pulls, dungeon)
+        healer = next(p for p in stats.players.values() if p.name == "Bigheals-Area52")
+        assert healer.damage_taken_hits_by_spell[(1216538, "Dark Bolt")] == 2
+
+    def test_no_avoidable_data_leaves_players_untouched(self, run_segment, dungeon):
+        pulls = detect_pulls(run_segment.events)
+        stats = compute_stats(run_segment.events, pulls, dungeon)
+        for p in stats.players.values():
+            assert p.avoidable_damage_taken == 0
+            assert p.avoidable_hits == 0
+
+    def test_full_report_json_roundtrip(self, run_segment, route, dungeon_data_file, avoidable):
+        store = DungeonDataStore.load(dungeon_data_file)
+        report = analyze_run(run_segment, route=route, store=store, avoidable=avoidable)
+        payload = json.loads(json.dumps(report))
+
+        block = payload["avoidable_damage"]
+        assert block["tagged_spell_count"] == 1
+        assert block["total_damage"] == 400000
+        by_player = {e["name"]: e for e in block["by_player"]}
+        assert by_player["Bigheals-Area52"]["avoidable_damage_taken"] == 400000
+        assert by_player["Bigheals-Area52"]["avoidable_hits"] == 2
+        (spell,) = by_player["Bigheals-Area52"]["by_spell"]
+        assert spell == {"spell_id": 1216538, "name": "Dark Bolt",
+                          "amount": 400000, "hits": 2}
+        assert "Thicktank-Area52" not in by_player  # untouched players are omitted
+
+        # per-player flat field on the player summary too
+        players = {p["name"]: p for p in payload["players"]}
+        assert players["Bigheals-Area52"]["avoidable_damage_taken"] == 400000
+        assert players["Thicktank-Area52"]["avoidable_damage_taken"] == 0
+
+    def test_no_flag_omits_report_block(self, run_segment, route, dungeon_data_file):
+        store = DungeonDataStore.load(dungeon_data_file)
+        report = analyze_run(run_segment, route=route, store=store)
+        assert "avoidable_damage" not in report
+
+    def test_truncated_top15_does_not_hide_tagged_spell(self):
+        """Regression test for the top_damage_taken truncation gap: a
+        player takes damage from 15 high-damage spells plus one low-damage
+        *tagged* spell. summary()'s top_damage_taken (top 15) must exclude
+        the low-damage one, while avoidable-damage tagging -- which reads
+        the full damage_taken_by_spell Counter -- must still catch it."""
+        b = LogBuilder()
+        npc = b.npc_guid(FELWYRM, "0001")
+        b.start(0)
+        b.combatant(0.5, TANK)
+        for i in range(15):
+            b.npc_damage(10 + i, npc, "Felwyrm", TANK, 800000 + i, f"Big Hit {i}", 100000)
+        b.npc_damage(30, npc, "Felwyrm", TANK, self.LOW_FREQ_SPELL, "Sneaky Puddle", 1)
+        b.npc_damage(31, npc, "Felwyrm", TANK, self.LOW_FREQ_SPELL, "Sneaky Puddle", 2)
+        b.end(40)
+
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        pulls = detect_pulls(run.events)
+        avoidable = AvoidableData(spells={
+            self.LOW_FREQ_SPELL: {"name": "Sneaky Puddle", "note": None},
+        })
+        stats = compute_stats(run.events, pulls, avoidable=avoidable)
+        tank = next(p for p in stats.players.values() if p.name == TANK[1])
+
+        top_ids = {s["spell_id"] for s in tank.summary()["top_damage_taken"]}
+        assert len(tank.summary()["top_damage_taken"]) == 15
+        assert self.LOW_FREQ_SPELL not in top_ids  # confirms the truncation actually bites
+
+        assert tank.avoidable_damage_taken == 3
+        assert tank.avoidable_hits == 2
+
+    def test_renderers_show_section_when_present(self, run_segment, route,
+                                                  dungeon_data_file, avoidable):
+        from mythic_analyzer.report.html import render_html
+        from mythic_analyzer.report.text import render_text
+
+        store = DungeonDataStore.load(dungeon_data_file)
+        report = analyze_run(run_segment, route=route, store=store, avoidable=avoidable)
+
+        text = render_text(report)
+        assert "AVOIDABLE DAMAGE" in text
+        assert "Bigheals-Area52" in text
+        assert "Dark Bolt" in text
+
+        # the HTML report is a static JS template + an embedded JSON data
+        # payload (see render_html) -- the JS function's source text is
+        # always present in the template either way, so the meaningful
+        # presence signal is the data it reads out of, not the function.
+        html = render_html(report)
+        assert "function avoidableDamage()" in html  # the renderer exists
+        assert '"avoidable_damage"' in html           # ...and has data to render
+        assert '"Bigheals-Area52"' in html
+
+    def test_renderers_omit_section_when_absent(self, run_segment, route, dungeon_data_file):
+        from mythic_analyzer.report.html import render_html
+        from mythic_analyzer.report.text import render_text
+
+        store = DungeonDataStore.load(dungeon_data_file)
+        report = analyze_run(run_segment, route=route, store=store)
+
+        text = render_text(report)
+        assert "AVOIDABLE DAMAGE" not in text
+
+        html = render_html(report)
+        assert '"avoidable_damage"' not in html
+
+
+class TestDeathDefensives:
+    """WP-A3: personal defensive usage on deaths (gamedata.DEFENSIVES)."""
+
+    BIG_HIT_SPELL = 900001
+
+    @staticmethod
+    def _minimal_log():
+        b = LogBuilder()
+        npc = b.npc_guid(FELWYRM, "0001")
+        b.start(0)
+        return b, npc
+
+    def _kill(self, b, npc, player, t=50.0):
+        b.npc_damage(t, npc, "Felwyrm", player, self.BIG_HIT_SPELL, "Big Hit",
+                     500000, hp=0)
+        b.unit_died(t + 0.5, player[0], player[1], player[2])
+        b.end(t + 10)
+
+    @staticmethod
+    def _one_death(b):
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        pulls = detect_pulls(run.events)
+        return compute_stats(run.events, pulls)
+
+    def test_defensive_cast_shortly_before_death(self):
+        # Protection Paladin (spec 66): Divine Shield cast 5s before death,
+        # well inside the 10s cast_timeline window.
+        b, npc = self._minimal_log()
+        b.combatant(0.5, TANK)
+        b.cast(45, TANK, 642, "Divine Shield")
+        self._kill(b, npc, TANK)
+
+        (death,) = self._one_death(b).deaths
+        assert death.died_without_defensive is False
+        (used,) = death.defensives_used_before_death
+        assert used["spell_id"] == 642
+        assert used["name"] == "Divine Shield"
+        # log ts values are absolute (see LogBuilder._stamp); death was
+        # built to land 5.5s after the cast (t=45 cast, t=50.5 death)
+        assert death.ts - used["ts"] == pytest.approx(5.5, abs=0.01)
+
+    def test_no_defensive_used(self):
+        # same spec, same death, but no defensive cast anywhere in the log
+        b, npc = self._minimal_log()
+        b.combatant(0.5, TANK)
+        self._kill(b, npc, TANK)
+
+        (death,) = self._one_death(b).deaths
+        assert death.died_without_defensive is True
+        assert death.defensives_used_before_death == []
+
+    def test_defensive_still_active_beyond_10s_cast_window(self):
+        # Divine Shield goes up 15s before death and is never removed --
+        # still active at death, but outside the naive 10s cast window, so
+        # only the retained buff-window path can catch it.
+        b, npc = self._minimal_log()
+        b.combatant(0.5, TANK)
+        b.aura(35, TANK, TANK, 642, "Divine Shield")
+        self._kill(b, npc, TANK)  # dies at t=50.5
+
+        (death,) = self._one_death(b).deaths
+        assert death.died_without_defensive is False
+        (used,) = death.defensives_used_before_death
+        assert used["spell_id"] == 642
+        # aura applied at t=35, death at t=50.5 -- 15.5s gap, well outside
+        # the 10s cast-timeline window, only found via the buff-window path
+        assert death.ts - used["ts"] == pytest.approx(15.5, abs=0.01)
+
+    def test_unrecognized_spec_reports_none(self):
+        # Devastation Evoker (spec 1467): a real, known spec_id, but one
+        # gamedata.DEFENSIVES intentionally doesn't cover -- must never be
+        # reported as "died without a defensive" since we don't actually
+        # know whether that's true.
+        mystery = ("Player-1403-0000000D", "Mysteryman-Area52", 0x511, 1467)
+        b, npc = self._minimal_log()
+        b.combatant(0.5, mystery)
+        self._kill(b, npc, mystery)
+
+        (death,) = self._one_death(b).deaths
+        assert death.died_without_defensive is None
+        assert death.defensives_used_before_death == []
+
+    def test_missing_spec_info_reports_none(self):
+        # no COMBATANT_INFO at all for this player -> spec_id stays None
+        ghost = ("Player-1403-0000000E", "Ghosty-Area52", 0x511, 66)
+        b, npc = self._minimal_log()
+        self._kill(b, npc, ghost)
+
+        (death,) = self._one_death(b).deaths
+        assert death.died_without_defensive is None
+
+    def test_no_cast_timeline_falls_back_to_none_not_false_true(self):
+        # --no-cast-timeline (full_cast_timeline=False): cast_timeline is
+        # empty, so the cast-based half of detection has no data. Must not
+        # be reported as a confident "died without a defensive".
+        b, npc = self._minimal_log()
+        b.combatant(0.5, TANK)
+        self._kill(b, npc, TANK)
+
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        pulls = detect_pulls(run.events)
+        stats = compute_stats(run.events, pulls, full_cast_timeline=False)
+
+        assert stats.cast_timeline == []
+        (death,) = stats.deaths
+        assert death.died_without_defensive is None
+
+    def test_no_cast_timeline_still_finds_active_buff_window(self):
+        # the buff-window path doesn't depend on full_cast_timeline, so an
+        # active defensive is still caught even with casts untracked
+        b, npc = self._minimal_log()
+        b.combatant(0.5, TANK)
+        b.aura(35, TANK, TANK, 642, "Divine Shield")
+        self._kill(b, npc, TANK)
+
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        pulls = detect_pulls(run.events)
+        stats = compute_stats(run.events, pulls, full_cast_timeline=False)
+
+        (death,) = stats.deaths
+        assert death.died_without_defensive is False
+        assert death.defensives_used_before_death[0]["spell_id"] == 642
+
+    def test_cast_timeline_carries_player_guid(self):
+        # the name/GUID mismatch fix: cast_timeline entries must carry
+        # player_guid (matching interrupt_events' existing pattern), since
+        # death matching joins on GUID, not the fragile name string
+        b, npc = self._minimal_log()
+        b.combatant(0.5, TANK)
+        b.cast(45, TANK, 642, "Divine Shield")
+        stats = self._one_death(b)
+        assert stats.cast_timeline[0]["player_guid"] == TANK[0]
+
+    def test_renderers_show_biggest_hit_damage_last_5s_and_defensive_status(
+        self, run_segment, route, dungeon_data_file
+    ):
+        from mythic_analyzer.report.html import render_html
+        from mythic_analyzer.report.text import render_text
+
+        store = DungeonDataStore.load(dungeon_data_file)
+        report = analyze_run(run_segment, route=route, store=store)
+        # the log's one death (Bigheals-Area52, Restoration Shaman) never
+        # casts its known defensive (Astral Shift, spell id 108271)
+        assert report["deaths"][0]["biggest_hit"] == 250000
+        assert report["deaths"][0]["damage_last_5s"] == 400000
+        assert report["deaths"][0]["died_without_defensive"] is True
+
+        text = render_text(report)
+        assert "biggest hit: 250.0k" in text
+        assert "last 5s: 400.0k" in text
+        assert "no defensive used" in text
+
+        html = render_html(report)
+        assert '"biggest_hit": 250000' in html
+        assert '"damage_last_5s": 400000' in html
+        assert '"died_without_defensive": true' in html
+
+        # JSON round-trippable end to end, new fields included
+        payload = json.loads(json.dumps(report))
+        assert payload["deaths"][0]["died_without_defensive"] is True
