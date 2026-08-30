@@ -3,11 +3,16 @@
   "spells": [
     {
       "id": 1216538,
-      "name": "Dark Bolt",
-      "note": "Murder Row (Felwyrm) -- stack-and-spread cone, easily sidestepped"
+      "name": "Fel Detonation",
+      "note": "Murder Row (Felwyrm) -- AOE ground effect, easily sidestepped"
+    },
+    {
+      "id": 1217099,
+      "name": "Fel-Infused Freight",
+      "note": "Murder Row (Forbidden Freight) -- AOE, avoidable"
     }
   ],
   "dungeons": {
-    "160": [1216538]
+    "160": [1216538, 1217099]
   }
 }
