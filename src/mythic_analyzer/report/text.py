@@ -131,6 +131,32 @@ def render_text(report: dict[str, Any]) -> str:
                 + (f"  killed by {kb.get('spell')} from {kb.get('source')}"
                    f" for {_fmt_num(kb.get('amount'))}" if kb else ""))
 
+    # --- kick value ---
+    kicks = report.get("kick_value") or {}
+    if kicks.get("by_player"):
+        add("")
+        add("-- KICKS (estimated damage/healing prevented) " + "-" * 26)
+        for entry in kicks["by_player"]:
+            parts = [f"{entry['kicks']} kicks"]
+            if entry["estimated_prevented_damage"]:
+                parts.append(f"~{_fmt_num(entry['estimated_prevented_damage'])} dmg prevented")
+            if entry["estimated_prevented_healing"]:
+                parts.append(f"~{_fmt_num(entry['estimated_prevented_healing'])} healing prevented")
+            add(f"  {entry['name']:<24}{'  |  '.join(parts)}")
+        for i in report.get("interrupts") or []:
+            est = i.get("estimated_prevented_damage")
+            est_h = i.get("estimated_prevented_healing")
+            what = []
+            if est:
+                what.append(f"~{_fmt_num(est)} dmg")
+            if est_h:
+                what.append(f"~{_fmt_num(est_h)} healing")
+            basis = (f" (avg of {i['observed_casts']} landed casts)"
+                     if i.get("observed_casts") else " (never landed — no estimate)")
+            add(f"    {_fmt_time(i.get('t'))}  {i['player']} kicked "
+                f"{i.get('interrupted_spell') or '?'} on {i['target']}"
+                + (f": {' + '.join(what)} prevented{basis}" if what else basis))
+
     # --- big moments ---
     lust = report.get("lust") or []
     brez = report.get("brez") or []

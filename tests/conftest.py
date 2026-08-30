@@ -146,6 +146,14 @@ class LogBuilder:
         self.spell_damage(t, npc_guid, npc_name, HOSTILE, guid, name, flags,
                           spell_id, spell_name, amount, hp=hp)
 
+    def npc_heal(self, t, src_guid, src_name, dst_guid, dst_name, spell_id,
+                 spell_name, amount):
+        adv = self._advanced(dst_guid)
+        self.raw(t, f'SPELL_HEAL,{src_guid},"{src_name}",{HOSTILE:#06x},0x0,'
+                    f'{dst_guid},"{dst_name}",{HOSTILE:#06x},0x0,'
+                    f'{spell_id},"{spell_name}",0x8,{adv},'
+                    f'{amount},{amount},0,0,nil')
+
     def heal(self, t, src_player, dst_player, spell_id, spell_name, amount,
              overheal=0):
         sguid, sname, sflags, _ = src_player
@@ -225,8 +233,13 @@ def build_run_log() -> LogBuilder:
     b.player_damage(62, DPS1, add, "Summoned Thing", 133, "Fireball", 10000)
     b.interrupt(63, TANK, dB, "Duskblade", 96231, "Rebuke", 1216538, "Dark Bolt")
     b.npc_damage(64, dB, "Duskblade", HEALER, 1216538, "Dark Bolt", 150000, hp=200000)
+    # kick of an enemy heal (observed once at t=67), and one of a spell that
+    # never lands in this run (no basis for an estimate)
+    b.interrupt(65, DPS1, sh, "Shadeling", 2139, "Counterspell", 888001, "Void Mending")
     b.npc_damage(66, dB, "Duskblade", HEALER, 1216538, "Dark Bolt", 250000, hp=0)
     b.unit_died(66.5, HEALER[0], HEALER[1], HEALER[2])
+    b.npc_heal(67, sh, "Shadeling", dB, "Duskblade", 888001, "Void Mending", 80000)
+    b.interrupt(69, DPS1, sh, "Shadeling", 2139, "Counterspell", 999, "Mystery Bolt")
     b.cast(68, TANK, 391054, "Intercession", HEALER[0], f'"{HEALER[1]}"', HEALER[2])
     b.player_damage(70, DPS1, dB, "Duskblade", 133, "Fireball", 90000)
     b.unit_died(71, dB, "Duskblade", HOSTILE)

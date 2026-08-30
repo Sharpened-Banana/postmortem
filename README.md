@@ -63,6 +63,11 @@ WoW only writes `WoWCombatLog.txt` while combat logging is on:
   healing + overhealing + absorbs, damage taken, DPS/HPS, interrupts,
   dispels, deaths; specs/roles resolved from `COMBATANT_INFO`.
 - **Deaths** — killing blow and a last-hits recap with remaining HP.
+- **Kick value** — each interrupt is priced: the estimated damage (or enemy
+  healing) it prevented, based on the average amount per completed cast of
+  that spell observed elsewhere in the same run, with per-player totals.
+  Conservative by design: DoT components and spells that never landed in
+  the run count as 0.
 - **Timelines** — bloodlust, battle resses, kicks and dispels; the full
   per-cast timeline is included in the JSON report.
 - **Forces** — enemy-forces count progress over time vs. the required

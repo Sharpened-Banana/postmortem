@@ -150,6 +150,30 @@ class TestStats:
         assert len(stats.brez_events) == 1
         assert stats.brez_events[0]["spell"] == "Intercession"
 
+    def test_kick_value_estimates(self, stats):
+        by_name = {p.name: p for p in stats.players.values()}
+        # TANK kicked Dark Bolt; it landed twice (150k, 250k) -> avg 200k
+        tank = by_name["Thicktank-Area52"]
+        assert tank.kick_prevented_damage == 200000
+        assert tank.kick_prevented_healing == 0
+        # DPS kicked an enemy heal observed once (80k) and one unknown spell
+        dps = by_name["Zappyboi-Area52"]
+        assert dps.interrupts == 2
+        assert dps.kick_prevented_healing == 80000
+        assert dps.kick_prevented_damage == 0
+
+        events = {e["interrupted_spell"]: e for e in stats.interrupt_events}
+        dark_bolt = events["Dark Bolt"]
+        assert dark_bolt["estimated_prevented_damage"] == 200000
+        assert dark_bolt["observed_casts"] == 2
+        mending = events["Void Mending"]
+        assert mending["estimated_prevented_healing"] == 80000
+        assert mending["estimated_prevented_damage"] is None
+        mystery = events["Mystery Bolt"]
+        assert mystery["estimated_prevented_damage"] is None
+        assert mystery["estimated_prevented_healing"] is None
+        assert mystery["observed_casts"] == 0
+
     def test_downtime(self, stats):
         gaps = {(w["after_pull"], w["before_pull"]): w["seconds"] for w in stats.downtime}
         assert (1, 2) in gaps and (2, 3) in gaps
@@ -173,6 +197,13 @@ class TestAnalyzeRun:
         players = {p["name"]: p for p in payload["players"]}
         assert players["Zappyboi-Area52"]["dps"] > 0
         assert players["Thicktank-Area52"]["role"] == "tank"
+        kicks = payload["kick_value"]
+        assert kicks["total_estimated_prevented_damage"] == 200000
+        assert kicks["total_estimated_prevented_healing"] == 80000
+        assert kicks["by_player"][0]["name"] == "Thicktank-Area52"
+        obs = {(o["spell_id"], o["kind"]): o for o in kicks["spell_observations"]}
+        assert obs[(1216538, "damage")]["avg_per_cast"] == 200000
+        assert obs[(888001, "healing")]["observed_casts"] == 1
 
     def test_report_without_dungeon_data(self, run_segment, route):
         report = analyze_run(run_segment, route=route, store=None)
@@ -190,6 +221,9 @@ class TestAnalyzeRun:
         assert "Murder Row" in text
         assert "EARLY: 1x Duskblade" in text
         assert "OFF-ROUTE: 1x Shadeling" in text
+        assert "~200.0k dmg prevented" in text
+        assert "~80.0k healing prevented" in text
+        assert "never landed" in text  # Mystery Bolt kick has no estimate
         html = render_html(report)
         assert "<html" in html and "Murder Row" in html
         assert "</script>" in html
