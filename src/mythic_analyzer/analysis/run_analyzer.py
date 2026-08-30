@@ -18,6 +18,51 @@ def _relativize(entries: list[dict[str, Any]], start_ts: float, key: str = "ts")
             e["t"] = round(e[key] - start_ts, 1)
 
 
+def _kick_value_summary(stats) -> dict[str, Any]:
+    """Estimated damage/healing prevented by interrupts (see stats module)."""
+    interrupted_ids = {
+        ev.get("interrupted_spell_id") for ev in stats.interrupt_events
+    } - {None}
+    observations = []
+    for spell_id in sorted(interrupted_ids):
+        for kind, obs in (("damage", stats.enemy_cast_observations),
+                          ("healing", stats.enemy_heal_observations)):
+            entry = obs.get(spell_id)
+            if entry and entry["instances"]:
+                observations.append({
+                    "spell_id": spell_id,
+                    "name": entry["name"],
+                    "kind": kind,
+                    "observed_casts": entry["instances"],
+                    "avg_per_cast": entry["avg"],
+                })
+    by_player = [
+        {
+            "name": p.name or p.guid,
+            "kicks": p.interrupts,
+            "estimated_prevented_damage": p.kick_prevented_damage,
+            "estimated_prevented_healing": p.kick_prevented_healing,
+        }
+        for p in stats.players.values()
+        if p.interrupts
+    ]
+    by_player.sort(key=lambda e: -(e["estimated_prevented_damage"]
+                                   + e["estimated_prevented_healing"]))
+    return {
+        "note": "estimates: average observed amount per completed cast of the "
+                "interrupted spell in this run; DoT components and spells that "
+                "never landed count as 0",
+        "total_estimated_prevented_damage": sum(
+            e["estimated_prevented_damage"] for e in by_player
+        ),
+        "total_estimated_prevented_healing": sum(
+            e["estimated_prevented_healing"] for e in by_player
+        ),
+        "by_player": by_player,
+        "spell_observations": observations,
+    }
+
+
 def analyze_run(
     segment: RunSegment,
     route: Optional[Route] = None,
@@ -82,6 +127,7 @@ def analyze_run(
             {"name": name, "damage_to_group": dmg}
             for name, dmg in stats.enemy_damage_taken.most_common(20)
         ],
+        "kick_value": _kick_value_summary(stats),
         "cast_timeline": stats.cast_timeline,
     }
 

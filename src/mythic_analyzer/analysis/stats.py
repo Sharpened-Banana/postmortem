@@ -55,6 +55,8 @@ class PlayerStats:
     overhealing: int = 0
     absorbs_granted: int = 0
     interrupts: int = 0
+    kick_prevented_damage: int = 0  # estimated, see RunStats.enemy_cast_observations
+    kick_prevented_healing: int = 0
     dispels: int = 0
     death_count: int = 0
     casts: Counter = field(default_factory=Counter)  # (spell_id, spell_name) -> n
@@ -81,6 +83,8 @@ class PlayerStats:
             "overhealing": self.overhealing,
             "absorbs_granted": self.absorbs_granted,
             "interrupts": self.interrupts,
+            "kick_prevented_damage": self.kick_prevented_damage,
+            "kick_prevented_healing": self.kick_prevented_healing,
             "dispels": self.dispels,
             "deaths": self.death_count,
             "top_damage_spells": _top(self.damage_by_spell, 15),
@@ -112,6 +116,10 @@ class RunStats:
     forces_timeline: list[dict[str, Any]] = field(default_factory=list)
     forces_total: float = 0.0
     enemy_damage_taken: Counter = field(default_factory=Counter)  # npc name -> dmg dealt to group
+    # spell_id -> {name, total, instances, avg} for enemy casts that landed;
+    # the basis for the "damage prevented by kicks" estimates
+    enemy_cast_observations: dict[int, dict[str, Any]] = field(default_factory=dict)
+    enemy_heal_observations: dict[int, dict[str, Any]] = field(default_factory=dict)
     pull_stats: list[dict[str, Any]] = field(default_factory=list)
     downtime: list[dict[str, Any]] = field(default_factory=list)
     total_downtime_s: float = 0.0
@@ -144,6 +152,22 @@ def compute_stats(
     recent_damage: dict[str, deque] = {}
     locator = _PullLocator(pulls)
     killed_guids: set[str] = set()
+    # (source_guid, spell_id) -> ts of the last observed hit, so multi-target
+    # hits within a short window count as one cast instance
+    last_obs_hit: dict[tuple[str, int], float] = {}
+    _AOE_WINDOW = 1.0
+
+    def observe_enemy_cast(obs: dict[int, dict[str, Any]], src: str,
+                           sp, amount: int, ts: float) -> None:
+        entry = obs.setdefault(sp.spell_id, {
+            "name": sp.spell_name, "total": 0, "instances": 0,
+        })
+        entry["total"] += amount
+        key = (src, sp.spell_id)
+        last = last_obs_hit.get(key)
+        if last is None or ts - last > _AOE_WINDOW:
+            entry["instances"] += 1
+        last_obs_hit[key] = ts
 
     def get_player(guid: str, name: str = "") -> PlayerStats:
         p = stats.players.get(guid)
@@ -242,6 +266,12 @@ def compute_stats(
                 source_player.damage_by_spell[key] += damage.amount
                 if pull_idx is not None:
                     source_player.damage_by_pull[pull_idx] += damage.amount
+            if name in ("SPELL_DAMAGE", "RANGE_DAMAGE") and is_hostile_npc(src_flags) \
+                    and (is_group_player(dst_flags) or is_group_owned(dst_flags)):
+                sp = spell_info(event)
+                if sp is not None:
+                    observe_enemy_cast(stats.enemy_cast_observations, src_guid,
+                                       sp, damage.amount + damage.absorbed, event.ts)
             if is_group_player(dst_flags):
                 target = get_player(dst_guid, dst_name)
                 target.damage_taken += damage.amount
@@ -268,6 +298,11 @@ def compute_stats(
 
         heal = parse_heal(event)
         if heal is not None:
+            if is_hostile_npc(src_flags):
+                sp = spell_info(event)
+                if sp is not None:
+                    observe_enemy_cast(stats.enemy_heal_observations, src_guid,
+                                       sp, heal.amount, event.ts)
             source_player = resolve_source(src_guid, src_name, src_flags)
             if source_player is not None and (
                 is_group_player(dst_flags) or is_group_owned(dst_flags)
@@ -301,6 +336,7 @@ def compute_stats(
                     "ts": event.ts,
                     "pull": pull_idx,
                     "player": source_player.name or src_name,
+                    "player_guid": source_player.guid,
                     "target": dst_name,
                     "interrupted_spell": extra.spell_name if extra else None,
                     "interrupted_spell_id": extra.spell_id if extra else None,
@@ -364,8 +400,35 @@ def compute_stats(
                     })
             continue
 
+    _estimate_kick_value(stats)
     _finish_pull_stats(stats, pulls, data)
     return stats
+
+
+def _estimate_kick_value(stats: RunStats) -> None:
+    """Estimate the damage/healing each kick prevented.
+
+    Basis: the average amount per completed cast of the interrupted spell,
+    observed elsewhere in this same run (multi-target hits within 1 s count
+    as one cast). Conservative: DoT/debuff components and casts that never
+    landed in the run contribute nothing.
+    """
+    for obs in (stats.enemy_cast_observations, stats.enemy_heal_observations):
+        for entry in obs.values():
+            entry["avg"] = round(entry["total"] / entry["instances"]) \
+                if entry["instances"] else 0
+
+    for ev in stats.interrupt_events:
+        spell_id = ev.get("interrupted_spell_id")
+        dmg = stats.enemy_cast_observations.get(spell_id) if spell_id else None
+        heal = stats.enemy_heal_observations.get(spell_id) if spell_id else None
+        ev["estimated_prevented_damage"] = dmg["avg"] if dmg else None
+        ev["estimated_prevented_healing"] = heal["avg"] if heal else None
+        ev["observed_casts"] = (dmg or heal or {}).get("instances", 0)
+        player = stats.players.get(ev.get("player_guid", ""))
+        if player is not None:
+            player.kick_prevented_damage += (dmg or {}).get("avg") or 0
+            player.kick_prevented_healing += (heal or {}).get("avg") or 0
 
 
 def _finish_pull_stats(

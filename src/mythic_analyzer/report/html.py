@@ -112,6 +112,7 @@ function render() {
     ${stat((R.pulls||[]).length, "actual pulls")}
     ${R.route ? stat(R.route.pull_count, "planned pulls") : ""}
     ${R.comparison && R.comparison.adherence_pct != null ? stat(R.comparison.adherence_pct + "%", "route adherence") : ""}
+    ${R.kick_value && R.kick_value.total_estimated_prevented_damage ? stat("~" + num(R.kick_value.total_estimated_prevented_damage), "dmg prevented by kicks (est.)") : ""}
   </div>`;
 
   html += timeline();
@@ -174,9 +175,11 @@ function playersTable() {
     <td class="num">${num(p.healing_done)}</td>
     <td class="num">${num(p.absorbs_granted)}</td>
     <td class="num">${num(p.damage_taken)}</td>
-    <td class="num">${p.interrupts}</td><td class="num">${p.dispels}</td>
+    <td class="num">${p.interrupts}</td>
+    <td class="num" title="estimated damage + healing prevented by this player's interrupts">${(p.kick_prevented_damage || p.kick_prevented_healing) ? "~" + num((p.kick_prevented_damage||0) + (p.kick_prevented_healing||0)) : ""}</td>
+    <td class="num">${p.dispels}</td>
     <td class="num${p.deaths ? ' dev-off' : ''}">${p.deaths}</td></tr>
-    <tr><td colspan="11" style="border-bottom:1px solid var(--line)">
+    <tr><td colspan="12" style="border-bottom:1px solid var(--line)">
       <details><summary class="dim">top abilities</summary>
       <div class="dim">Damage: ${(p.top_damage_spells||[]).slice(0,8).map(s => `${esc(s.name)} ${num(s.total)}`).join(" · ")}</div>
       ${(p.top_healing_spells||[]).length ? `<div class="dim">Healing: ${(p.top_healing_spells||[]).slice(0,8).map(s => `${esc(s.name)} ${num(s.total)}`).join(" · ")}</div>` : ""}
@@ -185,7 +188,9 @@ function playersTable() {
   return `<h2>Players</h2><div class="wrap"><table>
     <tr><th>Player</th><th>Spec</th><th class="num">DPS</th><th class="num">HPS</th>
     <th class="num">Damage</th><th class="num">Healing</th><th class="num">Absorbs</th>
-    <th class="num">Taken</th><th class="num">Kicks</th><th class="num">Dispels</th>
+    <th class="num">Taken</th><th class="num">Kicks</th>
+    <th class="num" title="estimated damage/healing prevented by kicks">Kick prev.</th>
+    <th class="num">Dispels</th>
     <th class="num">Deaths</th></tr>${rows}</table></div>`;
 }
 
@@ -261,7 +266,15 @@ function utility() {
   const rows = [];
   (R.lust||[]).forEach(l => rows.push([l.t, "Bloodlust", `${esc(l.spell)}${l.source ? " (" + esc(l.source) + ")" : ""}`, l.pull]));
   (R.brez||[]).forEach(b => rows.push([b.t, "Battle res", `${esc(b.player)} → ${esc(b.target || "?")} (${esc(b.spell)})`, b.pull]));
-  (R.interrupts||[]).forEach(i => rows.push([i.t, "Interrupt", `${esc(i.player)} kicked ${esc(i.interrupted_spell || "?")} on ${esc(i.target)}`, i.pull]));
+  (R.interrupts||[]).forEach(i => {
+    const est = [];
+    if (i.estimated_prevented_damage) est.push(`~${num(i.estimated_prevented_damage)} dmg`);
+    if (i.estimated_prevented_healing) est.push(`~${num(i.estimated_prevented_healing)} healing`);
+    const suffix = est.length
+      ? ` — <span class="ok" title="average of ${i.observed_casts} landed casts of this spell in this run">${est.join(" + ")} prevented</span>`
+      : ' — <span class="dim">no landed casts to estimate from</span>';
+    rows.push([i.t, "Interrupt", `${esc(i.player)} kicked ${esc(i.interrupted_spell || "?")} on ${esc(i.target)}${suffix}`, i.pull]);
+  });
   (R.dispels||[]).forEach(d => rows.push([d.t, "Dispel", `${esc(d.player)} dispelled ${esc(d.dispelled_spell || "?")} on ${esc(d.target)}`, d.pull]));
   if (!rows.length) return "";
   rows.sort((a, b) => a[0] - b[0]);
