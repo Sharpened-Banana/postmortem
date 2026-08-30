@@ -17,13 +17,13 @@ from conftest import (
 )
 
 from mythic_analyzer.analysis.compare import compare_route
-from mythic_analyzer.analysis.pulls import detect_pulls
+from mythic_analyzer.analysis.pulls import ActualPull, UnitEngagement, detect_pulls
 from mythic_analyzer.analysis.run_analyzer import analyze_run
 from mythic_analyzer.analysis.stats import compute_stats
 from mythic_analyzer.combatlog.parser import iter_events
 from mythic_analyzer.combatlog.segmenter import segment_runs
-from mythic_analyzer.mdt.dungeon_data import DungeonData, DungeonDataStore
-from mythic_analyzer.mdt.route import Route
+from mythic_analyzer.mdt.dungeon_data import DungeonData, DungeonDataStore, Enemy
+from mythic_analyzer.mdt.route import Pull, Route
 
 
 @pytest.fixture()
@@ -101,6 +101,161 @@ class TestRouteComparison:
         summary = compare_route(route, pulls, dungeon).summary(dungeon)
         early = summary["pulls"][0]["pulled_early"]
         assert early == [{"npc_id": DUSKBLADE, "n": 1, "name": "Duskblade"}]
+
+    def test_match_confidence(self, run_segment, route, dungeon):
+        pulls = detect_pulls(run_segment.events)
+        comp = compare_route(route, pulls, dungeon)
+        m1, m2, m3 = comp.matches
+        # m1 has 3 matched units total: 2x Felwyrm at its primary (plan #1)
+        # plus the 1x Duskblade pulled early from plan #2 -> 2/3 at primary.
+        assert m1.match_confidence == pytest.approx(2 / 3, abs=0.001)
+        # m2 (leftover Duskblade at plan #2) and m3 (boss at plan #4) have
+        # every matched unit at their primary pull.
+        assert m2.match_confidence == 1.0
+        assert m3.match_confidence == 1.0
+
+        summary = comp.summary(dungeon)
+        assert summary["pulls"][0]["match_confidence"] == pytest.approx(2 / 3, abs=0.001)
+
+    def test_match_confidence_none_for_pure_off_route_pull(self):
+        # A pull whose only unit isn't in the plan at all should have no
+        # match_confidence — nothing matched, so there's no fraction to
+        # report (and no divide-by-zero).
+        dungeon = DungeonData(
+            dungeon_idx=1,
+            name="Test Dungeon",
+            total_count={"normal": 10},
+            enemies=[
+                Enemy(enemy_idx=1, npc_id=700001, name="Planned Mob", count=1),
+                Enemy(enemy_idx=2, npc_id=700002, name="Unplanned Mob", count=1),
+            ],
+        )
+        route = Route(
+            name="Test",
+            dungeon_idx=1,
+            week=None,
+            difficulty=None,
+            pulls=[Pull(index=1, enemies={1: [1]})],
+        )
+        actual = [
+            ActualPull(
+                index=1,
+                units=[
+                    UnitEngagement(
+                        guid="Creature-0-1-1-1-700002-0001",
+                        npc_id=700002,
+                        name="Unplanned Mob",
+                        first_ts=0.0,
+                        last_ts=1.0,
+                        died_at=1.0,
+                    )
+                ],
+            )
+        ]
+        comp = compare_route(route, actual, dungeon)
+        (m,) = comp.matches
+        assert m.off_route == {700002: 1}
+        assert m.primary_plan_pull is None
+        assert m.match_confidence is None
+
+
+class TestRouteComparisonDPAlignment:
+    """The greedy per-unit matcher can misattribute a whole actual pull to
+    the wrong planned pull when two planned pulls share an NPC type and the
+    group runs them in a different order than planned. The windowed DP
+    alignment in compare_route fixes this by weighing the whole actual/plan
+    pull sequences together instead of consuming mobs unit-by-unit from
+    wherever's cheapest at that instant."""
+
+    OGRE = 800001
+    GOBLIN = 800002
+
+    @pytest.fixture()
+    def dungeon(self) -> DungeonData:
+        return DungeonData(
+            dungeon_idx=2,
+            name="Swap Test Dungeon",
+            total_count={"normal": 10},
+            enemies=[
+                Enemy(enemy_idx=1, npc_id=self.OGRE, name="Ogre", count=1),
+                Enemy(enemy_idx=2, npc_id=self.GOBLIN, name="Goblin", count=1),
+            ],
+        )
+
+    @pytest.fixture()
+    def route(self) -> Route:
+        # plan pull A: 2x Ogre.  plan pull B: 1x Ogre + 1x Goblin.
+        # A and B share the Ogre npc type -- that overlap is exactly what
+        # trips up the greedy per-unit matcher (see the test below).
+        return Route(
+            name="Swap Test",
+            dungeon_idx=2,
+            week=None,
+            difficulty=None,
+            pulls=[
+                Pull(index=1, enemies={1: [1, 2]}),       # A: 2x Ogre
+                Pull(index=2, enemies={1: [3], 2: [1]}),  # B: 1x Ogre, 1x Goblin
+            ],
+        )
+
+    def _unit(self, npc_id: int, spawn: str) -> UnitEngagement:
+        return UnitEngagement(
+            guid=f"Creature-0-1-1-1-{npc_id}-{spawn}",
+            npc_id=npc_id,
+            name="",
+            first_ts=0.0,
+            last_ts=1.0,
+            died_at=1.0,
+        )
+
+    def test_greedy_alone_misattributes_the_swap(self, route, dungeon):
+        # Sanity check on the documented bug: run the same per-unit search
+        # the greedy pass uses (bypassing the DP entirely) against an
+        # actual pull shaped like plan pull B (1x Ogre + 1x Goblin), and
+        # confirm it pulls the Ogre from plan pull A instead of B -- a 1-1
+        # tie that would make greedy's most_common() primary default to A,
+        # even though the pull's composition is an exact match for B. This
+        # is *why* compare_route needs the DP correction; the fix itself is
+        # asserted in test_reordered_pulls_get_correct_primary below.
+        from mythic_analyzer.analysis.compare import _find_plan_pull
+
+        plan_order = [p.index for p in route.pulls]
+        remaining = {p.index: p.npc_counter(dungeon) for p in route.pulls}
+
+        pos_ogre = _find_plan_pull(self.OGRE, remaining, plan_order, 0)
+        remaining[plan_order[pos_ogre]][self.OGRE] -= 1
+        pos_goblin = _find_plan_pull(self.GOBLIN, remaining, plan_order, 0)
+
+        assert pos_ogre == 0    # taken from plan pull A (wrong: this is B's pack)
+        assert pos_goblin == 1  # taken from plan pull B
+
+    def test_reordered_pulls_get_correct_primary(self, route, dungeon):
+        # Actual order is reversed relative to the plan: the group kills
+        # B's mobs (1x Ogre + 1x Goblin) first, then A's mobs (2x Ogre).
+        pull_b_first = ActualPull(
+            index=1,
+            units=[self._unit(self.OGRE, "0001"), self._unit(self.GOBLIN, "0002")],
+        )
+        pull_a_second = ActualPull(
+            index=2,
+            units=[self._unit(self.OGRE, "0003"), self._unit(self.OGRE, "0004")],
+        )
+
+        comp = compare_route(route, [pull_b_first, pull_a_second], dungeon)
+        m_first, m_second = comp.matches
+
+        # The DP alignment recognizes pull_b_first's composition matches
+        # plan pull B (index 2) exactly, and pull_a_second's matches plan
+        # pull A (index 1) exactly -- a perfect, deviation-free assignment
+        # the greedy per-unit matcher alone does not find (see the test
+        # above).
+        assert m_first.primary_plan_pull == 2
+        assert m_second.primary_plan_pull == 1
+        assert m_first.deviation_count == 0
+        assert m_second.deviation_count == 0
+        assert m_first.match_confidence == 1.0
+        assert m_second.match_confidence == 1.0
+        assert comp.missed == {}
 
 
 class TestStats:
