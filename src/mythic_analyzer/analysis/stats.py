@@ -152,22 +152,39 @@ def compute_stats(
     recent_damage: dict[str, deque] = {}
     locator = _PullLocator(pulls)
     killed_guids: set[str] = set()
-    # (source_guid, spell_id) -> ts of the last observed hit, so multi-target
-    # hits within a short window count as one cast instance
-    last_obs_hit: dict[tuple[str, int], float] = {}
+    # (source_guid, spell_id, kind) -> ts of the last observed hit, so
+    # multi-target hits/applications within a short window count as one cast
+    last_obs_hit: dict[tuple[str, int, str], float] = {}
     _AOE_WINDOW = 1.0
 
-    def observe_enemy_cast(obs: dict[int, dict[str, Any]], src: str,
-                           sp, amount: int, ts: float) -> None:
-        entry = obs.setdefault(sp.spell_id, {
-            "name": sp.spell_name, "total": 0, "instances": 0,
+    def _obs_entry(obs: dict[int, dict[str, Any]], sp) -> dict[str, Any]:
+        return obs.setdefault(sp.spell_id, {
+            "name": sp.spell_name,
+            "direct_total": 0, "direct_casts": 0,     # up-front hit / heal
+            "dot_total": 0, "dot_casts": 0,           # periodic ticks / casts
+            "aura_applications": 0,                   # raw per-target debuffs
         })
-        entry["total"] += amount
-        key = (src, sp.spell_id)
+
+    def _new_cast_instance(src: str, spell_id: int, kind: str, ts: float) -> bool:
+        key = (src, spell_id, kind)
         last = last_obs_hit.get(key)
-        if last is None or ts - last > _AOE_WINDOW:
-            entry["instances"] += 1
         last_obs_hit[key] = ts
+        return last is None or ts - last > _AOE_WINDOW
+
+    def observe_direct(obs, src: str, sp, amount: int, ts: float) -> None:
+        entry = _obs_entry(obs, sp)
+        entry["direct_total"] += amount
+        if _new_cast_instance(src, sp.spell_id, "direct", ts):
+            entry["direct_casts"] += 1
+
+    def observe_periodic(obs, sp, amount: int) -> None:
+        _obs_entry(obs, sp)["dot_total"] += amount
+
+    def observe_aura(obs, src: str, sp, ts: float) -> None:
+        entry = _obs_entry(obs, sp)
+        entry["aura_applications"] += 1
+        if _new_cast_instance(src, sp.spell_id, "aura", ts):
+            entry["dot_casts"] += 1
 
     def get_player(guid: str, name: str = "") -> PlayerStats:
         p = stats.players.get(guid)
@@ -266,12 +283,16 @@ def compute_stats(
                 source_player.damage_by_spell[key] += damage.amount
                 if pull_idx is not None:
                     source_player.damage_by_pull[pull_idx] += damage.amount
-            if name in ("SPELL_DAMAGE", "RANGE_DAMAGE") and is_hostile_npc(src_flags) \
+            if is_hostile_npc(src_flags) \
                     and (is_group_player(dst_flags) or is_group_owned(dst_flags)):
                 sp = spell_info(event)
                 if sp is not None:
-                    observe_enemy_cast(stats.enemy_cast_observations, src_guid,
+                    if name in ("SPELL_DAMAGE", "RANGE_DAMAGE"):
+                        observe_direct(stats.enemy_cast_observations, src_guid,
                                        sp, damage.amount + damage.absorbed, event.ts)
+                    elif name == "SPELL_PERIODIC_DAMAGE":
+                        observe_periodic(stats.enemy_cast_observations, sp,
+                                         damage.amount + damage.absorbed)
             if is_group_player(dst_flags):
                 target = get_player(dst_guid, dst_name)
                 target.damage_taken += damage.amount
@@ -301,7 +322,11 @@ def compute_stats(
             if is_hostile_npc(src_flags):
                 sp = spell_info(event)
                 if sp is not None:
-                    observe_enemy_cast(stats.enemy_heal_observations, src_guid,
+                    if name == "SPELL_PERIODIC_HEAL":
+                        observe_periodic(stats.enemy_heal_observations, sp,
+                                         heal.amount)
+                    else:
+                        observe_direct(stats.enemy_heal_observations, src_guid,
                                        sp, heal.amount, event.ts)
             source_player = resolve_source(src_guid, src_name, src_flags)
             if source_player is not None and (
@@ -386,6 +411,17 @@ def compute_stats(
 
         if name == "SPELL_AURA_APPLIED":
             sp = spell_info(event)
+            if sp is not None and is_hostile_npc(src_flags):
+                aura_kind = event.params[11] if len(event.params) > 11 else ""
+                if aura_kind == "DEBUFF" and (
+                    is_group_player(dst_flags) or is_group_owned(dst_flags)
+                ):
+                    observe_aura(stats.enemy_cast_observations, src_guid, sp,
+                                 event.ts)
+                elif aura_kind == "BUFF" and is_hostile_npc(dst_flags):
+                    # enemy buffing an ally (HoTs, empowerments): heal-side
+                    observe_aura(stats.enemy_heal_observations, src_guid, sp,
+                                 event.ts)
             if sp is not None and sp.spell_id in LUST_SPELLS and is_group_player(dst_flags):
                 if not any(
                     abs(l["ts"] - event.ts) < 1.0 and l["spell_id"] == sp.spell_id
@@ -409,22 +445,39 @@ def _estimate_kick_value(stats: RunStats) -> None:
     """Estimate the damage/healing each kick prevented.
 
     Basis: the average amount per completed cast of the interrupted spell,
-    observed elsewhere in this same run (multi-target hits within 1 s count
-    as one cast). Conservative: DoT/debuff components and casts that never
-    landed in the run contribute nothing.
+    observed elsewhere in this same run — the up-front hit plus the full
+    periodic (DoT/HoT) component per application. Multi-target hits and
+    debuff applications within 1 s count as one cast. Spells that never
+    landed in the run still contribute nothing; a debuff that carries no
+    damage at all is reported as a prevented application instead.
     """
     for obs in (stats.enemy_cast_observations, stats.enemy_heal_observations):
         for entry in obs.values():
-            entry["avg"] = round(entry["total"] / entry["instances"]) \
-                if entry["instances"] else 0
+            direct_casts = entry["direct_casts"]
+            # ticks seen without any observed aura application (e.g. applied
+            # before the run slice) fall back to the direct-cast count
+            dot_casts = entry["dot_casts"] or direct_casts
+            avg_direct = entry["direct_total"] / direct_casts if direct_casts else 0
+            avg_dot = entry["dot_total"] / dot_casts if dot_casts else 0
+            entry["avg_direct"] = round(avg_direct)
+            entry["avg_dot"] = round(avg_dot)
+            entry["avg"] = round(avg_direct + avg_dot)
+            entry["observed_casts"] = max(direct_casts, entry["dot_casts"])
 
     for ev in stats.interrupt_events:
         spell_id = ev.get("interrupted_spell_id")
         dmg = stats.enemy_cast_observations.get(spell_id) if spell_id else None
         heal = stats.enemy_heal_observations.get(spell_id) if spell_id else None
-        ev["estimated_prevented_damage"] = dmg["avg"] if dmg else None
-        ev["estimated_prevented_healing"] = heal["avg"] if heal else None
-        ev["observed_casts"] = (dmg or heal or {}).get("instances", 0)
+        ev["estimated_prevented_damage"] = (dmg["avg"] or None) if dmg else None
+        ev["estimated_prevented_healing"] = (heal["avg"] or None) if heal else None
+        ev["prevented_dot_damage"] = dmg["avg_dot"] if dmg else 0
+        ev["observed_casts"] = (dmg or heal or {}).get("observed_casts", 0)
+        # a zero-damage debuff (CC, snare, heal absorb...): no number to put
+        # on it, but the kick still visibly prevented an application
+        ev["prevented_debuff_applications"] = (
+            dmg["aura_applications"]
+            if dmg and not dmg["avg"] and dmg["aura_applications"] else 0
+        )
         player = stats.players.get(ev.get("player_guid", ""))
         if player is not None:
             player.kick_prevented_damage += (dmg or {}).get("avg") or 0
