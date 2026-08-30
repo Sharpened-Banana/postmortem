@@ -158,6 +158,9 @@ class RunStats:
     encounters: list[dict[str, Any]] = field(default_factory=list)
     consumable_events: list[dict[str, Any]] = field(default_factory=list)
     buff_uptimes: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    # guid -> [[t, x, y, ui_map_id], ...], t relative to run start. Sampled
+    # from SPELL_CAST_SUCCESS and (for near-death coverage) damage-taken
+    # advanced blocks; throttled to >=2s between samples per guid.
     position_samples: dict[str, list[list[float]]] = field(default_factory=dict)
 
 
@@ -236,6 +239,7 @@ def compute_stats(
     # (player_guid, spell_id) -> [[start, end_or_None], ...]
     defensive_windows: dict[tuple[str, int], list[list[Optional[float]]]] = {}
     last_position: dict[str, tuple[float, float, float]] = {}  # guid -> (ts, x, y)
+    last_sample_ts: dict[str, float] = {}  # guid -> absolute ts of last position_samples entry
     open_encounter: Optional[dict[str, Any]] = None
     boss_npc_ids: set[int] = (
         {e.npc_id for e in data.enemies if e.is_boss} if data is not None else set()
@@ -253,24 +257,30 @@ def compute_stats(
         })
         entry[outcome] += 1
 
-    def track_movement(guid: str, ts: float, x: float, y: float) -> None:
+    def track_movement(guid: str, ts: float, x: float, y: float, ui_map_id: int) -> None:
         prev = last_position.get(guid)
         if prev is not None:
-            dt = ts - prev[0]
             dist = ((x - prev[1]) ** 2 + (y - prev[2]) ** 2) ** 0.5
             # ignore teleports/graveyard runs masquerading as sprints
             if dist < 150:
                 player = stats.players.get(guid)
                 if player is not None:
                     player.distance_traveled += dist
-            samples = stats.position_samples.setdefault(guid, [])
-            if not samples or ts - samples[-1][0] >= 2.0:
-                samples.append([round(ts - run_start_ts, 1), round(x, 1), round(y, 1)])
-        else:
-            stats.position_samples.setdefault(guid, []).append(
-                [round(ts - run_start_ts, 1), round(x, 1), round(y, 1)]
-            )
         last_position[guid] = (ts, x, y)
+
+        # Minimum 2.0s between recorded samples. Both sides of this must be
+        # the same (absolute) timescale -- comparing this call's absolute
+        # `ts` against the run-relative value already stored in a sample
+        # (as this used to do) makes the gap trivially large every time,
+        # so the throttle silently never throttles. last_sample_ts tracks
+        # the absolute ts of the last *recorded* sample per guid instead.
+        last_sample_at = last_sample_ts.get(guid)
+        if last_sample_at is not None and ts - last_sample_at < 2.0:
+            return
+        last_sample_ts[guid] = ts
+        stats.position_samples.setdefault(guid, []).append(
+            [round(ts - run_start_ts, 1), round(x, 1), round(y, 1), ui_map_id]
+        )
 
     def get_player(guid: str, name: str = "") -> PlayerStats:
         p = stats.players.get(guid)
@@ -424,6 +434,14 @@ def compute_stats(
                 hp_left = None
                 if adv is not None and adv.info_guid == dst_guid:
                     hp_left = adv.current_hp
+                    # the victim's own position is in the advanced block of
+                    # every hit against them "for free" -- including the
+                    # killing blow, so a death now has a nearby position
+                    # sample even though it isn't a cast (see WP-A4: this
+                    # is what powers the map overlay's death markers).
+                    if adv.pos_x or adv.pos_y:
+                        track_movement(dst_guid, event.ts, adv.pos_x, adv.pos_y,
+                                       adv.ui_map_id)
                 buf.append({
                     "ts": event.ts,
                     "spell": sp.spell_name if sp else "Melee",
@@ -531,7 +549,7 @@ def compute_stats(
             source_player.casts_total += 1
             if adv is not None and adv.info_guid == src_guid \
                     and src_guid.startswith("Player-") and (adv.pos_x or adv.pos_y):
-                track_movement(src_guid, event.ts, adv.pos_x, adv.pos_y)
+                track_movement(src_guid, event.ts, adv.pos_x, adv.pos_y, adv.ui_map_id)
             lowered = sp.spell_name.lower()
             if "potion" in lowered:
                 source_player.potions_used += 1

@@ -9,6 +9,7 @@ from ..mdt.dungeon_data import DungeonData, DungeonDataStore
 from ..mdt.route import Route
 from .avoidable import AvoidableData
 from .compare import compare_route
+from .mapping import build_map_report
 from .pulls import detect_pulls
 from .stats import compute_stats
 
@@ -250,6 +251,13 @@ def analyze_run(
                          "`mythic-analyzer extract-data` and pass --dungeon-data "
                          "to resolve planned pulls to NPCs"
             }
+
+    if data is not None:
+        player_names = {g: (p.name or g) for g, p in stats.players.items()}
+        report["map"] = build_map_report(
+            data, route, report.get("comparison"), pulls,
+            stats.position_samples, player_names, stats.deaths, start,
+        )
 
     for key in ("pulls", "deaths", "interrupts", "dispels", "lust", "brez",
                 "cast_timeline", "consumables"):
