@@ -156,23 +156,36 @@ class TestStats:
         tank = by_name["Thicktank-Area52"]
         assert tank.kick_prevented_damage == 200000
         assert tank.kick_prevented_healing == 0
-        # DPS kicked an enemy heal observed once (80k) and one unknown spell
+        # DPS kicked an enemy heal observed once (80k), one unknown spell,
+        # and a zero-damage debuff
         dps = by_name["Zappyboi-Area52"]
-        assert dps.interrupts == 2
+        assert dps.interrupts == 3
         assert dps.kick_prevented_healing == 80000
         assert dps.kick_prevented_damage == 0
+        # HEALER kicked the pure-DoT Creeping Rot: 3 ticks x 15k, 1 application
+        healer = by_name["Bigheals-Area52"]
+        assert healer.kick_prevented_damage == 45000
 
         events = {e["interrupted_spell"]: e for e in stats.interrupt_events}
         dark_bolt = events["Dark Bolt"]
         assert dark_bolt["estimated_prevented_damage"] == 200000
+        assert dark_bolt["prevented_dot_damage"] == 0
         assert dark_bolt["observed_casts"] == 2
+        rot = events["Creeping Rot"]
+        assert rot["estimated_prevented_damage"] == 45000
+        assert rot["prevented_dot_damage"] == 45000
+        assert rot["observed_casts"] == 1
         mending = events["Void Mending"]
         assert mending["estimated_prevented_healing"] == 80000
         assert mending["estimated_prevented_damage"] is None
+        hex_kick = events["Nasty Hex"]
+        assert hex_kick["estimated_prevented_damage"] is None
+        assert hex_kick["prevented_debuff_applications"] == 1
         mystery = events["Mystery Bolt"]
         assert mystery["estimated_prevented_damage"] is None
         assert mystery["estimated_prevented_healing"] is None
         assert mystery["observed_casts"] == 0
+        assert mystery["prevented_debuff_applications"] == 0
 
     def test_downtime(self, stats):
         gaps = {(w["after_pull"], w["before_pull"]): w["seconds"] for w in stats.downtime}
@@ -198,12 +211,18 @@ class TestAnalyzeRun:
         assert players["Zappyboi-Area52"]["dps"] > 0
         assert players["Thicktank-Area52"]["role"] == "tank"
         kicks = payload["kick_value"]
-        assert kicks["total_estimated_prevented_damage"] == 200000
+        assert kicks["total_estimated_prevented_damage"] == 245000
         assert kicks["total_estimated_prevented_healing"] == 80000
         assert kicks["by_player"][0]["name"] == "Thicktank-Area52"
         obs = {(o["spell_id"], o["kind"]): o for o in kicks["spell_observations"]}
         assert obs[(1216538, "damage")]["avg_per_cast"] == 200000
         assert obs[(888001, "healing")]["observed_casts"] == 1
+        rot_obs = obs[(777001, "damage")]
+        assert rot_obs["avg_per_cast"] == 45000
+        assert rot_obs["avg_dot"] == 45000 and rot_obs["avg_direct"] == 0
+        hex_obs = obs[(777002, "damage")]
+        assert hex_obs["avg_per_cast"] == 0
+        assert hex_obs["debuff_applications"] == 1
 
     def test_report_without_dungeon_data(self, run_segment, route):
         report = analyze_run(run_segment, route=route, store=None)
@@ -223,6 +242,8 @@ class TestAnalyzeRun:
         assert "OFF-ROUTE: 1x Shadeling" in text
         assert "~200.0k dmg prevented" in text
         assert "~80.0k healing prevented" in text
+        assert "~45.0k dmg (45.0k of it DoT) prevented" in text
+        assert "a debuff application (seen 1x elsewhere, no damage)" in text
         assert "never landed" in text  # Mystery Bolt kick has no estimate
         html = render_html(report)
         assert "<html" in html and "Murder Row" in html

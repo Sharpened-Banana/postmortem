@@ -148,11 +148,22 @@ def render_text(report: dict[str, Any]) -> str:
             est_h = i.get("estimated_prevented_healing")
             what = []
             if est:
-                what.append(f"~{_fmt_num(est)} dmg")
+                dot = i.get("prevented_dot_damage") or 0
+                dot_s = f" ({_fmt_num(dot)} of it DoT)" if dot else ""
+                what.append(f"~{_fmt_num(est)} dmg{dot_s}")
             if est_h:
                 what.append(f"~{_fmt_num(est_h)} healing")
-            basis = (f" (avg of {i['observed_casts']} landed casts)"
-                     if i.get("observed_casts") else " (never landed — no estimate)")
+            if i.get("prevented_debuff_applications"):
+                what.append(
+                    f"a debuff application (seen "
+                    f"{i['prevented_debuff_applications']}x elsewhere, no damage)"
+                )
+            if est or est_h:
+                basis = f" (avg of {i['observed_casts']} landed casts)"
+            elif i.get("prevented_debuff_applications"):
+                basis = ""
+            else:
+                basis = " (never landed — no estimate)"
             add(f"    {_fmt_time(i.get('t'))}  {i['player']} kicked "
                 f"{i.get('interrupted_spell') or '?'} on {i['target']}"
                 + (f": {' + '.join(what)} prevented{basis}" if what else basis))

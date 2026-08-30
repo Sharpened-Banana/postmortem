@@ -28,13 +28,16 @@ def _kick_value_summary(stats) -> dict[str, Any]:
         for kind, obs in (("damage", stats.enemy_cast_observations),
                           ("healing", stats.enemy_heal_observations)):
             entry = obs.get(spell_id)
-            if entry and entry["instances"]:
+            if entry and (entry["observed_casts"] or entry["aura_applications"]):
                 observations.append({
                     "spell_id": spell_id,
                     "name": entry["name"],
                     "kind": kind,
-                    "observed_casts": entry["instances"],
+                    "observed_casts": entry["observed_casts"],
                     "avg_per_cast": entry["avg"],
+                    "avg_direct": entry["avg_direct"],
+                    "avg_dot": entry["avg_dot"],
+                    "debuff_applications": entry["aura_applications"],
                 })
     by_player = [
         {
@@ -50,8 +53,10 @@ def _kick_value_summary(stats) -> dict[str, Any]:
                                    + e["estimated_prevented_healing"]))
     return {
         "note": "estimates: average observed amount per completed cast of the "
-                "interrupted spell in this run; DoT components and spells that "
-                "never landed count as 0",
+                "interrupted spell in this run, including its periodic "
+                "(DoT/HoT) component per application; spells that never "
+                "landed count as 0, zero-damage debuffs are reported as "
+                "prevented applications",
         "total_estimated_prevented_damage": sum(
             e["estimated_prevented_damage"] for e in by_player
         ),

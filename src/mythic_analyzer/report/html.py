@@ -268,10 +268,14 @@ function utility() {
   (R.brez||[]).forEach(b => rows.push([b.t, "Battle res", `${esc(b.player)} → ${esc(b.target || "?")} (${esc(b.spell)})`, b.pull]));
   (R.interrupts||[]).forEach(i => {
     const est = [];
-    if (i.estimated_prevented_damage) est.push(`~${num(i.estimated_prevented_damage)} dmg`);
+    if (i.estimated_prevented_damage) {
+      const dot = i.prevented_dot_damage ? ` (${num(i.prevented_dot_damage)} DoT)` : "";
+      est.push(`~${num(i.estimated_prevented_damage)} dmg${dot}`);
+    }
     if (i.estimated_prevented_healing) est.push(`~${num(i.estimated_prevented_healing)} healing`);
+    if (i.prevented_debuff_applications) est.push(`a debuff (seen ${i.prevented_debuff_applications}x, no dmg)`);
     const suffix = est.length
-      ? ` — <span class="ok" title="average of ${i.observed_casts} landed casts of this spell in this run">${est.join(" + ")} prevented</span>`
+      ? ` — <span class="ok" title="average per completed cast (direct + periodic) over ${i.observed_casts} observed casts in this run">${est.join(" + ")} prevented</span>`
       : ' — <span class="dim">no landed casts to estimate from</span>';
     rows.push([i.t, "Interrupt", `${esc(i.player)} kicked ${esc(i.interrupted_spell || "?")} on ${esc(i.target)}${suffix}`, i.pull]);
   });
