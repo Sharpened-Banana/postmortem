@@ -6,8 +6,9 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 
+from .analysis.avoidable import AvoidableData
 from .analysis.run_analyzer import analyze_run
 from .combatlog.parser import parse_file
 from .combatlog.segmenter import RunSegment, segment_runs
@@ -42,18 +43,72 @@ def _load_store(path: Optional[str]) -> Optional[DungeonDataStore]:
         raise SystemExit(f"error: could not load dungeon data {path}: {exc}")
 
 
-def _pick_run(segments: list[RunSegment], selector: str) -> RunSegment:
-    if not segments:
+def _load_avoidable(path: Optional[str]) -> Optional[AvoidableData]:
+    """Load --avoidable-data. Like --dungeon-data, an explicitly-passed
+    path that fails to load is a clear CLI error (SystemExit) -- the user
+    typed a path, and silently ignoring a typo there would just be
+    confusing. Omitting the flag entirely just skips avoidable-damage
+    tagging (see analyze_run)."""
+    if not path:
+        return None
+    try:
+        return AvoidableData.load(path)
+    except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"error: could not load avoidable-damage data {path}: {exc}")
+
+
+def _pick_run(segments: Iterable[RunSegment], selector: str) -> RunSegment:
+    """Select one run out of a (lazy) stream of segments.
+
+    ``segments`` is driven incrementally rather than materialized up front,
+    so a log with many runs never needs to hold more than one or two
+    RunSegments' event lists in memory at a time:
+
+    - ``--run N``: stops driving the generator the moment the Nth segment
+      is yielded (later runs in the log are never parsed at all). Segments
+      passed over on the way there have their ``events`` dropped as soon
+      as they're superseded.
+    - ``'last'``: still has to consume the whole log to know which segment
+      is last, but only ever keeps the current best candidate's events —
+      each earlier candidate's events are dropped the moment a newer
+      segment arrives (this also means an abandoned run followed by a
+      real completed run still resolves to the completed one, matching
+      segment_runs's abandoned-run handling).
+    """
+    it = iter(segments)
+    try:
+        first = next(it)
+    except StopIteration:
         raise SystemExit("error: no Mythic+ runs (CHALLENGE_MODE_START) found in this log")
+
     if selector == "last":
-        return segments[-1]
+        candidate = first
+        for seg in it:
+            candidate.events = []
+            candidate = seg
+        return candidate
+
     try:
         idx = int(selector)
     except ValueError:
         raise SystemExit(f"error: --run must be a number or 'last', got {selector!r}")
-    if not 1 <= idx <= len(segments):
-        raise SystemExit(f"error: --run {idx} out of range (log has {len(segments)} runs)")
-    return segments[idx - 1]
+
+    count = 1
+    picked: Optional[RunSegment] = first if idx == count else None
+    if picked is None:
+        first.events = []
+    for seg in it:
+        count += 1
+        if count == idx:
+            picked = seg
+            break
+        seg.events = []
+    if picked is None:
+        for seg in it:  # exhaust the rest just to report an accurate total
+            count += 1
+            seg.events = []
+        raise SystemExit(f"error: --run {idx} out of range (log has {count} runs)")
+    return picked
 
 
 def cmd_import_route(args: argparse.Namespace) -> int:
@@ -96,30 +151,40 @@ def cmd_extract_data(args: argparse.Namespace) -> int:
 
 
 def cmd_runs(args: argparse.Namespace) -> int:
-    segments = list(segment_runs(parse_file(args.log)))
-    if not segments:
-        print("no Mythic+ runs found in this log")
-        return 1
-    for i, seg in enumerate(segments, start=1):
+    # Consumed one segment at a time (no list(...)): each RunSegment's
+    # events are only needed for summary() and are eligible for GC as soon
+    # as the next run starts, instead of the whole file's runs being held
+    # in memory at once.
+    found = False
+    for i, seg in enumerate(segment_runs(parse_file(args.log)), start=1):
+        found = True
         s = seg.summary()
+        seg.events = []
         state = "timed" if s["timed"] else (
             "over timer" if s["completed"] else "incomplete")
         mins = s["wall_duration_s"] / 60
         print(f"{i:>3}. {s['zone']} +{s['keystone_level']}  [{state}]"
               f"  {mins:.1f} min, {s['event_count']} events")
+    if not found:
+        print("no Mythic+ runs found in this log")
+        return 1
     return 0
 
 
 def cmd_analyze(args: argparse.Namespace) -> int:
     route = _load_route(args.route) if args.route else None
     store = _load_store(args.dungeon_data)
-    segments = list(segment_runs(parse_file(args.log)))
-    segment = _pick_run(segments, args.run)
+    avoidable = _load_avoidable(args.avoidable_data)
+    # Stream segments directly into _pick_run rather than list(...)-ing them
+    # all up front — for a numeric --run it stops parsing once the wanted
+    # run is found, and never retains other runs' event lists either way.
+    segment = _pick_run(segment_runs(parse_file(args.log)), args.run)
 
     report = analyze_run(
         segment,
         route=route,
         store=store,
+        avoidable=avoidable,
         pull_gap_seconds=args.pull_gap,
         full_cast_timeline=not args.no_cast_timeline,
         death_penalty_s=args.death_penalty,
@@ -198,6 +263,9 @@ def cmd_record(args: argparse.Namespace) -> int:
         if not args.analyze:
             return
         try:
+            # list(...) is fine here: run.path is a per-run recorded slice
+            # (Recorder opens a fresh file per CHALLENGE_MODE_START), so this
+            # never holds more than one run's events regardless.
             segments = list(segment_runs(parse_file(run.path)))
             if not segments:
                 return
@@ -256,6 +324,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="which run in the log: a number from `runs`, or 'last' (default)")
     p.add_argument("--route", help="MDT export string or file with one (intended route)")
     p.add_argument("--dungeon-data", help="extracted dungeon data JSON (see extract-data)")
+    p.add_argument("--avoidable-data",
+                   help="JSON file tagging avoidable-damage spell ids (community/"
+                        "user-maintained; see docs/avoidable_spells.example.json) "
+                        "to break out avoidable damage taken per player")
     p.add_argument("--format", default="text",
                    help="comma-separated: text,json,html (default: text)")
     p.add_argument("--out", help="directory to write reports into (default: stdout/cwd)")
