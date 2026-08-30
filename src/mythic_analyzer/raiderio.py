@@ -20,10 +20,17 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any, Callable, Iterator, Optional
+from typing import Any, Callable, Iterable, Iterator, Optional
 
 API_URL = "https://raider.io/api/v1/characters/profile"
-FIELDS = "mythic_plus_scores_by_season:current,mythic_plus_best_runs"
+# mythic_plus_recent_runs (WP-C3) is requested alongside the existing
+# fields purely additively -- one more comma-separated value in the same
+# `fields` query param the character-profile endpoint already accepts,
+# not a second HTTP call. See the "Official run matching" section below
+# for why this field (rather than a separate /mythic-plus/runs endpoint)
+# was chosen, and the same "we can't verify this against a real
+# response" caveat that applies to it.
+FIELDS = "mythic_plus_scores_by_season:current,mythic_plus_best_runs,mythic_plus_recent_runs"
 
 Fetcher = Callable[[str], Optional[dict]]
 
@@ -90,9 +97,23 @@ def enrich_report(
 ) -> int:
     """Attach a ``raiderio`` block to every resolvable player in-place.
 
+    For each player whose profile is found, also attempts to match this
+    analyzed run against that player's Raider.io "recent runs" (WP-C3,
+    see the section below) and attaches ``raiderio_run`` on a match. The
+    local run's own ``challenge_map_id``/``keystone_level``/completion
+    time are read from ``report["run"]`` (``RunSegment.summary()``'s
+    shape) rather than added as new parameters -- that dict already
+    carries everything needed. A run with no completion time (abandoned/
+    incomplete -- no ``end_ts``) or a ``report`` with no ``"run"`` key at
+    all just skips run-matching entirely; no error, no crash.
+
     Returns the number of players enriched.
     """
     enriched = 0
+    run = report.get("run") or {}
+    challenge_map_id = run.get("challenge_map_id")
+    keystone_level = run.get("keystone_level")
+    completion_ts = run.get("end_ts")
     for player in report.get("players", []):
         full_name = player.get("name") or ""
         if "-" not in full_name:
@@ -105,6 +126,21 @@ def enrich_report(
             continue
         player["raiderio"] = _summarize(profile)
         enriched += 1
+
+        if completion_ts is not None:
+            match = match_run(
+                parse_recent_runs(profile),
+                challenge_map_id=challenge_map_id,
+                keystone_level=keystone_level,
+                completion_ts=completion_ts,
+            )
+            if match is not None:
+                player["raiderio_run"] = {
+                    "score": match.get("score"),
+                    "url": match.get("url"),
+                    "level": match.get("keystone_level"),
+                    "dungeon": match.get("dungeon"),
+                }
     report["raiderio"] = {
         "region": region,
         "enriched_players": enriched,
@@ -309,3 +345,206 @@ def resolve_timer_map(
     if timers:
         return timers
     return load_fallback_timers(fallback_path)
+
+
+# --- Official run matching (WP-C3) -------------------------------------------
+#
+# The plan doc floats two possible sources for a player's "recent runs":
+# a dedicated `/api/v1/mythic-plus/runs` endpoint, or the character
+# profile's `mythic_plus_recent_runs` field. We go with the latter:
+#
+# 1. It's one more value in the `fields` query param `fetch_character`
+#    already sends -- see the FIELDS constant above -- so matching adds
+#    *zero* new HTTP calls per player, not a second one to a different
+#    endpoint.
+# 2. It rides WP-C1's disk cache for free: cache.py wraps whatever
+#    fetcher is passed to fetch_character/enrich_report, keyed off the
+#    request URL, so a cached profile fetch already carries this data
+#    with no new cache filename or invalidation logic needed.
+# 3. `mythic_plus_scores_by_season`/`mythic_plus_best_runs` (already used
+#    above) and `mythic_plus_recent_runs` are long-standing, stable,
+#    well-known field names on the real public character-profile API --
+#    unlike WP-C2's static-data endpoint (which serves this project's
+#    entirely fictional dungeons and has no real-world shape to check
+#    against), guessing that the same endpoint also accepts one more
+#    plausible field name in its existing `fields` param is a much more
+#    conservative bet than guessing at a whole second endpoint's
+#    existence, path, and payload shape.
+#
+# That said: we have *not* verified the real shape of a
+# `mythic_plus_recent_runs` entry against a live response, and this
+# project's dungeons aren't real WoW content anyway -- so, same posture
+# as WP-C2's static-data parser: ``parse_recent_runs`` below tries a
+# short list of plausible field names per value, in priority order, and
+# silently skips (never raises on) anything it doesn't recognize. An
+# entry missing what's needed to attempt a match (map id, level, or a
+# parseable completion timestamp) is dropped rather than guessed at.
+#
+# The matching logic itself (``match_run``) is the well-specified part
+# of this WP -- exact map id + keystone level, completion time within
+# window_s seconds, closest-in-time tiebreak -- and doesn't depend on
+# any of the above guesswork being correct.
+
+# Reuse WP-C2's map-id candidate keys: challenge_map_id means the same
+# thing whether it's labeling a static-data dungeon entry or a specific
+# completed run.
+_RUN_MAP_ID_KEYS = _ID_KEYS
+_RUN_LEVEL_KEYS = ("mythic_level", "keystone_level", "level")
+_RUN_COMPLETED_TS_KEYS = (
+    "completed_at", "completed_timestamp", "clear_time", "finished_at",
+    "keystone_time", "clear_at",
+)
+_RUN_SCORE_KEYS = ("score", "mythic_rating", "rating")
+_RUN_URL_KEYS = ("url",)
+_RUN_DUNGEON_KEYS = ("dungeon", "name", "short_name")
+
+# Candidate top-level keys the recent-runs list might be published
+# under in a character profile payload.
+_RECENT_RUNS_KEYS = ("mythic_plus_recent_runs", "recent_runs")
+
+
+def _iter_recent_run_entries(profile: Any) -> Iterator[dict]:
+    """Yield every dict that looks like a recent-run entry from a
+    character profile payload. Never raises: a missing/renamed field, a
+    non-list value, or non-dict entries are all just skipped."""
+    if not isinstance(profile, dict):
+        return
+    for key in _RECENT_RUNS_KEYS:
+        entries = profile.get(key)
+        if isinstance(entries, list):
+            for entry in entries:
+                if isinstance(entry, dict):
+                    yield entry
+
+
+def _extract_int_field(entry: dict, keys: tuple[str, ...]) -> Optional[int]:
+    for key in keys:
+        if key in entry:
+            try:
+                return int(entry[key])
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def _extract_float_field(entry: dict, keys: tuple[str, ...]) -> Optional[float]:
+    for key in keys:
+        if key in entry:
+            try:
+                return float(entry[key])
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def _extract_str_field(entry: dict, keys: tuple[str, ...]) -> Optional[str]:
+    for key in keys:
+        value = entry.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _parse_timestamp(value: Any) -> Optional[float]:
+    """Best-effort epoch-seconds from a timestamp field of unknown shape:
+    a unix seconds/milliseconds number (or numeric string), or an
+    ISO-8601 string (``...Z`` accepted). Returns None for anything
+    unparseable -- never raises."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        ts = float(value)
+        return ts / 1000.0 if ts > 10_000_000_000 else ts
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return _parse_timestamp(float(text))
+        except ValueError:
+            pass
+        try:
+            from datetime import datetime
+            iso = text[:-1] + "+00:00" if text.endswith("Z") else text
+            return datetime.fromisoformat(iso).timestamp()
+        except ValueError:
+            return None
+    return None
+
+
+def parse_recent_runs(profile: Any) -> list[dict[str, Any]]:
+    """Best-effort list of candidate run records extracted from a
+    character profile's recent-runs field (see module notes above).
+
+    Each candidate dict carries ``challenge_map_id``, ``keystone_level``,
+    ``completed_ts`` (epoch seconds), and best-effort ``score``/``url``/
+    ``dungeon``. An entry missing a map id, level, or parseable
+    completion timestamp -- the fields required to even attempt a match
+    -- is dropped. Never raises: an unrecognized/malformed payload
+    (missing fields, wrong types, not a list at all) just yields fewer
+    or no candidates.
+    """
+    out: list[dict[str, Any]] = []
+    for entry in _iter_recent_run_entries(profile):
+        map_id = _extract_int_field(entry, _RUN_MAP_ID_KEYS)
+        level = _extract_int_field(entry, _RUN_LEVEL_KEYS)
+        completed_ts: Optional[float] = None
+        for key in _RUN_COMPLETED_TS_KEYS:
+            if key in entry:
+                completed_ts = _parse_timestamp(entry[key])
+                if completed_ts is not None:
+                    break
+        if map_id is None or level is None or completed_ts is None:
+            continue
+        out.append({
+            "challenge_map_id": map_id,
+            "keystone_level": level,
+            "completed_ts": completed_ts,
+            "score": _extract_float_field(entry, _RUN_SCORE_KEYS),
+            "url": _extract_str_field(entry, _RUN_URL_KEYS),
+            "dungeon": _extract_str_field(entry, _RUN_DUNGEON_KEYS),
+        })
+    return out
+
+
+def match_run(
+    candidates: Iterable[dict[str, Any]],
+    *,
+    challenge_map_id: Optional[int],
+    keystone_level: Optional[int],
+    completion_ts: Optional[float],
+    window_s: float = 600,
+) -> Optional[dict[str, Any]]:
+    """Pick the candidate run record matching a local run.
+
+    A candidate qualifies when its ``challenge_map_id`` and
+    ``keystone_level`` match exactly and its ``completed_ts`` is within
+    ``window_s`` seconds of ``completion_ts`` (either direction). When
+    more than one candidate qualifies, the closest in time wins.
+
+    Returns ``None`` -- never raises -- when there's nothing to match
+    against (``challenge_map_id``/``keystone_level``/``completion_ts``
+    missing, as for an incomplete/abandoned local run with no completion
+    time) or when no candidate qualifies.
+    """
+    if challenge_map_id is None or keystone_level is None or completion_ts is None:
+        return None
+    best: Optional[dict[str, Any]] = None
+    best_delta: Optional[float] = None
+    for cand in candidates:
+        if not isinstance(cand, dict):
+            continue
+        if cand.get("challenge_map_id") != challenge_map_id:
+            continue
+        if cand.get("keystone_level") != keystone_level:
+            continue
+        cts = cand.get("completed_ts")
+        if not isinstance(cts, (int, float)):
+            continue
+        delta = abs(cts - completion_ts)
+        if delta > window_s:
+            continue
+        if best is None or delta < best_delta:
+            best = cand
+            best_delta = delta
+    return best
