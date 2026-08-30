@@ -1,6 +1,7 @@
 """Pull detection, route comparison and stats on the synthetic run."""
 
 import json
+from pathlib import Path
 
 import pytest
 from conftest import (
@@ -9,6 +10,7 @@ from conftest import (
     DUSKBLADE,
     FELWYRM,
     HEALER,
+    LogBuilder,
     ROUTE_PRESET,
     SHADELING,
     SUMMONED,
@@ -16,6 +18,7 @@ from conftest import (
     build_run_log,
 )
 
+from mythic_analyzer.analysis.avoidable import AvoidableData
 from mythic_analyzer.analysis.compare import compare_route
 from mythic_analyzer.analysis.pulls import ActualPull, UnitEngagement, detect_pulls
 from mythic_analyzer.analysis.run_analyzer import analyze_run
@@ -292,6 +295,7 @@ class TestStats:
         assert death.player_name == "Bigheals-Area52"
         assert death.pull_index == 2
         assert death.killing_blow["spell"] == "Dark Bolt"
+        assert death.killing_blow["spell_id"] == 1216538
         assert death.killing_blow["amount"] == 250000
         assert death.killing_blow["hp_after"] == 0
 
@@ -486,3 +490,193 @@ class TestAnalyzeRun:
         html = render_html(report)
         assert "<html" in html and "Murder Row" in html
         assert "</script>" in html
+        # no --avoidable-data passed: no section in either renderer (the
+        # HTML template's JS source always defines avoidableDamage(), but
+        # without avoidable_damage data in the embedded JSON it renders "")
+        assert "AVOIDABLE DAMAGE" not in text
+        assert '"avoidable_damage"' not in html
+
+
+class TestAvoidableDataLoad:
+    """AvoidableData.load: schema parsing, with and without 'dungeons'."""
+
+    def test_loads_example_schema(self, tmp_path):
+        path = tmp_path / "avoidable.json"
+        path.write_text(json.dumps({
+            "spells": [
+                {"id": 1216538, "name": "Dark Bolt", "note": "easily dodged"},
+            ],
+            "dungeons": {"160": [1216538]},
+        }), encoding="utf-8")
+        data = AvoidableData.load(path)
+        assert data.spells[1216538] == {"name": "Dark Bolt", "note": "easily dodged"}
+        assert data.dungeons == {160: {1216538}}
+
+    def test_loads_without_dungeons_key(self, tmp_path):
+        path = tmp_path / "avoidable.json"
+        path.write_text(json.dumps({
+            "spells": [{"id": 1216538, "name": "Dark Bolt"}],
+        }), encoding="utf-8")
+        data = AvoidableData.load(path)
+        assert data.spells[1216538]["name"] == "Dark Bolt"
+        assert data.spells[1216538]["note"] is None
+        assert data.dungeons == {}
+
+    def test_loads_the_shipped_example_file(self):
+        example = Path(__file__).resolve().parents[1] / "docs" / "avoidable_spells.example.json"
+        data = AvoidableData.load(example)
+        assert 1216538 in data.spells
+        assert data.spells[1216538]["name"] == "Dark Bolt"
+        assert data.dungeons.get(160) == {1216538}
+
+    def test_missing_file_raises(self, tmp_path):
+        with pytest.raises(OSError):
+            AvoidableData.load(tmp_path / "does-not-exist.json")
+
+    def test_malformed_json_raises(self, tmp_path):
+        path = tmp_path / "bad.json"
+        path.write_text("{not valid json", encoding="utf-8")
+        with pytest.raises(json.JSONDecodeError):
+            AvoidableData.load(path)
+
+    def test_missing_spells_key_raises(self, tmp_path):
+        path = tmp_path / "bad.json"
+        path.write_text(json.dumps({"dungeons": {}}), encoding="utf-8")
+        with pytest.raises(KeyError):
+            AvoidableData.load(path)
+
+
+class TestAvoidableDamage:
+    """Avoidable-damage tagging: PlayerStats totals/hits, the full report
+    block, and the top-15-truncation regression the WP brief calls out."""
+
+    DARK_BOLT = 1216538
+    LOW_FREQ_SPELL = 900001
+
+    @pytest.fixture()
+    def avoidable(self) -> AvoidableData:
+        return AvoidableData(spells={
+            self.DARK_BOLT: {"name": "Dark Bolt", "note": "test fixture"},
+        })
+
+    def test_player_totals_and_hits(self, run_segment, dungeon, avoidable):
+        pulls = detect_pulls(run_segment.events)
+        stats = compute_stats(run_segment.events, pulls, dungeon, avoidable=avoidable)
+        by_name = {p.name: p for p in stats.players.values()}
+
+        healer = by_name["Bigheals-Area52"]
+        # Dark Bolt hit the healer twice: 150000 (t=64) and 250000 (t=66)
+        assert healer.avoidable_damage_taken == 400000
+        assert healer.avoidable_hits == 2
+        assert healer.damage_taken_hits_by_spell[(self.DARK_BOLT, "Dark Bolt")] == 2
+
+        # players never hit by a tagged spell stay at zero
+        tank = by_name["Thicktank-Area52"]
+        assert tank.avoidable_damage_taken == 0
+        assert tank.avoidable_hits == 0
+
+    def test_hit_counter_tracks_all_damage_taken_spells(self, run_segment, dungeon):
+        # damage_taken_hits_by_spell is populated regardless of tagging
+        pulls = detect_pulls(run_segment.events)
+        stats = compute_stats(run_segment.events, pulls, dungeon)
+        healer = next(p for p in stats.players.values() if p.name == "Bigheals-Area52")
+        assert healer.damage_taken_hits_by_spell[(1216538, "Dark Bolt")] == 2
+
+    def test_no_avoidable_data_leaves_players_untouched(self, run_segment, dungeon):
+        pulls = detect_pulls(run_segment.events)
+        stats = compute_stats(run_segment.events, pulls, dungeon)
+        for p in stats.players.values():
+            assert p.avoidable_damage_taken == 0
+            assert p.avoidable_hits == 0
+
+    def test_full_report_json_roundtrip(self, run_segment, route, dungeon_data_file, avoidable):
+        store = DungeonDataStore.load(dungeon_data_file)
+        report = analyze_run(run_segment, route=route, store=store, avoidable=avoidable)
+        payload = json.loads(json.dumps(report))
+
+        block = payload["avoidable_damage"]
+        assert block["tagged_spell_count"] == 1
+        assert block["total_damage"] == 400000
+        by_player = {e["name"]: e for e in block["by_player"]}
+        assert by_player["Bigheals-Area52"]["avoidable_damage_taken"] == 400000
+        assert by_player["Bigheals-Area52"]["avoidable_hits"] == 2
+        (spell,) = by_player["Bigheals-Area52"]["by_spell"]
+        assert spell == {"spell_id": 1216538, "name": "Dark Bolt",
+                          "amount": 400000, "hits": 2}
+        assert "Thicktank-Area52" not in by_player  # untouched players are omitted
+
+        # per-player flat field on the player summary too
+        players = {p["name"]: p for p in payload["players"]}
+        assert players["Bigheals-Area52"]["avoidable_damage_taken"] == 400000
+        assert players["Thicktank-Area52"]["avoidable_damage_taken"] == 0
+
+    def test_no_flag_omits_report_block(self, run_segment, route, dungeon_data_file):
+        store = DungeonDataStore.load(dungeon_data_file)
+        report = analyze_run(run_segment, route=route, store=store)
+        assert "avoidable_damage" not in report
+
+    def test_truncated_top15_does_not_hide_tagged_spell(self):
+        """Regression test for the top_damage_taken truncation gap: a
+        player takes damage from 15 high-damage spells plus one low-damage
+        *tagged* spell. summary()'s top_damage_taken (top 15) must exclude
+        the low-damage one, while avoidable-damage tagging -- which reads
+        the full damage_taken_by_spell Counter -- must still catch it."""
+        b = LogBuilder()
+        npc = b.npc_guid(FELWYRM, "0001")
+        b.start(0)
+        b.combatant(0.5, TANK)
+        for i in range(15):
+            b.npc_damage(10 + i, npc, "Felwyrm", TANK, 800000 + i, f"Big Hit {i}", 100000)
+        b.npc_damage(30, npc, "Felwyrm", TANK, self.LOW_FREQ_SPELL, "Sneaky Puddle", 1)
+        b.npc_damage(31, npc, "Felwyrm", TANK, self.LOW_FREQ_SPELL, "Sneaky Puddle", 2)
+        b.end(40)
+
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        pulls = detect_pulls(run.events)
+        avoidable = AvoidableData(spells={
+            self.LOW_FREQ_SPELL: {"name": "Sneaky Puddle", "note": None},
+        })
+        stats = compute_stats(run.events, pulls, avoidable=avoidable)
+        tank = next(p for p in stats.players.values() if p.name == TANK[1])
+
+        top_ids = {s["spell_id"] for s in tank.summary()["top_damage_taken"]}
+        assert len(tank.summary()["top_damage_taken"]) == 15
+        assert self.LOW_FREQ_SPELL not in top_ids  # confirms the truncation actually bites
+
+        assert tank.avoidable_damage_taken == 3
+        assert tank.avoidable_hits == 2
+
+    def test_renderers_show_section_when_present(self, run_segment, route,
+                                                  dungeon_data_file, avoidable):
+        from mythic_analyzer.report.html import render_html
+        from mythic_analyzer.report.text import render_text
+
+        store = DungeonDataStore.load(dungeon_data_file)
+        report = analyze_run(run_segment, route=route, store=store, avoidable=avoidable)
+
+        text = render_text(report)
+        assert "AVOIDABLE DAMAGE" in text
+        assert "Bigheals-Area52" in text
+        assert "Dark Bolt" in text
+
+        # the HTML report is a static JS template + an embedded JSON data
+        # payload (see render_html) -- the JS function's source text is
+        # always present in the template either way, so the meaningful
+        # presence signal is the data it reads out of, not the function.
+        html = render_html(report)
+        assert "function avoidableDamage()" in html  # the renderer exists
+        assert '"avoidable_damage"' in html           # ...and has data to render
+        assert '"Bigheals-Area52"' in html
+
+    def test_renderers_omit_section_when_absent(self, run_segment, route, dungeon_data_file):
+        from mythic_analyzer.report.html import render_html
+        from mythic_analyzer.report.text import render_text
+
+        store = DungeonDataStore.load(dungeon_data_file)
+        report = analyze_run(run_segment, route=route, store=store)
+
+        text = render_text(report)
+        assert "AVOIDABLE DAMAGE" not in text
+
+        html = render_html(report)
+        assert '"avoidable_damage"' not in html

@@ -27,6 +27,7 @@ from ..combatlog.events import (
 )
 from ..combatlog.guid import parse_guid
 from ..mdt.dungeon_data import DungeonData
+from .avoidable import AvoidableData
 from .gamedata import BREZ_SPELLS, LUST_SPELLS, spec_info
 from .pulls import ActualPull
 
@@ -66,10 +67,14 @@ class PlayerStats:
     healthstones_used: int = 0
     damage_to_bosses: int = 0
     distance_traveled: float = 0.0
+    avoidable_damage_taken: int = 0  # see avoidable.py; 0 unless --avoidable-data used
+    avoidable_hits: int = 0
     casts: Counter = field(default_factory=Counter)  # (spell_id, spell_name) -> n
     damage_by_spell: Counter = field(default_factory=Counter)
     healing_by_spell: Counter = field(default_factory=Counter)
     damage_taken_by_spell: Counter = field(default_factory=Counter)
+    # (spell_id, spell_name) -> hit count, parallel to damage_taken_by_spell
+    damage_taken_hits_by_spell: Counter = field(default_factory=Counter)
     damage_by_pull: Counter = field(default_factory=Counter)
     healing_by_pull: Counter = field(default_factory=Counter)
     damage_taken_by_pull: Counter = field(default_factory=Counter)
@@ -86,6 +91,7 @@ class PlayerStats:
             "damage_done": self.damage_done,
             "damage_overkill": self.damage_overkill,
             "damage_taken": self.damage_taken,
+            "avoidable_damage_taken": self.avoidable_damage_taken,
             "healing_done": self.healing_done,
             "overhealing": self.overhealing,
             "absorbs_granted": self.absorbs_granted,
@@ -167,6 +173,7 @@ def compute_stats(
     pulls: list[ActualPull],
     data: Optional[DungeonData] = None,
     full_cast_timeline: bool = True,
+    avoidable: Optional[AvoidableData] = None,
 ) -> RunStats:
     stats = RunStats()
     owner_map: dict[str, str] = {}
@@ -386,7 +393,13 @@ def compute_stats(
                 target.damage_taken += damage.amount
                 sp = spell_info(event)
                 key = (sp.spell_id, sp.spell_name) if sp else (0, "Melee")
+                # amount is post-absorb (what actually landed) -- see
+                # combatlog.events.parse_damage; that's the right basis for
+                # damage-taken totals (including avoidable-damage tagging),
+                # unlike the amount+absorbed basis used for enemy-cast
+                # observation above, which prices the full potential hit.
                 target.damage_taken_by_spell[key] += damage.amount
+                target.damage_taken_hits_by_spell[key] += 1
                 if pull_idx is not None:
                     target.damage_taken_by_pull[pull_idx] += damage.amount
                 if is_hostile_npc(src_flags):
@@ -397,7 +410,8 @@ def compute_stats(
                     hp_left = adv.current_hp
                 buf.append({
                     "ts": event.ts,
-                    "spell": (spell_info(event).spell_name if spell_info(event) else "Melee"),
+                    "spell": sp.spell_name if sp else "Melee",
+                    "spell_id": sp.spell_id if sp else 0,
                     "source": src_name or src_guid,
                     "amount": damage.amount,
                     "overkill": damage.overkill,
@@ -598,7 +612,27 @@ def compute_stats(
 
     _estimate_kick_value(stats)
     _finish_pull_stats(stats, pulls, data)
+    if avoidable is not None:
+        _tag_avoidable_damage(stats, avoidable)
     return stats
+
+
+def _tag_avoidable_damage(stats: RunStats, avoidable: AvoidableData) -> None:
+    """Break out each player's damage taken from spells tagged as
+    avoidable ("stand in the fire" mechanics) in the loaded avoidable-
+    damage file.
+
+    Tags from the player's full damage_taken_by_spell/
+    damage_taken_hits_by_spell Counters, not the top-15-truncated
+    top_damage_taken report field -- otherwise a low-frequency but tagged
+    spell could be silently dropped.
+    """
+    for player in stats.players.values():
+        for key, total in player.damage_taken_by_spell.items():
+            spell_id = key[0]
+            if spell_id in avoidable.spells:
+                player.avoidable_damage_taken += total
+                player.avoidable_hits += player.damage_taken_hits_by_spell[key]
 
 
 def _estimate_kick_value(stats: RunStats) -> None:

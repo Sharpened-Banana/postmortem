@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from typing import Iterable, Optional
 
+from .analysis.avoidable import AvoidableData
 from .analysis.run_analyzer import analyze_run
 from .combatlog.parser import parse_file
 from .combatlog.segmenter import RunSegment, segment_runs
@@ -40,6 +41,20 @@ def _load_store(path: Optional[str]) -> Optional[DungeonDataStore]:
         return DungeonDataStore.load(path)
     except (OSError, ValueError, KeyError) as exc:
         raise SystemExit(f"error: could not load dungeon data {path}: {exc}")
+
+
+def _load_avoidable(path: Optional[str]) -> Optional[AvoidableData]:
+    """Load --avoidable-data. Like --dungeon-data, an explicitly-passed
+    path that fails to load is a clear CLI error (SystemExit) -- the user
+    typed a path, and silently ignoring a typo there would just be
+    confusing. Omitting the flag entirely just skips avoidable-damage
+    tagging (see analyze_run)."""
+    if not path:
+        return None
+    try:
+        return AvoidableData.load(path)
+    except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"error: could not load avoidable-damage data {path}: {exc}")
 
 
 def _pick_run(segments: Iterable[RunSegment], selector: str) -> RunSegment:
@@ -159,6 +174,7 @@ def cmd_runs(args: argparse.Namespace) -> int:
 def cmd_analyze(args: argparse.Namespace) -> int:
     route = _load_route(args.route) if args.route else None
     store = _load_store(args.dungeon_data)
+    avoidable = _load_avoidable(args.avoidable_data)
     # Stream segments directly into _pick_run rather than list(...)-ing them
     # all up front — for a numeric --run it stops parsing once the wanted
     # run is found, and never retains other runs' event lists either way.
@@ -168,6 +184,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         segment,
         route=route,
         store=store,
+        avoidable=avoidable,
         pull_gap_seconds=args.pull_gap,
         full_cast_timeline=not args.no_cast_timeline,
         death_penalty_s=args.death_penalty,
@@ -307,6 +324,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="which run in the log: a number from `runs`, or 'last' (default)")
     p.add_argument("--route", help="MDT export string or file with one (intended route)")
     p.add_argument("--dungeon-data", help="extracted dungeon data JSON (see extract-data)")
+    p.add_argument("--avoidable-data",
+                   help="JSON file tagging avoidable-damage spell ids (community/"
+                        "user-maintained; see docs/avoidable_spells.example.json) "
+                        "to break out avoidable damage taken per player")
     p.add_argument("--format", default="text",
                    help="comma-separated: text,json,html (default: text)")
     p.add_argument("--out", help="directory to write reports into (default: stdout/cwd)")
