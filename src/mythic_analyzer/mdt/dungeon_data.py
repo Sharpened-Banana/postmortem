@@ -25,6 +25,17 @@ class EnemyClone:
 
 
 @dataclass
+class MapPOI:
+    """A point of interest on MDT's planning canvas (dungeon entrance, boss
+    marker, etc.) -- from ``MDT.mapPOIs[dungeonIndex]``, keyed by sublevel."""
+
+    type: str
+    x: float
+    y: float
+    size_mult: Optional[float] = None
+
+
+@dataclass
 class Enemy:
     enemy_idx: int
     npc_id: int
@@ -46,6 +57,17 @@ class DungeonData:
     zone_ids: list[int] = field(default_factory=list)
     total_count: dict[str, float] = field(default_factory=dict)
     enemies: list[Enemy] = field(default_factory=list)
+    # sublevel index -> display name (MDT.dungeonSubLevels). Every current-
+    # season dungeon has exactly one sublevel; carried through rather than
+    # discarded, but no multi-floor UI is built on top of it (yet).
+    sublevels: dict[int, str] = field(default_factory=dict)
+    # sublevel index -> map texture path (MDT.dungeonMaps). Not renderable
+    # in an HTML report (it's a WoW client texture path, not an image asset
+    # we have access to) -- kept only so extraction round-trips it.
+    map_textures: dict[int, str] = field(default_factory=dict)
+    # sublevel index -> POIs on that sublevel (MDT.mapPOIs): dungeon
+    # entrance, boss markers, etc.
+    pois: dict[int, list[MapPOI]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._by_index = {e.enemy_idx: e for e in self.enemies}
@@ -93,6 +115,30 @@ class DungeonData:
                     clones=clones,
                 )
             )
+        sublevels = {
+            int(k): str(v) for k, v in (d.get("sublevels") or {}).items()
+            if str(k).lstrip("-").isdigit()
+        }
+        map_textures = {
+            int(k): str(v) for k, v in (d.get("map_textures") or {}).items()
+            if str(k).lstrip("-").isdigit()
+        }
+        pois: dict[int, list[MapPOI]] = {}
+        for k, entries in (d.get("pois") or {}).items():
+            if not str(k).lstrip("-").isdigit() or not isinstance(entries, list):
+                continue
+            parsed = [
+                MapPOI(
+                    type=str(e.get("type") or "unknown"),
+                    x=float(e.get("x", 0.0)),
+                    y=float(e.get("y", 0.0)),
+                    size_mult=e.get("size_mult"),
+                )
+                for e in entries if isinstance(e, dict)
+            ]
+            if parsed:
+                pois[int(k)] = parsed
+
         return cls(
             dungeon_idx=int(d["dungeon_idx"]),
             name=str(d.get("name") or f"dungeon:{d['dungeon_idx']}"),
@@ -101,6 +147,9 @@ class DungeonData:
             zone_ids=[int(z) for z in d.get("zone_ids", [])],
             total_count={str(k): float(v) for k, v in (d.get("total_count") or {}).items()},
             enemies=enemies,
+            sublevels=sublevels,
+            map_textures=map_textures,
+            pois=pois,
         )
 
 

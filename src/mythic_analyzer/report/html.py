@@ -70,6 +70,9 @@ summary { cursor: pointer; }
 .legend { font-size: 12px; color: var(--dim); margin-top: 6px; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px;
   margin: 0 4px 0 12px; vertical-align: -1px; }
+.map-wrap { padding: 0; }
+.map-wrap svg { display: block; width: 100%; height: auto; max-height: 560px;
+  background: var(--panel2); }
 </style>
 </head>
 <body>
@@ -122,6 +125,7 @@ function render() {
   html += avoidableDamage();
   if (R.comparison && !R.comparison.error) html += comparison();
   else if (R.route) html += `<h2>Route</h2><div class="dim">${esc((R.comparison||{}).error || "")}</div>` + routeOnly();
+  html += mapSection();
   html += pullsTable();
   html += enemyCasts();
   html += encounters();
@@ -253,6 +257,70 @@ function routeOnly() {
     ${R.route.pulls.map(p => `<tr><td class="num">${p.pull}</td>
       <td class="num">${p.forces ?? ""}${p.forces_pct_cumulative != null ? ` <span class="dim">(${p.forces_pct_cumulative}%)</span>` : ""}</td>
       <td>${npcs(p.enemies || [])}</td></tr>`).join("")}</table></div>`;
+}
+
+function mapSection() {
+  const m = R.map;
+  if (!m || !(m.enemies||[]).length) return "";
+  const b = m.bounds;
+  const w = (b.max_x - b.min_x) || 1, h = (b.max_y - b.min_y) || 1;
+  // Per-plan-pull colors are generated (not drawn from the theme's small
+  // fixed --good/--bad/--warn/--blue/--accent set) since a route can have
+  // far more pulls than that set has entries; the lightness/saturation is
+  // chosen to sit in the same range as those vars so dots read consistently
+  // against the existing dark panel background.
+  const pullColor = i => i == null ? "var(--dim)" : `hsl(${(i * 63) % 360},65%,62%)`;
+  const playerColor = i => ["var(--blue)","var(--accent)","var(--good)","var(--warn)",
+    "#c774e8","#4fd1c5"][i % 6];
+
+  const pois = (m.pois||[]).map(p => {
+    const s = Math.max(w, h) * 0.02 * (p.size_mult || 1);
+    return `<rect x="${(p.x - s/2).toFixed(1)}" y="${(p.y - s/2).toFixed(1)}"
+      width="${s.toFixed(1)}" height="${s.toFixed(1)}" transform="rotate(45 ${p.x} ${p.y})"
+      fill="var(--warn)" stroke="var(--bg)" stroke-width="1"><title>${esc(p.type)}</title></rect>`;
+  }).join("");
+
+  const enemyDots = m.enemies.map(e => {
+    const fill = pullColor(e.plan_pull);
+    const r = (e.is_boss ? 1.8 : 1.0) * Math.max(w, h) * 0.01;
+    // deviated pulls get a dashed red ring in addition to their fill color
+    // -- a shape/stroke distinction, not just a color swap, so it stays
+    // legible for anyone not distinguishing hues easily.
+    const stroke = e.deviated
+      ? `stroke="var(--bad)" stroke-width="${(r*0.5).toFixed(2)}" stroke-dasharray="${(r*0.6).toFixed(2)},${(r*0.4).toFixed(2)}"`
+      : `stroke="#00000066" stroke-width="${(r*0.15).toFixed(2)}"`;
+    const tip = `${e.name}${e.plan_pull != null ? " — plan #" + e.plan_pull : " — not in route"}`
+      + (e.deviated ? " (deviation)" : "");
+    return `<circle cx="${e.x}" cy="${e.y}" r="${r.toFixed(2)}" fill="${fill}" ${stroke}>` +
+      `<title>${esc(tip)}</title></circle>`;
+  }).join("");
+
+  const calibrated = m.calibration && m.calibration.ok;
+  let paths = "", deathMarks = "";
+  if (calibrated) {
+    paths = (m.players||[]).map((p, i) => {
+      const pts = p.path.map(pt => `${pt[1]},${pt[2]}`).join(" ");
+      return `<polyline points="${pts}" fill="none" stroke="${playerColor(i)}"
+        stroke-width="${(Math.max(w, h) * 0.004).toFixed(2)}" stroke-linejoin="round"
+        opacity="0.8"><title>${esc(p.name)}'s path</title></polyline>`;
+    }).join("");
+    const s = Math.max(w, h) * 0.014;
+    deathMarks = (m.deaths||[]).map(d => `<g stroke="var(--bad)" stroke-width="${(s*0.35).toFixed(2)}">
+        <line x1="${(d.x-s).toFixed(1)}" y1="${(d.y-s).toFixed(1)}" x2="${(d.x+s).toFixed(1)}" y2="${(d.y+s).toFixed(1)}" />
+        <line x1="${(d.x-s).toFixed(1)}" y1="${(d.y+s).toFixed(1)}" x2="${(d.x+s).toFixed(1)}" y2="${(d.y-s).toFixed(1)}" />
+        <title>${esc(d.player)} died here (${mmss(d.t)})</title></g>`).join("");
+  }
+
+  const note = calibrated ? "" : `<div class="dim">No player-path overlay: ${
+    esc((m.calibration||{}).reason || "not attempted")}.</div>`;
+
+  return `<h2>Route map</h2><div class="wrap map-wrap">
+    <svg viewBox="${b.min_x} ${b.min_y} ${w} ${h}" preserveAspectRatio="xMidYMid meet">
+      ${pois}${enemyDots}${paths}${deathMarks}
+    </svg></div>${note}
+    <div class="legend">dot = planned enemy (color = plan pull; dashed red ring = route deviation)
+      <i style="background:var(--warn)"></i>POI (entrance / marker)
+      ${calibrated ? '<i style="background:var(--bad)"></i>death (×) · colored lines = player paths' : ""}</div>`;
 }
 
 function pullsTable() {

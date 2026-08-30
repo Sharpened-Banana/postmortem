@@ -31,6 +31,15 @@ class TestExtractor:
           MDT.zoneIdToDungeonIdx[zone] = dungeonIndex
         end
         MDT.dungeonTotalCount[dungeonIndex] = { normal = 655 }
+        MDT.dungeonSubLevels[dungeonIndex] = { [1] = "Murder Row" }
+        MDT.dungeonMaps[dungeonIndex] = {
+          [1] = { customTextures = 'Interface\\\\AddOns\\\\'..addonName..'\\\\MurderRow' },
+        }
+        MDT.mapPOIs[dungeonIndex] = {
+          [1] = {
+            [1] = { type = "dungeonEntrance", x = 779.77, y = -509.6, sizeMult = 1.5 },
+          },
+        }
         MDT.dungeonEnemies[dungeonIndex] = {
           [1] = {
             ["name"] = "Felwyrm",
@@ -70,6 +79,32 @@ class TestExtractor:
         assert felwyrm["creature_type"] == "Beast"
         assert len(felwyrm["clones"]) == 2
         assert data["enemies"][1]["is_boss"] is True
+        assert data["sublevels"] == {"1": "Murder Row"}
+        assert data["map_textures"]["1"].endswith("MurderRow")
+        assert data["pois"] == {
+            "1": [{"type": "dungeonEntrance", "x": 779.77, "y": -509.6, "size_mult": 1.5}]
+        }
+
+    def test_missing_optional_tables_dont_break_extraction(self, tmp_path):
+        # dungeonSubLevels/dungeonMaps/mapPOIs missing entirely (shouldn't
+        # normally happen, but tolerant parsing is the whole ethos here) --
+        # the rest of the dungeon should still extract cleanly.
+        lua = textwrap.dedent("""
+        local dungeonIndex = 161
+        MDT.dungeonList[dungeonIndex] = "No Extras"
+        MDT.dungeonEnemies[dungeonIndex] = {
+          [1] = { ["name"] = "Lonely Mob", ["id"] = 1, ["count"] = 1,
+                  ["clones"] = { [1] = { ["x"] = 1, ["y"] = 2, ["sublevel"] = 1 } } },
+        }
+        """)
+        path = tmp_path / "NoExtras.lua"
+        path.write_text(lua, encoding="utf-8")
+        data = extract_dungeon_file(path)
+        assert data["dungeon_idx"] == 161
+        assert len(data["enemies"]) == 1
+        assert "sublevels" not in data
+        assert "map_textures" not in data
+        assert "pois" not in data
 
     def test_non_dungeon_file_skipped(self, tmp_path):
         path = tmp_path / "Other.lua"

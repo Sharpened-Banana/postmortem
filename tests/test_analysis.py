@@ -45,6 +45,31 @@ def route() -> Route:
     return Route.from_preset(ROUTE_PRESET)
 
 
+class TestDungeonDataMapExtras:
+    """sublevels/map_textures/pois round-trip through the extracted-JSON
+    shape (see extract.py) via DungeonData.from_dict."""
+
+    def test_round_trips_from_extracted_dict(self):
+        d = dict(DUNGEON_DATA["dungeons"]["160"])
+        d["sublevels"] = {"1": "Murder Row"}
+        d["map_textures"] = {"1": "Interface\\AddOns\\MythicDungeonTools\\MurderRow"}
+        d["pois"] = {
+            "1": [{"type": "dungeonEntrance", "x": 779.77, "y": -509.6, "size_mult": 1.5}]
+        }
+        dungeon = DungeonData.from_dict(d)
+        assert dungeon.sublevels == {1: "Murder Row"}
+        assert dungeon.map_textures[1].endswith("MurderRow")
+        (poi,) = dungeon.pois[1]
+        assert poi.type == "dungeonEntrance"
+        assert poi.x == 779.77 and poi.y == -509.6
+        assert poi.size_mult == 1.5
+
+    def test_missing_extras_default_empty(self, dungeon):
+        assert dungeon.sublevels == {}
+        assert dungeon.map_textures == {}
+        assert dungeon.pois == {}
+
+
 class TestPullDetection:
     def test_three_pulls(self, run_segment):
         pulls = detect_pulls(run_segment.events)
@@ -391,9 +416,28 @@ class TestExpandedStats:
         dps = next(p for p in stats.players.values() if p.name == "Zappyboi-Area52")
         assert dps.distance_traveled == pytest.approx(40.0, abs=0.1)
         samples = stats.position_samples[dps.guid]
+        # unaffected by the throttle-bug fix: every cast in this fixture is
+        # already >=2s apart, so all 4 casts still produce a sample -- the
+        # bug (comparing an absolute ts against an already-relative stored
+        # value) meant the throttle never actually applied before either,
+        # so this specific count doesn't change, only each sample's shape.
         assert len(samples) == 4
-        assert samples[0][1:] == [100.0, -200.0]
-        assert samples[2][1:] == [110.0, -230.0]
+        assert samples[0][1:3] == [100.0, -200.0]
+        assert samples[2][1:3] == [110.0, -230.0]
+        # 4th element is ui_map_id, now carried alongside each sample
+        assert samples[0][3] == 2200
+
+    def test_movement_throttles_samples_less_than_2s_apart(self, stats):
+        # a death now also samples position (see stats.py's damage-taken
+        # branch) -- the healer takes two hits 2.0s apart (t=64, t=66) at
+        # the fixed (100,-200) advanced-block position build_run_log()
+        # always uses for npc_damage(), plus a later cast sample at t=101.
+        healer = next(p for p in stats.players.values() if p.name == "Bigheals-Area52")
+        samples = stats.position_samples[healer.guid]
+        times = [s[0] for s in samples]
+        assert times == sorted(times)
+        # no two samples closer together than the 2.0s throttle
+        assert all(b - a >= 2.0 - 1e-6 for a, b in zip(times, times[1:]))
 
     def test_buff_uptime(self, stats):
         dps = next(p for p in stats.players.values() if p.name == "Zappyboi-Area52")
@@ -460,11 +504,25 @@ class TestAnalyzeRun:
         assert lust and lust[0]["uptime_pct"] == pytest.approx(21.4, abs=0.1)
         assert len(payload["positions"]["Zappyboi-Area52"]) == 4
         assert payload["pulls"][0]["group_dps"] > 0
+        # "map" block: present whenever dungeon data is present, with the
+        # geometry-only planned map even though this run's synthetic
+        # dungeon data doesn't have enough single-clone npcs to calibrate
+        # a player-path overlay (see TestCalibrate for the calibration
+        # math itself, tested in isolation).
+        m = payload["map"]
+        assert m["canvas"] == {"width": 840, "height": 555}
+        assert len(m["enemies"]) == 4 + 3 + 1 + 4  # Felwyrm/Duskblade/Boss/Shadeling clones
+        assert m["calibration"]["ok"] is False
+        assert m["calibration"]["reason"] == "insufficient anchors"
+        assert m["players"] == []
+        assert m["deaths"] == []
 
     def test_report_without_dungeon_data(self, run_segment, route):
         report = analyze_run(run_segment, route=route, store=None)
         assert "error" in report["comparison"]
         assert report["forces"]["required"] is None
+        # no dungeon data -> no map block at all (not an empty/broken one)
+        assert "map" not in report
 
     def test_renderers(self, run_segment, route, dungeon_data_file):
         from mythic_analyzer.report.html import render_html
@@ -495,6 +553,63 @@ class TestAnalyzeRun:
         # without avoidable_damage data in the embedded JSON it renders "")
         assert "AVOIDABLE DAMAGE" not in text
         assert '"avoidable_damage"' not in html
+        # map block present (plan-only, since this fixture can't calibrate):
+        # the SVG-rendering JS is always defined in the template (like
+        # avoidableDamage() above), so what actually distinguishes "the
+        # section has data" is the embedded report JSON, not raw
+        # substring-presence of "<svg" in the page's JS source text.
+        assert "<svg" in html
+        assert '"map":' in html
+
+    def test_renderer_omits_map_without_dungeon_data(self, run_segment, route):
+        from mythic_analyzer.report.html import render_html
+
+        report = analyze_run(run_segment, route=route, store=None)
+        assert "map" not in report
+        html = render_html(report)
+        assert "<html" in html
+        # no dungeon data -> no "map" key in the embedded report JSON, so
+        # the JS guard (`if (!m ...) return "";`) renders nothing for it
+        assert '"map":' not in html
+
+    def test_html_renders_calibrated_path_and_death_markers(
+        self, run_segment, route, dungeon_data_file
+    ):
+        # Exercise the calibrated-overlay branch directly (the synthetic
+        # fixture's dungeon data doesn't have enough single-clone npcs to
+        # calibrate for real -- see TestAnalyzeRun.test_full_report) by
+        # building a report whose "map" block already reflects a
+        # successful calibration, and confirming the renderer draws a
+        # player path and a death marker rather than just the dim
+        # fallback note.
+        from mythic_analyzer.report.html import render_html
+
+        store = DungeonDataStore.load(dungeon_data_file)
+        report = analyze_run(run_segment, route=route, store=store)
+        report["map"]["calibration"] = {
+            "ok": True, "anchor_count": 5, "residual": 1.2,
+            "scale": 4.0, "rotation": 0.1, "reflected": False,
+            "translation": {"x": 10.0, "y": -5.0},
+        }
+        report["map"]["players"] = [
+            {"name": "Zappyboi-Area52", "guid": "Player-x",
+             "path": [[0.0, 100.0, -100.0], [5.0, 110.0, -120.0]]}
+        ]
+        report["map"]["deaths"] = [
+            {"player": "Bigheals-Area52", "t": 66.5, "x": 105.0, "y": -110.0}
+        ]
+        html = render_html(report)
+        assert "<svg" in html
+        # the calibrated-overlay data actually made it into the embedded
+        # report JSON the page's JS reads (the JS source text itself
+        # always contains e.g. "polyline"/"No player-path overlay" as
+        # literal strings regardless of data, so those aren't meaningful
+        # substring checks -- see test_renderers above for the same point)
+        assert '"ok": true' in html
+        assert '"anchor_count": 5' in html
+        assert '"insufficient anchors"' not in html
+        assert '"path": [[0.0, 100.0, -100.0]' in html
+        assert '"player": "Bigheals-Area52"' in html
 
 
 class TestAvoidableDataLoad:
