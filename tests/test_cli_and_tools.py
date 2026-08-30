@@ -5,7 +5,9 @@ import textwrap
 
 from conftest import build_run_log
 
-from mythic_analyzer.cli import main
+from mythic_analyzer.cli import _pick_run, main
+from mythic_analyzer.combatlog.parser import parse_file
+from mythic_analyzer.combatlog.segmenter import segment_runs
 from mythic_analyzer.mdt.extract import extract_dungeon_file
 from mythic_analyzer.recorder import Recorder
 
@@ -127,6 +129,106 @@ class TestCLI:
             assert "no Mythic+ runs" in str(exc)
         else:  # pragma: no cover
             raise AssertionError("expected SystemExit")
+
+    def test_runs_lists_all_three(self, three_run_log_file, capsys):
+        assert main(["runs", str(three_run_log_file)]) == 0
+        out = capsys.readouterr().out
+        lines = [ln for ln in out.splitlines() if ln.strip()]
+        assert len(lines) == 3
+        assert "Cave One +5" in lines[0] and "incomplete" in lines[0]
+        assert "Cave Two +10" in lines[1] and "timed" in lines[1]
+        assert "Cave Three +15" in lines[2] and "over timer" in lines[2]
+
+    def test_analyze_run_2_picks_middle_run(self, three_run_log_file, capsys):
+        assert main(["analyze", str(three_run_log_file), "--run", "2"]) == 0
+        out = capsys.readouterr().out
+        assert "Cave Two +10" in out
+        assert "Cave One" not in out
+        assert "Cave Three" not in out
+
+    def test_analyze_run_last_skips_abandoned_run(self, three_run_log_file, capsys):
+        assert main(["analyze", str(three_run_log_file), "--run", "last"]) == 0
+        out = capsys.readouterr().out
+        assert "Cave Three +15" in out
+
+    def test_analyze_run_out_of_range(self, three_run_log_file):
+        try:
+            main(["analyze", str(three_run_log_file), "--run", "5"])
+        except SystemExit as exc:
+            assert "out of range (log has 3 runs)" in str(exc)
+        else:  # pragma: no cover
+            raise AssertionError("expected SystemExit")
+
+
+class TestPickRunStreaming:
+    """Direct tests of _pick_run's streaming behavior (WP-A0 memory fix).
+
+    These drive segment_runs/_pick_run directly (rather than through the
+    CLI) so they can inspect which RunSegments were actually produced and
+    whether their event lists were dropped, which is the part that
+    actually proves runs other than the picked one never need to be held
+    in memory in full.
+    """
+
+    @staticmethod
+    def _tap(gen):
+        """Wrap a segment generator, recording every segment it yields
+        (by identity) as it's consumed, so the test can inspect segments
+        _pick_run passed over after the fact."""
+        seen = []
+
+        def wrapped():
+            for seg in gen:
+                seen.append(seg)
+                yield seg
+
+        return seen, wrapped()
+
+    def test_numeric_run_stops_early_and_drops_earlier_events(self, three_run_log_file):
+        seen, tapped = self._tap(segment_runs(parse_file(three_run_log_file)))
+        picked = _pick_run(tapped, "2")
+
+        assert picked.zone_name == "Cave Two"
+        assert picked.keystone_level == 10
+        assert picked.events  # the picked run's events are retained
+
+        # run 3 should never even have been parsed/yielded: _pick_run must
+        # stop driving the generator as soon as it has run 2.
+        assert len(seen) == 2
+        assert seen[0].zone_name == "Cave One"
+        assert seen[1] is picked
+
+        # the abandoned run 1, passed over on the way to run 2, must not
+        # retain its events.
+        assert seen[0].events == []
+
+    def test_last_keeps_only_current_candidates_events(self, three_run_log_file):
+        seen, tapped = self._tap(segment_runs(parse_file(three_run_log_file)))
+        picked = _pick_run(tapped, "last")
+
+        assert picked.zone_name == "Cave Three"
+        assert picked.events  # the picked (last) run's events are retained
+
+        # 'last' has to scan the whole log to know it's last.
+        assert len(seen) == 3
+        assert seen[2] is picked
+
+        # every earlier candidate had its events dropped once superseded.
+        assert seen[0].events == []
+        assert seen[1].events == []
+
+    def test_numeric_run_out_of_range_reports_total(self, three_run_log_file):
+        seen, tapped = self._tap(segment_runs(parse_file(three_run_log_file)))
+        try:
+            _pick_run(tapped, "5")
+        except SystemExit as exc:
+            assert "out of range (log has 3 runs)" in str(exc)
+        else:  # pragma: no cover
+            raise AssertionError("expected SystemExit")
+        # had to scan the whole log to know the true count, but none of
+        # the segments' events should have been retained.
+        assert len(seen) == 3
+        assert all(s.events == [] for s in seen)
 
 
 class TestRecorder:
