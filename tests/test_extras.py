@@ -10,7 +10,12 @@ import pytest
 from conftest import build_run_log
 
 from mythic_analyzer.cli import main
-from mythic_analyzer.raiderio import enrich_report, realm_slug
+from mythic_analyzer.raiderio import (
+    enrich_report,
+    match_run,
+    parse_recent_runs,
+    realm_slug,
+)
 from mythic_analyzer.recorder import Recorder
 from mythic_analyzer.report.index import build_index, collect_reports, render_index
 
@@ -260,6 +265,268 @@ class TestRaiderIO:
         assert rio["season_best"]["level"] == 17
         assert report["players"][1]["raiderio"] == {"error": "lookup failed"}
         assert report["raiderio"]["enriched_players"] == 1
+
+
+class TestRunMatching:
+    """WP-C3: matching a locally-analyzed run against a player's
+    Raider.io "recent runs" (sourced from the mythic_plus_recent_runs
+    field on the same character-profile fetch enrich_report already
+    makes -- see raiderio.py's module notes on why)."""
+
+    def _candidate(self, **over):
+        base = {
+            "challenge_map_id": 587,
+            "keystone_level": 10,
+            "completed_ts": 1_700_000_000.0,
+            "score": 150.0,
+            "url": "https://raider.io/runs/1",
+            "dungeon": "Murder Row",
+        }
+        base.update(over)
+        return base
+
+    # -- match_run ------------------------------------------------------
+
+    def test_match_run_exact_match(self):
+        cand = self._candidate()
+        result = match_run(
+            [cand],
+            challenge_map_id=587,
+            keystone_level=10,
+            completion_ts=1_700_000_030.0,  # 30s off, well inside window
+        )
+        assert result is cand
+        assert result["score"] == 150.0
+        assert result["url"] == "https://raider.io/runs/1"
+
+    def test_match_run_no_match_wrong_map_id(self):
+        cand = self._candidate(challenge_map_id=600)
+        assert match_run(
+            [cand], challenge_map_id=587, keystone_level=10,
+            completion_ts=1_700_000_000.0,
+        ) is None
+
+    def test_match_run_no_match_wrong_level(self):
+        cand = self._candidate(keystone_level=11)
+        assert match_run(
+            [cand], challenge_map_id=587, keystone_level=10,
+            completion_ts=1_700_000_000.0,
+        ) is None
+
+    def test_match_run_no_match_just_outside_window(self):
+        cand = self._candidate(completed_ts=1_700_000_000.0)
+        # 601s off (> 600s default window): no match
+        assert match_run(
+            [cand], challenge_map_id=587, keystone_level=10,
+            completion_ts=1_700_000_000.0 + 601,
+        ) is None
+
+    def test_match_run_at_window_boundary_matches(self):
+        cand = self._candidate(completed_ts=1_700_000_000.0)
+        # exactly 600s off (== default window): still matches
+        result = match_run(
+            [cand], challenge_map_id=587, keystone_level=10,
+            completion_ts=1_700_000_000.0 + 600,
+        )
+        assert result is cand
+
+    def test_match_run_picks_closest_of_multiple_candidates(self):
+        far = self._candidate(completed_ts=1_700_000_000.0 - 400, url="far")
+        near = self._candidate(completed_ts=1_700_000_000.0 - 50, url="near")
+        other_run = self._candidate(completed_ts=1_700_000_000.0 + 590, url="other")
+        result = match_run(
+            [far, other_run, near],
+            challenge_map_id=587, keystone_level=10,
+            completion_ts=1_700_000_000.0,
+        )
+        assert result["url"] == "near"
+
+    def test_match_run_no_local_completion_time_returns_none(self):
+        # An incomplete/abandoned local run has no completion time to
+        # match against at all -- skip cleanly, no crash.
+        cand = self._candidate()
+        assert match_run(
+            [cand], challenge_map_id=587, keystone_level=10,
+            completion_ts=None,
+        ) is None
+
+    def test_match_run_empty_candidates(self):
+        assert match_run(
+            [], challenge_map_id=587, keystone_level=10,
+            completion_ts=1_700_000_000.0,
+        ) is None
+
+    # -- parse_recent_runs ------------------------------------------------
+
+    def test_parse_recent_runs_extracts_plausible_fields(self):
+        profile = {
+            "mythic_plus_recent_runs": [
+                {
+                    "dungeon": "Murder Row",
+                    "mythic_level": 12,
+                    "challenge_mode_id": 587,
+                    "completed_at": "2023-11-14T22:13:20Z",
+                    "score": 175.5,
+                    "url": "https://raider.io/runs/2",
+                },
+            ]
+        }
+        out = parse_recent_runs(profile)
+        assert len(out) == 1
+        entry = out[0]
+        assert entry["challenge_map_id"] == 587
+        assert entry["keystone_level"] == 12
+        assert entry["score"] == 175.5
+        assert entry["url"] == "https://raider.io/runs/2"
+        assert entry["dungeon"] == "Murder Row"
+        # 2023-11-14T22:13:20Z as epoch seconds
+        assert entry["completed_ts"] == pytest.approx(1_700_000_000.0, abs=1)
+
+    def test_parse_recent_runs_numeric_and_ms_timestamps(self):
+        profile = {
+            "mythic_plus_recent_runs": [
+                {"map_id": 600, "level": 8, "completed_at": 1_700_000_000},
+                {"map_id": 612, "level": 9, "clear_time": 1_700_000_000_000},  # ms
+            ]
+        }
+        out = parse_recent_runs(profile)
+        assert len(out) == 2
+        assert out[0]["completed_ts"] == 1_700_000_000.0
+        assert out[1]["completed_ts"] == 1_700_000_000.0
+
+    def test_parse_recent_runs_malformed_payload_yields_nothing(self):
+        assert parse_recent_runs(None) == []
+        assert parse_recent_runs({}) == []
+        assert parse_recent_runs({"mythic_plus_recent_runs": "not a list"}) == []
+        assert parse_recent_runs({"mythic_plus_recent_runs": [1, 2, "x"]}) == []
+        # missing required fields (no map id / level / timestamp)
+        assert parse_recent_runs({
+            "mythic_plus_recent_runs": [{"score": 100}]
+        }) == []
+        # unparseable timestamp
+        assert parse_recent_runs({
+            "mythic_plus_recent_runs": [
+                {"map_id": 587, "level": 10, "completed_at": "not-a-date"}
+            ]
+        }) == []
+        # wrong types don't raise
+        assert parse_recent_runs({
+            "mythic_plus_recent_runs": [
+                {"map_id": "nope", "level": 10, "completed_at": 1_700_000_000}
+            ]
+        }) == []
+
+    # -- enrich_report integration ----------------------------------------
+
+    def _profile(self, recent_runs):
+        return {
+            "name": "Zappyboi",
+            "profile_url": "https://raider.io/characters/us/area-52/Zappyboi",
+            "class": "Mage",
+            "active_spec_name": "Fire",
+            "mythic_plus_scores_by_season": [{"scores": {"all": 3021.4}}],
+            "mythic_plus_best_runs": [],
+            "mythic_plus_recent_runs": recent_runs,
+        }
+
+    def test_enrich_report_attaches_raiderio_run_on_match(self):
+        report = {
+            "run": {"challenge_map_id": 587, "keystone_level": 10,
+                     "end_ts": 1_700_000_000.0},
+            "players": [{"name": "Zappyboi-Area52", "guid": "Player-1"}],
+        }
+        recent = [{
+            "challenge_mode_id": 587, "mythic_level": 10,
+            "completed_at": 1_700_000_030.0,
+            "score": 210.0, "url": "https://raider.io/runs/match",
+        }]
+        fetcher = lambda url: self._profile(recent)
+
+        enrich_report(report, "us", fetcher=fetcher)
+        run_match = report["players"][0].get("raiderio_run")
+        assert run_match == {
+            "score": 210.0,
+            "url": "https://raider.io/runs/match",
+            "level": 10,
+            "dungeon": None,
+        }
+        # unrelated fields from _summarize are unaffected
+        assert report["players"][0]["raiderio"]["score"] == 3021.4
+
+    def test_enrich_report_no_match_no_attachment(self):
+        report = {
+            "run": {"challenge_map_id": 587, "keystone_level": 10,
+                     "end_ts": 1_700_000_000.0},
+            "players": [{"name": "Zappyboi-Area52", "guid": "Player-1"}],
+        }
+        recent = [
+            {"challenge_mode_id": 600, "mythic_level": 10,  # wrong map
+             "completed_at": 1_700_000_000.0, "score": 1, "url": "a"},
+            {"challenge_mode_id": 587, "mythic_level": 10,  # right key, too far off
+             "completed_at": 1_700_000_000.0 + 900, "score": 2, "url": "b"},
+        ]
+        fetcher = lambda url: self._profile(recent)
+
+        enrich_report(report, "us", fetcher=fetcher)
+        assert "raiderio_run" not in report["players"][0]
+        assert "raiderio" in report["players"][0]  # enrichment itself still worked
+
+    def test_enrich_report_incomplete_local_run_skips_matching(self):
+        # No end_ts (abandoned/incomplete run): matching is skipped
+        # entirely, even though character enrichment succeeds.
+        report = {
+            "run": {"challenge_map_id": 587, "keystone_level": 10,
+                     "end_ts": None},
+            "players": [{"name": "Zappyboi-Area52", "guid": "Player-1"}],
+        }
+        recent = [{"challenge_mode_id": 587, "mythic_level": 10,
+                   "completed_at": 1_700_000_000.0, "score": 1, "url": "a"}]
+        fetcher = lambda url: self._profile(recent)
+
+        n = enrich_report(report, "us", fetcher=fetcher)
+        assert n == 1  # profile lookup itself still succeeded
+        assert "raiderio_run" not in report["players"][0]
+
+    def test_enrich_report_no_run_key_skips_matching(self):
+        # No "run" block on the report at all (e.g. a caller that never
+        # threaded one through): matching is skipped, no crash.
+        report = {"players": [{"name": "Zappyboi-Area52", "guid": "Player-1"}]}
+        fetcher = lambda url: self._profile(
+            [{"challenge_mode_id": 587, "mythic_level": 10,
+              "completed_at": 1_700_000_000.0, "score": 1, "url": "a"}]
+        )
+        enrich_report(report, "us", fetcher=fetcher)
+        assert "raiderio_run" not in report["players"][0]
+
+    def test_enrich_report_malformed_recent_runs_payload_no_crash(self):
+        report = {
+            "run": {"challenge_map_id": 587, "keystone_level": 10,
+                     "end_ts": 1_700_000_000.0},
+            "players": [{"name": "Zappyboi-Area52", "guid": "Player-1"}],
+        }
+
+        def fetcher(url):
+            profile = self._profile("not a list")  # wrong type entirely
+            return profile
+
+        n = enrich_report(report, "us", fetcher=fetcher)
+        assert n == 1
+        assert "raiderio_run" not in report["players"][0]
+
+    def test_enrich_report_lookup_failure_skips_matching(self):
+        # Total lookup failure (profile None) is still marked via the
+        # existing {"error": "lookup failed"} path; run-matching simply
+        # never gets attempted since there's no profile to pull
+        # candidates from.
+        report = {
+            "run": {"challenge_map_id": 587, "keystone_level": 10,
+                     "end_ts": 1_700_000_000.0},
+            "players": [{"name": "Zappyboi-Area52", "guid": "Player-1"}],
+        }
+        n = enrich_report(report, "us", fetcher=lambda url: None)
+        assert n == 0
+        assert report["players"][0]["raiderio"] == {"error": "lookup failed"}
+        assert "raiderio_run" not in report["players"][0]
 
 
 class TestRaiderIOCliCache:
