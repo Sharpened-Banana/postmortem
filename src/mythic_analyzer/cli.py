@@ -350,6 +350,21 @@ def cmd_record(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    from .history.serve import make_server
+
+    server = make_server(args.directory, port=args.port, bind=args.bind)
+    host, port = server.server_address[:2]
+    print(f"serving {args.directory} on http://{host}:{port}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("stopped", file=sys.stderr)
+    finally:
+        server.server_close()
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mythic-analyzer",
@@ -434,6 +449,18 @@ def build_parser() -> argparse.ArgumentParser:
                    help="shell command to run when the key ends "
                         "(e.g. 'obs-cmd recording stop')")
     p.set_defaults(func=cmd_record)
+
+    p = sub.add_parser(
+        "serve",
+        help="serve a directory of saved reports locally, rebuilding the "
+             "index whenever report files change",
+    )
+    p.add_argument("directory", help="directory containing report .json/.html files")
+    p.add_argument("--port", type=int, default=8765,
+                   help="port to listen on (default: 8765)")
+    p.add_argument("--bind", default="127.0.0.1",
+                   help="address to bind to (default: 127.0.0.1, loopback-only)")
+    p.set_defaults(func=cmd_serve)
 
     return parser
 
