@@ -231,6 +231,50 @@ class TestPickRunStreaming:
         assert all(s.events == [] for s in seen)
 
 
+class TestAvoidableDataCLI:
+    """--avoidable-data: a bad explicitly-passed path is a clear CLI
+    error (SystemExit), never a crash and never a silent no-op."""
+
+    def test_missing_file_is_clear_systemexit(self, log_file, tmp_path):
+        missing = tmp_path / "nope.json"
+        try:
+            main(["analyze", str(log_file), "--avoidable-data", str(missing)])
+        except SystemExit as exc:
+            assert "avoidable-damage data" in str(exc)
+        else:  # pragma: no cover
+            raise AssertionError("expected SystemExit")
+
+    def test_malformed_json_is_clear_systemexit(self, log_file, tmp_path):
+        bad = tmp_path / "bad.json"
+        bad.write_text("{not valid json", encoding="utf-8")
+        try:
+            main(["analyze", str(log_file), "--avoidable-data", str(bad)])
+        except SystemExit as exc:
+            assert "avoidable-damage data" in str(exc)
+        else:  # pragma: no cover
+            raise AssertionError("expected SystemExit")
+
+    def test_missing_spells_key_is_clear_systemexit(self, log_file, tmp_path):
+        bad = tmp_path / "bad.json"
+        bad.write_text(json.dumps({"dungeons": {}}), encoding="utf-8")
+        try:
+            main(["analyze", str(log_file), "--avoidable-data", str(bad)])
+        except SystemExit as exc:
+            assert "avoidable-damage data" in str(exc)
+        else:  # pragma: no cover
+            raise AssertionError("expected SystemExit")
+
+    def test_valid_file_end_to_end_adds_section(self, log_file, tmp_path, capsys):
+        good = tmp_path / "avoidable.json"
+        good.write_text(json.dumps({
+            "spells": [{"id": 1216538, "name": "Dark Bolt"}],
+        }), encoding="utf-8")
+        assert main(["analyze", str(log_file), "--avoidable-data", str(good)]) == 0
+        out = capsys.readouterr().out
+        assert "AVOIDABLE DAMAGE" in out
+        assert "Bigheals-Area52" in out
+
+
 class TestRecorder:
     def test_records_run_slice(self, tmp_path):
         log = tmp_path / "WoWCombatLog.txt"

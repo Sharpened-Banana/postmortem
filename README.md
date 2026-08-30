@@ -63,6 +63,11 @@ WoW only writes `WoWCombatLog.txt` while combat logging is on:
   healing + overhealing + absorbs, damage taken, DPS/HPS, interrupts,
   dispels, deaths; specs/roles resolved from `COMBATANT_INFO`.
 - **Deaths** — killing blow and a last-hits recap with remaining HP.
+- **Avoidable damage** — `analyze --avoidable-data FILE` tags spell ids as
+  "stand in the fire" mechanics (a small community/user-maintained JSON
+  file, format + example in `docs/avoidable_spells.example.json`) and
+  breaks out each player's damage taken from just those spells, with hit
+  counts; omit the flag and the report is unaffected.
 - **Kick value** — each interrupt is priced: the estimated damage (or enemy
   healing) it prevented, based on the average amount per completed cast of
   that spell observed elsewhere in the same run — the up-front hit plus its

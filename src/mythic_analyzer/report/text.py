@@ -215,6 +215,20 @@ def render_text(report: dict[str, Any]) -> str:
                 f"{i.get('interrupted_spell') or '?'} on {i['target']}"
                 + (f": {' + '.join(what)} prevented{basis}" if what else basis))
 
+    # --- avoidable damage ---
+    avoidable = report.get("avoidable_damage")
+    if avoidable:
+        add("")
+        header = "-- AVOIDABLE DAMAGE "
+        add(header + "-" * (72 - len(header)))
+        add(f"{avoidable['tagged_spell_count']} spell(s) tagged avoidable; "
+            f"{_fmt_num(avoidable['total_damage'])} total damage taken from them")
+        for entry in avoidable["by_player"]:
+            add(f"  {entry['name']:<24}{_fmt_num(entry['avoidable_damage_taken']):>8}"
+                f"  over {entry['avoidable_hits']} hits")
+            for s in entry["by_spell"][:5]:
+                add(f"      {s['name']:<28}{_fmt_num(s['amount']):>8}  ({s['hits']}x)")
+
     # --- big moments ---
     lust = report.get("lust") or []
     brez = report.get("brez") or []

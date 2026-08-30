@@ -119,6 +119,7 @@ function render() {
 
   html += timeline();
   html += playersTable();
+  html += avoidableDamage();
   if (R.comparison && !R.comparison.error) html += comparison();
   else if (R.route) html += `<h2>Route</h2><div class="dim">${esc((R.comparison||{}).error || "")}</div>` + routeOnly();
   html += pullsTable();
@@ -203,6 +204,21 @@ function playersTable() {
     <th class="num" title="killing blows">KB</th>
     <th class="num" title="casts per minute">CPM</th>
     <th class="num">Deaths</th></tr>${rows}</table></div>`;
+}
+
+function avoidableDamage() {
+  const a = R.avoidable_damage;
+  if (!a || !a.by_player || !a.by_player.length) return "";
+  const rows = a.by_player.map(p => `<tr>
+    <td>${esc(p.name)}</td>
+    <td class="num">${num(p.avoidable_damage_taken)}</td>
+    <td class="num">${p.avoidable_hits}</td>
+    <td class="dim" style="white-space:normal">${(p.by_spell||[]).slice(0, 6)
+      .map(s => `${esc(s.name)} ${num(s.amount)} (${s.hits}x)`).join(" · ")}</td></tr>`).join("");
+  return `<h2>Avoidable damage taken (${a.tagged_spell_count} tagged spell${a.tagged_spell_count === 1 ? "" : "s"})</h2>
+    <div class="wrap"><table>
+    <tr><th>Player</th><th class="num">Damage</th><th class="num">Hits</th><th>By spell</th></tr>
+    ${rows}</table></div>`;
 }
 
 function comparison() {

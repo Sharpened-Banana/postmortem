@@ -1,0 +1,13 @@
+{
+  "_comment": "Example --avoidable-data file. 'spells' is the master list of spell ids tagged as avoidable (stand-in-fire / easily-dodged mechanics); 'dungeons' is optional metadata mapping a dungeon_idx (matching mdt_data.json) to the subset of tagged spells relevant to that dungeon. We ship the format + this one example, not a full spell database -- extend it yourself, or with a community-maintained file.",
+  "spells": [
+    {
+      "id": 1216538,
+      "name": "Dark Bolt",
+      "note": "Murder Row (Felwyrm) -- stack-and-spread cone, easily sidestepped"
+    }
+  ],
+  "dungeons": {
+    "160": [1216538]
+  }
+}
