@@ -1,0 +1,142 @@
+"""Codec-level tests: printable encoding, AceSerializer, CBOR, MDT strings."""
+
+import math
+import os
+
+import pytest
+
+from mythic_analyzer.mdt import ace_serializer, cbor
+from mythic_analyzer.mdt.decode import (
+    MDTDecodeError,
+    decode_mdt_string,
+    encode_mdt_string,
+)
+from mythic_analyzer.mdt.print_codec import decode_for_print, encode_for_print
+from mythic_analyzer.mdt.route import Route
+
+
+class TestPrintCodec:
+    def test_round_trip_all_lengths(self):
+        for n in range(0, 40):
+            data = os.urandom(n)
+            assert decode_for_print(encode_for_print(data)) == data
+
+    def test_known_alphabet(self):
+        # 0x00 0x00 0x00 -> indices 0,0,0,0 -> "aaaa"
+        assert encode_for_print(b"\x00\x00\x00") == "aaaa"
+        # a single 0xff byte: 8 bits -> two 6-bit chars: 63, 3 -> ")d"
+        assert encode_for_print(b"\xff") == ")d"
+
+    def test_invalid_character(self):
+        with pytest.raises(ValueError):
+            decode_for_print("abc!")
+
+
+class TestAceSerializer:
+    def test_scalars(self):
+        s = ace_serializer.dumps("hi", 42, -7, True, False, None, 3.25)
+        assert ace_serializer.loads(s) == ["hi", 42, -7, True, False, None, 3.25]
+
+    def test_escapes(self):
+        tricky = "a^b~c\x1e d\x7f\ne,f"
+        s = ace_serializer.dumps(tricky)
+        assert ace_serializer.loads(s) == [tricky]
+
+    def test_nested_tables(self):
+        val = {"a": {1: [10, 20], "b": {"c": True}}, 2: "x"}
+        (out,) = ace_serializer.loads(ace_serializer.dumps(val))
+        assert out["a"][1] == {1: 10, 2: 20}  # lists become 1-based tables
+        assert out["a"]["b"] == {"c": True}
+        assert out[2] == "x"
+
+    def test_non_representable_float(self):
+        v = 0.1 + 0.2  # not exactly representable in %.14g round trip? it is; use tiny
+        v = 2.0 ** -1074  # denormal min: forces ^F encoding path robustness
+        (out,) = ace_serializer.loads(ace_serializer.dumps(v))
+        assert out == v
+
+    def test_infinity(self):
+        out = ace_serializer.loads(ace_serializer.dumps(math.inf, -math.inf))
+        assert out == [math.inf, -math.inf]
+
+    def test_wire_format(self):
+        assert ace_serializer.dumps(1, "a") == "^1^N1^Sa^^"
+        assert ace_serializer.loads("^1^N1^Sa^^") == [1, "a"]
+
+    def test_rejects_garbage(self):
+        with pytest.raises(ace_serializer.AceSerializerError):
+            ace_serializer.loads("not ace data")
+
+
+class TestCBOR:
+    @pytest.mark.parametrize("value,encoded", [
+        (0, b"\x00"),
+        (23, b"\x17"),
+        (24, b"\x18\x18"),
+        (500, b"\x19\x01\xf4"),
+        (-1, b"\x20"),
+        (-100, b"\x38\x63"),
+        ("a", b"\x61a"),
+        (b"\x01\x02", b"\x42\x01\x02"),
+        ([1, 2], b"\x82\x01\x02"),
+        (True, b"\xf5"),
+        (False, b"\xf4"),
+        (None, b"\xf6"),
+    ])
+    def test_known_vectors(self, value, encoded):
+        assert cbor.dumps(value) == encoded
+        assert cbor.loads(encoded) == value
+
+    def test_half_float_decode(self):
+        assert cbor.loads(b"\xf9\x3c\x00") == 1.0
+        assert cbor.loads(b"\xf9\x80\x00") == -0.0
+
+    def test_float64_round_trip(self):
+        v = 123.456
+        assert cbor.loads(cbor.dumps(v)) == v
+
+    def test_map_round_trip(self):
+        v = {"pulls": {1: [1, 2, 3], "color": "ff8000"}, "week": 2}
+        assert cbor.loads(cbor.dumps(v)) == v
+
+    def test_indefinite_length(self):
+        # 0x9f = indefinite array, 0xff = break
+        assert cbor.loads(b"\x9f\x01\x02\xff") == [1, 2]
+        # indefinite text string of two chunks
+        assert cbor.loads(b"\x7f\x61a\x61b\xff") == "ab"
+
+    def test_tag_transparent(self):
+        # tag 0 (0xc0) wrapping a string
+        assert cbor.loads(b"\xc0\x61a") == "a"
+
+    def test_truncated(self):
+        with pytest.raises(cbor.CBORError):
+            cbor.loads(b"\x19\x01")
+
+
+class TestMDTString:
+    def test_mdt2_round_trip(self, route_string):
+        preset = decode_mdt_string(route_string)
+        route = Route.from_preset(preset)
+        assert route.name == "Test MR Route"
+        assert route.dungeon_idx == 160
+        assert len(route.pulls) == 4
+        assert route.pulls[0].enemies == {1: [1, 2]}
+        assert route.pulls[0].color == "ff8000"
+
+    def test_legacy_round_trip(self):
+        from conftest import ROUTE_PRESET
+        enc = encode_mdt_string(ROUTE_PRESET, "legacy")
+        assert enc.startswith("!") and not enc.startswith("!~MDT2~")
+        route = Route.from_preset(decode_mdt_string(enc))
+        assert route.name == "Test MR Route"
+        assert [p.index for p in route.pulls] == [1, 2, 3, 4]
+
+    def test_whitespace_tolerated(self, route_string):
+        assert decode_mdt_string("  " + route_string + "\n")
+
+    def test_garbage_rejected(self):
+        with pytest.raises(MDTDecodeError):
+            decode_mdt_string("!~MDT2~definitely-not-base64!!!")
+        with pytest.raises(MDTDecodeError):
+            decode_mdt_string("")
