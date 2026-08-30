@@ -202,6 +202,8 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     base = _report_basename(report)
 
     wrote = []
+    json_path = None
+    html_path = None
     for fmt in formats:
         if fmt == "text":
             text = render_text(report)
@@ -217,6 +219,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
                 path = out_dir / f"{base}.json"
                 path.write_text(payload, encoding="utf-8")
                 wrote.append(path)
+                json_path = path
             else:
                 print(payload)
         elif fmt == "html":
@@ -224,10 +227,20 @@ def cmd_analyze(args: argparse.Namespace) -> int:
             path = (out_dir or Path(".")) / f"{base}.html"
             path.write_text(html, encoding="utf-8")
             wrote.append(path)
+            html_path = path
         else:
             raise SystemExit(f"error: unknown format {fmt!r} (text, json, html)")
     for path in wrote:
         print(f"wrote {path}", file=sys.stderr)
+
+    if args.history_db:
+        from .history.store import ingest as ingest_history
+
+        run_id = ingest_history(
+            report, args.history_db, source_path=json_path, html_path=html_path,
+        )
+        print(f"history: run {run_id} -> {args.history_db}", file=sys.stderr)
+
     return 0
 
 
@@ -242,8 +255,53 @@ def _report_basename(report: dict) -> str:
     return f"{stamp}_{zone}_{level}"
 
 
+def _scan_report_files(directory: str | Path) -> Iterable[tuple[Path, dict]]:
+    """Find report JSON files under ``directory``, yielding ``(path, report)``.
+
+    Mirrors ``report.index.collect_reports``'s own scan (same glob, same
+    tolerant skip of unreadable/malformed/foreign JSON) so `index --db`
+    ingests exactly the files a plain JSON-scan `index` run would have
+    picked up. Kept here rather than in report/index.py so that module's
+    scan loop isn't duplicated *and* modified in two places at once.
+    """
+    root = Path(directory)
+    for path in sorted(root.rglob("*.json")):
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                report = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        run = report.get("run")
+        if not isinstance(run, dict) or "zone" not in run:
+            continue  # not one of our reports
+        yield path, report
+
+
 def cmd_index(args: argparse.Namespace) -> int:
-    from .report.index import build_index, collect_reports
+    from .report.index import build_index, collect_reports, render_index
+
+    if args.db:
+        from .history.store import Store
+
+        n_ingested = 0
+        with Store(args.db) as store:
+            for path, report in _scan_report_files(args.directory):
+                html_sibling = path.with_suffix(".html")
+                store.ingest(
+                    report,
+                    source_path=path,
+                    html_path=html_sibling if html_sibling.exists() else None,
+                )
+                n_ingested += 1
+            rows = store.query_runs()
+
+        out = Path(args.output) if args.output else Path(args.directory) / "index.html"
+        out.write_text(render_index(rows), encoding="utf-8")
+        print(f"indexed {n_ingested} runs into {args.db} -> {out}")
+        if not rows:
+            print("(no report JSON files found — analyze runs with "
+                  "--format json,html first)", file=sys.stderr)
+        return 0
 
     rows = collect_reports(args.directory)
     out = build_index(args.directory, args.output)
@@ -340,6 +398,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--raiderio", metavar="REGION",
                    help="enrich players with Raider.io scores (us/eu/kr/tw/cn); "
                         "needs internet access")
+    p.add_argument("--history-db", metavar="PATH",
+                   help="also append this run to a SQLite run-history database "
+                        "at PATH (created if missing) — see `index --db`")
     p.set_defaults(func=cmd_analyze)
 
     p = sub.add_parser(
@@ -349,6 +410,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("directory", help="directory containing report .json/.html files")
     p.add_argument("-o", "--output",
                    help="where to write the page (default: <directory>/index.html)")
+    p.add_argument("--db", metavar="PATH",
+                   help="ingest scanned reports into a SQLite database at PATH "
+                        "(created if missing, idempotent) and build the page from "
+                        "it instead of a fresh JSON scan")
     p.set_defaults(func=cmd_index)
 
     p = sub.add_parser("record", help="watch the combat log live and record each run")
