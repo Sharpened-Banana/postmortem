@@ -28,7 +28,7 @@ from ..combatlog.events import (
 from ..combatlog.guid import parse_guid
 from ..mdt.dungeon_data import DungeonData
 from .avoidable import AvoidableData
-from .gamedata import BREZ_SPELLS, LUST_SPELLS, spec_info
+from .gamedata import BREZ_SPELLS, DEFENSIVES, LUST_SPELLS, spec_info
 from .pulls import ActualPull
 
 PET_BUCKET = "_pets"
@@ -42,6 +42,14 @@ class DeathRecord:
     pull_index: Optional[int]
     killing_blow: Optional[dict[str, Any]]
     recap: list[dict[str, Any]] = field(default_factory=list)
+    # personal defensive cooldowns (see gamedata.DEFENSIVES) the victim had
+    # up around their death -- see _tag_death_defensives
+    defensives_used_before_death: list[dict[str, Any]] = field(default_factory=list)
+    # True: spec has a known defensive and none were used/active.
+    # False: spec has a known defensive and at least one was used/active.
+    # None: can't honestly say either way (unknown spec, a spec this
+    # table doesn't cover, or cast data wasn't collected this run).
+    died_without_defensive: Optional[bool] = None
 
 
 @dataclass
@@ -219,6 +227,14 @@ def compute_stats(
     # buff uptime windows: (player_guid, spell_id) -> window start ts
     open_buffs: dict[tuple[str, int], float] = {}
     buff_totals: dict[tuple[str, int], dict[str, Any]] = {}
+    # start/end timestamps of buff windows, but ONLY for DEFENSIVES spell
+    # ids (unbounded growth is fine at this scale, but not worth it
+    # globally). open_buffs/buff_totals above discard each window's actual
+    # start/end once it closes, keeping only a running total -- deaths need
+    # the real windows to catch a defensive cast >10s before death that
+    # was still active at the moment of death.
+    # (player_guid, spell_id) -> [[start, end_or_None], ...]
+    defensive_windows: dict[tuple[str, int], list[list[Optional[float]]]] = {}
     last_position: dict[str, tuple[float, float, float]] = {}  # guid -> (ts, x, y)
     open_encounter: Optional[dict[str, Any]] = None
     boss_npc_ids: set[int] = (
@@ -542,6 +558,7 @@ def compute_stats(
                     "ts": event.ts,
                     "pull": pull_idx,
                     "player": source_player.name or src_name,
+                    "player_guid": source_player.guid,
                     "spell_id": sp.spell_id,
                     "spell": sp.spell_name,
                     "target": dst_name or None,
@@ -569,6 +586,10 @@ def compute_stats(
                     buff_totals.setdefault(key, {
                         "name": sp.spell_name, "uptime_s": 0.0, "applications": 0,
                     })["applications"] += 1
+                    if sp.spell_id in DEFENSIVES:
+                        windows = defensive_windows.setdefault(key, [])
+                        if not windows or windows[-1][1] is not None:
+                            windows.append([event.ts, None])
             if sp is not None and sp.spell_id in LUST_SPELLS and is_group_player(dst_flags):
                 if not any(
                     abs(l["ts"] - event.ts) < 1.0 and l["spell_id"] == sp.spell_id
@@ -590,11 +611,19 @@ def compute_stats(
                 start = open_buffs.pop(key, None)
                 if start is not None:
                     buff_totals[key]["uptime_s"] += event.ts - start
+                if sp.spell_id in DEFENSIVES:
+                    windows = defensive_windows.get(key)
+                    if windows and windows[-1][1] is None:
+                        windows[-1][1] = event.ts
             continue
 
     # buffs still up when the run ends count until the last event
     for key, start in open_buffs.items():
         buff_totals[key]["uptime_s"] += run_end_ts - start
+    for windows in defensive_windows.values():
+        for w in windows:
+            if w[1] is None:
+                w[1] = run_end_ts
 
     duration = max(1.0, run_end_ts - run_start_ts)
     per_player: dict[str, list[dict[str, Any]]] = {}
@@ -612,9 +641,88 @@ def compute_stats(
 
     _estimate_kick_value(stats)
     _finish_pull_stats(stats, pulls, data)
+    _tag_death_defensives(stats, defensive_windows, full_cast_timeline)
     if avoidable is not None:
         _tag_avoidable_damage(stats, avoidable)
     return stats
+
+
+def _tag_death_defensives(
+    stats: RunStats,
+    defensive_windows: dict[tuple[str, int], list[list[Optional[float]]]],
+    full_cast_timeline: bool,
+) -> None:
+    """For each death, find the victim's personal defensive cooldowns (see
+    gamedata.DEFENSIVES) that were used around the time of death.
+
+    Two sources, merged (deduped by spell id):
+      - cast_timeline: any DEFENSIVES cast by the victim (matched by GUID,
+        not name -- see module notes) in the 10s window before death.
+      - defensive_windows: the retained start/end of DEFENSIVES-only buff
+        windows (see compute_stats), so a defensive cast well before the
+        10s cutoff but still active at the moment of death is still caught
+        -- the naive cast_timeline window alone would miss it.
+
+    died_without_defensive is left None -- never guessed True -- unless we
+    actually know both the victim's spec AND that spec has at least one
+    DEFENSIVES entry that applies to it. It's also forced to None when
+    full_cast_timeline was off (cast_timeline is empty) and neither source
+    found anything: with casts not being tracked, an empty result there
+    proves nothing, so treating it as "no defensive used" would be a false
+    claim rather than an honest "we don't know".
+    """
+    casts_by_player: dict[str, list[dict[str, Any]]] = {}
+    for c in stats.cast_timeline:
+        guid = c.get("player_guid")
+        if guid:
+            casts_by_player.setdefault(guid, []).append(c)
+
+    for death in stats.deaths:
+        player = stats.players.get(death.player_guid)
+        spec_id = player.spec_id if player is not None else None
+        applicable = spec_id is not None and any(
+            spec_ids is None or spec_id in spec_ids
+            for _name, spec_ids in DEFENSIVES.values()
+        )
+        if not applicable:
+            death.died_without_defensive = None
+            death.defensives_used_before_death = []
+            continue
+
+        found: dict[int, dict[str, Any]] = {}
+        for cast in casts_by_player.get(death.player_guid, ()):
+            spell_id = cast["spell_id"]
+            entry = DEFENSIVES.get(spell_id)
+            if entry is not None and death.ts - 10.0 <= cast["ts"] <= death.ts:
+                found[spell_id] = {
+                    "spell_id": spell_id, "name": entry[0], "ts": cast["ts"],
+                }
+
+        for (guid, spell_id), windows in defensive_windows.items():
+            if guid != death.player_guid or spell_id in found:
+                continue
+            entry = DEFENSIVES.get(spell_id)
+            if entry is None:
+                continue
+            for start, end in windows:
+                if start is not None and end is not None and start <= death.ts <= end:
+                    found[spell_id] = {
+                        "spell_id": spell_id, "name": entry[0], "ts": start,
+                    }
+                    break
+
+        death.defensives_used_before_death = sorted(
+            found.values(), key=lambda e: e["ts"]
+        )
+        if not found and not full_cast_timeline:
+            # cast-based detection had no data to work with (--no-cast-
+            # timeline was used); the buff-window path is independent of
+            # that flag and already had its chance above, so an empty
+            # result here isn't good enough evidence for a "died without a
+            # defensive" claim
+            death.died_without_defensive = None
+        else:
+            death.died_without_defensive = not bool(found)
 
 
 def _tag_avoidable_damage(stats: RunStats, avoidable: AvoidableData) -> None:

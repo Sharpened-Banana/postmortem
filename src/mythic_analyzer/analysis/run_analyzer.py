@@ -184,6 +184,8 @@ def analyze_run(
                 "damage_last_5s": sum(
                     r["amount"] for r in d.recap if r["ts"] >= d.ts - 5.0
                 ),
+                "defensives_used_before_death": d.defensives_used_before_death,
+                "died_without_defensive": d.died_without_defensive,
                 "recap": d.recap,
             }
             for d in stats.deaths

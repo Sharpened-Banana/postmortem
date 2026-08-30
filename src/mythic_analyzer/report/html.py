@@ -308,13 +308,30 @@ function deaths() {
     const kb = d.killing_blow || {};
     const recap = (d.recap||[]).map(r =>
       `${mmss(r.ts - (R.run.start_ts||0))} ${esc(r.spell)} from ${esc(r.source)}: ${num(r.amount)}${r.hp_after != null ? ` (hp ${num(r.hp_after)})` : ""}`).join("<br>");
+    const used = d.defensives_used_before_death || [];
+    let defensive;
+    if (used.length) {
+      const names = used.map(u => `${esc(u.name)} (${Math.round(d.ts - u.ts)}s before)`).join(", ");
+      defensive = `<span class="ok">${names}</span>`;
+    } else if (d.died_without_defensive === true) {
+      defensive = `<span class="bad">no defensive used</span>`;
+    } else {
+      // died_without_defensive is null for an unrecognized spec or one
+      // with no known defensives -- an em-dash rather than a confusing
+      // "unknown" label on every such death
+      defensive = `<span class="dim">—</span>`;
+    }
     return `<tr><td>${mmss(d.t)}</td><td>${esc(d.player)}</td>
       <td class="num">${d.pull ?? ""}</td>
       <td>${kb.spell ? `${esc(kb.spell)} from ${esc(kb.source)} for ${num(kb.amount)}` : '<span class="dim">?</span>'}</td>
+      <td class="num">${num(d.biggest_hit)}</td>
+      <td class="num">${num(d.damage_last_5s)}</td>
+      <td>${defensive}</td>
       <td><details><summary class="dim">recap</summary>${recap}</details></td></tr>`;
   }).join("");
   return `<h2>Deaths</h2><div class="wrap"><table>
-    <tr><th>Time</th><th>Player</th><th class="num">Pull</th><th>Killing blow</th><th>Last hits</th></tr>
+    <tr><th>Time</th><th>Player</th><th class="num">Pull</th><th>Killing blow</th>
+      <th class="num">Biggest hit</th><th class="num">Last 5s</th><th>Defensive</th><th>Last hits</th></tr>
     ${rows}</table></div>`;
 }
 
