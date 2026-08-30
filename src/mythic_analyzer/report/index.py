@@ -94,6 +94,15 @@ a { color:#5c9ad0; text-decoration:none; } a:hover { text-decoration:underline; 
 select { background:var(--panel); color:var(--text); border:1px solid var(--line);
   border-radius:6px; padding:6px 10px; margin-bottom:12px; }
 .dim { color:var(--dim); }
+.charts { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+  gap:12px; margin-bottom:16px; }
+.chart { background:var(--panel); border:1px solid var(--line); border-radius:8px;
+  padding:10px 12px; }
+.chart-title { font-size:11px; color:var(--dim); text-transform:uppercase;
+  letter-spacing:.06em; display:flex; justify-content:space-between; margin-bottom:6px; }
+.chart-value { color:var(--text); font-weight:600; text-transform:none;
+  letter-spacing:normal; }
+.chart-svg { width:100%; height:56px; display:block; }
 </style>
 </head>
 <body>
@@ -116,12 +125,82 @@ function result(r) {
                  : '<span class="over">over timer</span>';
 }
 
+// Small inline-SVG sparkline for one trend series. `pts` is an array of
+// {x, y} in chronological order; a null/undefined y is a missing value
+// (e.g. a run analyzed without --route has no adherence_pct) and opens a
+// gap rather than being plotted as zero. The viewBox/scale is derived from
+// the data's own bounds, same as report/html.py's mapSection() -- no
+// hardcoded axis range. A run of 2+ consecutive valid points draws as a
+// polyline; an isolated valid point (boxed in by gaps, or the only data
+// point at all) still draws as a dot rather than silently vanishing.
+function sparklineChart(pts, opts) {
+  const w = 300, h = 60, pad = 4;
+  const valid = pts.filter(p => p.y != null);
+  if (!valid.length) {
+    return `<div class="chart"><div class="chart-title">${esc(opts.title)}</div><div class="dim">not enough data</div></div>`;
+  }
+  const xs = pts.map(p => p.x);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const spanX = (maxX - minX) || 1;
+  const minY = Math.min(...valid.map(p => p.y));
+  const maxY = Math.max(...valid.map(p => p.y));
+  const spanY = (maxY - minY) || 1;
+  const sx = x => pad + (x - minX) / spanX * (w - 2 * pad);
+  const sy = y => h - pad - (y - minY) / spanY * (h - 2 * pad);
+
+  let segs = [], cur = [];
+  const flush = () => { if (cur.length) segs.push(cur); cur = []; };
+  for (const p of pts) {
+    if (p.y == null) { flush(); continue; }
+    cur.push({ x: sx(p.x), y: sy(p.y) });
+  }
+  flush();
+
+  const marks = segs.map(seg => seg.length > 1
+    ? `<polyline points="${seg.map(pt => `${pt.x.toFixed(1)},${pt.y.toFixed(1)}`).join(" ")}"
+        fill="none" stroke="${opts.color}" stroke-width="1.5"
+        stroke-linejoin="round" stroke-linecap="round"/>`
+    : `<circle cx="${seg[0].x.toFixed(1)}" cy="${seg[0].y.toFixed(1)}" r="2" fill="${opts.color}"/>`
+  ).join("");
+
+  const last = valid[valid.length - 1].y;
+  return `<div class="chart">
+    <div class="chart-title">${esc(opts.title)}<span class="chart-value">${esc(opts.fmt(last))}</span></div>
+    <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" class="chart-svg">${marks}</svg>
+  </div>`;
+}
+
+// Builds the four trend sparklines from a row set that is already filtered
+// (by the dungeon <select>) and sorted chronologically ascending -- the
+// caller (render()) owns that ordering; this function never re-sorts, so
+// it can't drift from the table's own (independent, user-clickable) sort.
+function chartsSection(sorted) {
+  let timedSoFar = 0;
+  const timedPts = sorted.map((r, i) => {
+    if (r.timed) timedSoFar++;
+    return { x: i, y: Math.round(1000 * timedSoFar / (i + 1)) / 10 };
+  });
+  const deathPts = sorted.map((r, i) => ({ x: i, y: r.deaths || 0 }));
+  const adherPts = sorted.map((r, i) => ({ x: i, y: r.adherence_pct }));
+  const kickPts = sorted.map((r, i) => ({ x: i, y: r.kick_efficiency_pct }));
+  return `<h2>Trends</h2>
+  <div class="charts">
+    ${sparklineChart(timedPts, { title: "Timed rate (cumulative)", color: "var(--good)", fmt: v => v + "%" })}
+    ${sparklineChart(deathPts, { title: "Deaths per run", color: "var(--bad)", fmt: v => String(v) })}
+    ${sparklineChart(adherPts, { title: "Route adherence", color: "var(--accent)", fmt: v => v + "%" })}
+    ${sparklineChart(kickPts, { title: "Kick efficiency", color: "var(--warn)", fmt: v => v + "%" })}
+  </div>`;
+}
+
 function render() {
-  const rows = RUNS.filter(r => !dungeon || r.zone === dungeon)
-    .slice().sort((a, b) => {
-      const va = a[sortKey] ?? -Infinity, vb = b[sortKey] ?? -Infinity;
-      return (va < vb ? -1 : va > vb ? 1 : 0) * sortDir;
-    });
+  const filtered = RUNS.filter(r => !dungeon || r.zone === dungeon);
+  const rows = filtered.slice().sort((a, b) => {
+    const va = a[sortKey] ?? -Infinity, vb = b[sortKey] ?? -Infinity;
+    return (va < vb ? -1 : va > vb ? 1 : 0) * sortDir;
+  });
+  // Charts always read the filtered-but-chronological set, independent of
+  // whatever column the table is currently sorted by.
+  const chartRows = filtered.slice().sort((a, b) => (a.start_ts ?? 0) - (b.start_ts ?? 0));
   const dungeons = [...new Set(RUNS.map(r => r.zone).filter(Boolean))].sort();
   const timed = rows.filter(r => r.timed).length;
   const completed = rows.filter(r => r.completed).length;
@@ -150,6 +229,7 @@ function render() {
     <option value="">All dungeons</option>
     ${dungeons.map(d => `<option ${d === dungeon ? "selected" : ""} value="${esc(d)}">${esc(d)}</option>`).join("")}
   </select>
+  ${chartsSection(chartRows)}
   <div class="wrap"><table>
     <tr>${th("Date", "start_ts")}${th("Dungeon", "zone")}${th("Key", "level", 1)}
     <th>Result</th>${th("Timer", "duration_ms", 1)}${th("Deaths", "deaths", 1)}
