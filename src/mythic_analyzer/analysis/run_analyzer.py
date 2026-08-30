@@ -68,12 +68,42 @@ def _kick_value_summary(stats) -> dict[str, Any]:
     }
 
 
+def _enemy_cast_summary(stats) -> dict[str, Any]:
+    """Kick efficiency: for every enemy hard-cast, did it get through?"""
+    spells = []
+    kicked_total = 0
+    landed_kickable = 0
+    for spell_id, entry in stats.enemy_cast_outcomes.items():
+        spells.append({
+            "spell_id": spell_id,
+            "name": entry["name"],
+            "kicked": entry["kicked"],
+            "got_through": entry["landed"],
+            "expired": entry["expired"],
+        })
+        if entry["kicked"]:
+            # only spells someone kicked at least once are provably kickable
+            kicked_total += entry["kicked"]
+            landed_kickable += entry["landed"]
+    spells.sort(key=lambda s: -(s["got_through"] + s["kicked"]))
+    efficiency = None
+    if kicked_total + landed_kickable:
+        efficiency = round(100.0 * kicked_total / (kicked_total + landed_kickable), 1)
+    return {
+        "note": "counts every enemy hard-cast (SPELL_CAST_START); efficiency "
+                "covers spells that were kicked at least once this run",
+        "kick_efficiency_pct": efficiency,
+        "spells": spells,
+    }
+
+
 def analyze_run(
     segment: RunSegment,
     route: Optional[Route] = None,
     store: Optional[DungeonDataStore] = None,
     pull_gap_seconds: float = 5.0,
     full_cast_timeline: bool = True,
+    death_penalty_s: float = 15.0,
 ) -> dict[str, Any]:
     """Analyze one M+ run; returns a JSON-ready report dict."""
     data: Optional[DungeonData] = None
@@ -105,10 +135,24 @@ def analyze_run(
                 "player": d.player_name,
                 "pull": d.pull_index,
                 "killing_blow": d.killing_blow,
+                "biggest_hit": max(
+                    (r["amount"] for r in d.recap), default=None
+                ),
+                "damage_last_5s": sum(
+                    r["amount"] for r in d.recap if r["ts"] >= d.ts - 5.0
+                ),
                 "recap": d.recap,
             }
             for d in stats.deaths
         ],
+        "death_cost": {
+            "deaths": len(stats.deaths),
+            "per_death_s": death_penalty_s,
+            "total_s": round(len(stats.deaths) * death_penalty_s, 1),
+        },
+        "encounters": [dict(e) for e in stats.encounters],
+        "enemy_casts": _enemy_cast_summary(stats),
+        "consumables": stats.consumable_events,
         "interrupts": stats.interrupt_events,
         "dispels": stats.dispel_events,
         "lust": stats.lust_events,
@@ -134,7 +178,18 @@ def analyze_run(
         ],
         "kick_value": _kick_value_summary(stats),
         "cast_timeline": stats.cast_timeline,
+        # per-player position samples [t, x, y] from advanced logging —
+        # groundwork for map overlays; empty without advanced combat logging
+        "positions": {
+            (stats.players[g].name or g): samples
+            for g, samples in stats.position_samples.items()
+            if g in stats.players
+        },
     }
+    for player in report["players"]:
+        uptimes = stats.buff_uptimes.get(player["guid"])
+        if uptimes:
+            player["buff_uptimes"] = uptimes
 
     if route is not None:
         report["route"] = route.summary(data)
@@ -149,8 +204,9 @@ def analyze_run(
             }
 
     for key in ("pulls", "deaths", "interrupts", "dispels", "lust", "brez",
-                "cast_timeline"):
+                "cast_timeline", "consumables"):
         _relativize(report[key], start)
+    _relativize(report["encounters"], start, key="start_ts")
     _relativize(report["forces"]["timeline"], start)
     _relativize(report["downtime"]["windows"], start, key="start_ts")
     for p in report["pulls"]:
@@ -164,4 +220,5 @@ def analyze_run(
             player["hps"] = round(
                 (player["healing_done"] + player["absorbs_granted"]) / wall, 1
             )
+            player["cpm"] = round(player["casts_total"] * 60.0 / wall, 1)
     return report

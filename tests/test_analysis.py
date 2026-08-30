@@ -193,6 +193,67 @@ class TestStats:
         assert gaps[(1, 2)] == pytest.approx(20.0, abs=1.0)
 
 
+class TestExpandedStats:
+    @pytest.fixture()
+    def stats(self, run_segment, dungeon):
+        pulls = detect_pulls(run_segment.events)
+        return compute_stats(run_segment.events, pulls, dungeon)
+
+    def test_enemy_cast_outcomes(self, stats):
+        outcomes = {v["name"]: v for v in stats.enemy_cast_outcomes.values()}
+        assert outcomes["Dark Bolt"] == {"name": "Dark Bolt", "kicked": 1,
+                                         "landed": 2, "expired": 0}
+        assert outcomes["Creeping Rot"] == {"name": "Creeping Rot", "kicked": 1,
+                                            "landed": 1, "expired": 0}
+        assert outcomes["Void Mending"] == {"name": "Void Mending", "kicked": 1,
+                                            "landed": 1, "expired": 1}
+
+    def test_killing_blows(self, stats):
+        by_name = {p.name: p for p in stats.players.values()}
+        assert by_name["Zappyboi-Area52"].killing_blows == 4
+        assert by_name["Thicktank-Area52"].killing_blows == 2
+
+    def test_casts_and_consumables(self, stats):
+        by_name = {p.name: p for p in stats.players.values()}
+        assert by_name["Zappyboi-Area52"].casts_total == 4
+        assert by_name["Zappyboi-Area52"].potions_used == 1
+        assert by_name["Bigheals-Area52"].healthstones_used == 1
+        kinds = [c["kind"] for c in stats.consumable_events]
+        assert kinds == ["potion", "healthstone"]
+
+    def test_purge_vs_dispel(self, stats):
+        tank = next(p for p in stats.players.values() if p.name == "Thicktank-Area52")
+        assert tank.purges == 1
+        assert tank.dispels == 1
+        kinds = {e["kind"] for e in stats.dispel_events}
+        assert kinds == {"purge", "dispel"}
+
+    def test_movement(self, stats):
+        dps = next(p for p in stats.players.values() if p.name == "Zappyboi-Area52")
+        assert dps.distance_traveled == pytest.approx(40.0, abs=0.1)
+        samples = stats.position_samples[dps.guid]
+        assert len(samples) == 4
+        assert samples[0][1:] == [100.0, -200.0]
+        assert samples[2][1:] == [110.0, -230.0]
+
+    def test_buff_uptime(self, stats):
+        dps = next(p for p in stats.players.values() if p.name == "Zappyboi-Area52")
+        (lust,) = [b for b in stats.buff_uptimes[dps.guid] if b["name"] == "Bloodlust"]
+        assert lust["uptime_s"] == pytest.approx(30.0, abs=0.1)
+        assert lust["uptime_pct"] == pytest.approx(21.4, abs=0.1)
+        assert lust["applications"] == 1
+
+    def test_encounters(self, stats):
+        (enc,) = stats.encounters
+        assert enc["name"] == "Big Boss"
+        assert enc["kill"] is True
+        assert enc["duration_s"] == pytest.approx(30.0, abs=0.1)
+
+    def test_boss_damage(self, stats):
+        dps = next(p for p in stats.players.values() if p.name == "Zappyboi-Area52")
+        assert dps.damage_to_bosses == 7 * 80000
+
+
 class TestAnalyzeRun:
     def test_full_report(self, run_segment, route, dungeon_data_file):
         store = DungeonDataStore.load(dungeon_data_file)
@@ -223,6 +284,23 @@ class TestAnalyzeRun:
         hex_obs = obs[(777002, "damage")]
         assert hex_obs["avg_per_cast"] == 0
         assert hex_obs["debuff_applications"] == 1
+        # new run-level sections
+        assert payload["enemy_casts"]["kick_efficiency_pct"] == 42.9
+        through = {s["name"]: s for s in payload["enemy_casts"]["spells"]}
+        assert through["Dark Bolt"]["got_through"] == 2
+        assert payload["death_cost"] == {"deaths": 1, "per_death_s": 15.0,
+                                         "total_s": 15.0}
+        assert payload["deaths"][0]["biggest_hit"] == 250000
+        assert payload["deaths"][0]["damage_last_5s"] == 400000
+        assert payload["encounters"][0]["kill"] is True
+        players = {p["name"]: p for p in payload["players"]}
+        assert players["Zappyboi-Area52"]["cpm"] == pytest.approx(1.7, abs=0.1)
+        assert players["Zappyboi-Area52"]["killing_blows"] == 4
+        lust = [b for b in players["Zappyboi-Area52"]["buff_uptimes"]
+                if b["name"] == "Bloodlust"]
+        assert lust and lust[0]["uptime_pct"] == pytest.approx(21.4, abs=0.1)
+        assert len(payload["positions"]["Zappyboi-Area52"]) == 4
+        assert payload["pulls"][0]["group_dps"] > 0
 
     def test_report_without_dungeon_data(self, run_segment, route):
         report = analyze_run(run_segment, route=route, store=None)
@@ -245,6 +323,11 @@ class TestAnalyzeRun:
         assert "~45.0k dmg (45.0k of it DoT) prevented" in text
         assert "a debuff application (seen 1x elsewhere, no damage)" in text
         assert "never landed" in text  # Mystery Bolt kick has no estimate
+        assert "Kick efficiency: 42.9%" in text
+        assert "ENEMY CASTS THAT GOT THROUGH" in text
+        assert "Death cost: 1 deaths" in text
+        assert "CONSUMABLES" in text
+        assert "1 potions" in text
         html = render_html(report)
         assert "<html" in html and "Murder Row" in html
         assert "</script>" in html
