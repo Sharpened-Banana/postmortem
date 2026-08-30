@@ -139,6 +139,35 @@ def _avoidable_damage_summary(stats, avoidable: AvoidableData) -> dict[str, Any]
     }
 
 
+def _timer_summary(par_ms: int, duration_ms: Optional[int]) -> dict[str, Any]:
+    """+2/+3 keystone-upgrade thresholds at 80%/60% of par time -- a fixed
+    WoW Mythic+ formula since the system's introduction, not season- or
+    expansion-specific (see WP-C2). ``margin_ms``/``threshold`` are only
+    included once the run actually finished (``duration_ms`` known from
+    CHALLENGE_MODE_END) -- an abandoned run has no final time to compare
+    against par, so it gets par/thresholds only, no verdict.
+    """
+    threshold_2_ms = round(par_ms * 0.8)
+    threshold_3_ms = round(par_ms * 0.6)
+    summary: dict[str, Any] = {
+        "par_ms": par_ms,
+        "threshold_2_ms": threshold_2_ms,
+        "threshold_3_ms": threshold_3_ms,
+    }
+    if duration_ms is not None:
+        summary["margin_ms"] = par_ms - duration_ms
+        if duration_ms <= threshold_3_ms:
+            threshold = 3
+        elif duration_ms <= threshold_2_ms:
+            threshold = 2
+        elif duration_ms <= par_ms:
+            threshold = 1
+        else:
+            threshold = 0
+        summary["threshold"] = threshold
+    return summary
+
+
 def analyze_run(
     segment: RunSegment,
     route: Optional[Route] = None,
@@ -147,6 +176,7 @@ def analyze_run(
     pull_gap_seconds: float = 5.0,
     full_cast_timeline: bool = True,
     death_penalty_s: float = 15.0,
+    par_ms: Optional[int] = None,
 ) -> dict[str, Any]:
     """Analyze one M+ run; returns a JSON-ready report dict."""
     data: Optional[DungeonData] = None
@@ -239,6 +269,9 @@ def analyze_run(
 
     if avoidable is not None:
         report["avoidable_damage"] = _avoidable_damage_summary(stats, avoidable)
+
+    if par_ms is not None:
+        report["timer"] = _timer_summary(par_ms, segment.duration_ms)
 
     if route is not None:
         report["route"] = route.summary(data)

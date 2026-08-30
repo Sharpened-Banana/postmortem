@@ -57,6 +57,41 @@ def _load_avoidable(path: Optional[str]) -> Optional[AvoidableData]:
         raise SystemExit(f"error: could not load avoidable-damage data {path}: {exc}")
 
 
+def _resolve_timer_par_ms(args: argparse.Namespace, challenge_map_id: Optional[int]) -> Optional[int]:
+    """Resolve a par time (ms) for this run's dungeon, for the ``timer``
+    report block (WP-C2) -- or None to omit that block entirely.
+
+    Opt-in, like --avoidable-data/--dungeon-data: only attempted when
+    --timer-data was given explicitly, or --raiderio already opted this
+    invocation into network access (in which case a live static-data
+    fetch is additionally attempted, but only if --expansion-id was also
+    given -- we don't guess a "current" expansion id, see raiderio.py).
+    Either way, a live fetch that fails or comes back unusable falls back
+    to --timer-data / the bundled data/timers.json example seed rather
+    than silently omitting the block -- this whole resolution step is a
+    best-effort fallback source, not a user-typed path whose failure
+    should be a CLI error (contrast --avoidable-data/--dungeon-data).
+    """
+    if not (args.timer_data or args.raiderio):
+        return None
+
+    from .raiderio import _default_fetcher as _rio_default_fetcher
+    from .raiderio import resolve_timer_map
+
+    if args.raiderio_no_cache:
+        fetcher = _rio_default_fetcher
+    else:
+        from .cache import cached_fetcher
+        fetcher = cached_fetcher(_rio_default_fetcher, filename="raiderio_static.json")
+
+    timers = resolve_timer_map(
+        expansion_id=args.expansion_id if args.raiderio else None,
+        fetcher=fetcher,
+        fallback_path=args.timer_data,
+    )
+    return timers.get(challenge_map_id)
+
+
 def _pick_run(segments: Iterable[RunSegment], selector: str) -> RunSegment:
     """Select one run out of a (lazy) stream of segments.
 
@@ -180,6 +215,8 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     # run is found, and never retains other runs' event lists either way.
     segment = _pick_run(segment_runs(parse_file(args.log)), args.run)
 
+    par_ms = _resolve_timer_par_ms(args, segment.challenge_map_id)
+
     report = analyze_run(
         segment,
         route=route,
@@ -188,6 +225,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         pull_gap_seconds=args.pull_gap,
         full_cast_timeline=not args.no_cast_timeline,
         death_penalty_s=args.death_penalty,
+        par_ms=par_ms,
     )
 
     if args.raiderio:
@@ -422,6 +460,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--raiderio-no-cache", action="store_true",
                    help="bypass the on-disk Raider.io lookup cache for this run "
                         "(always fetch fresh; only matters with --raiderio)")
+    p.add_argument("--timer-data", metavar="PATH",
+                   help="JSON file mapping challenge_map_id -> par time in ms "
+                        "(same shape as the bundled data/timers.json) for "
+                        "keystone-timer margin/threshold reporting; used "
+                        "automatically (falling back to the bundled example "
+                        "seed) whenever --raiderio is also given, or on its "
+                        "own to use a specific file with no network access")
+    p.add_argument("--expansion-id", type=int, metavar="N",
+                   help="expansion_id to query Raider.io's live "
+                        "mythic-plus/static-data endpoint for dungeon par "
+                        "times (only used together with --raiderio; if "
+                        "omitted, --timer-data / the bundled example seed is "
+                        "used directly with no live fetch attempted -- we "
+                        "don't guess a 'current' expansion id)")
     p.add_argument("--history-db", metavar="PATH",
                    help="also append this run to a SQLite run-history database "
                         "at PATH (created if missing) — see `index --db`")

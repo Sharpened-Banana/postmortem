@@ -56,6 +56,21 @@ def render_text(report: dict[str, Any]) -> str:
     if run.get("affixes"):
         add(f"Affixes: {run['affixes']}")
 
+    timer_info = report.get("timer")
+    if timer_info:
+        par_s = timer_info["par_ms"] / 1000.0
+        if "margin_ms" in timer_info:
+            margin_s = timer_info["margin_ms"] / 1000.0
+            verb = "beat" if margin_s >= 0 else "over"
+            thr = timer_info.get("threshold")
+            thr_label = f" (+{thr})" if thr else ""
+            add(f"Timer: {verb} timer by {_fmt_time(abs(margin_s))}{thr_label}"
+                f"  (par {_fmt_time(par_s)})")
+        else:
+            add(f"Timer: par {_fmt_time(par_s)}  (+2 at "
+                f"{_fmt_time(timer_info['threshold_2_ms'] / 1000)}, +3 at "
+                f"{_fmt_time(timer_info['threshold_3_ms'] / 1000)})")
+
     forces = report.get("forces") or {}
     if forces.get("required"):
         add(f"Forces: {forces['killed']:.0f} / {forces['required']:.0f}"
