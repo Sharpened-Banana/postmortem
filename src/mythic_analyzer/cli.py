@@ -191,8 +191,14 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     )
 
     if args.raiderio:
-        from .raiderio import enrich_report
-        n = enrich_report(report, args.raiderio)
+        from .raiderio import _default_fetcher, enrich_report
+
+        if args.raiderio_no_cache:
+            fetcher = _default_fetcher
+        else:
+            from .cache import cached_fetcher
+            fetcher = cached_fetcher(_default_fetcher)
+        n = enrich_report(report, args.raiderio, fetcher=fetcher)
         print(f"raider.io: enriched {n} players", file=sys.stderr)
 
     formats = [f.strip() for f in args.format.split(",") if f.strip()]
@@ -413,6 +419,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--raiderio", metavar="REGION",
                    help="enrich players with Raider.io scores (us/eu/kr/tw/cn); "
                         "needs internet access")
+    p.add_argument("--raiderio-no-cache", action="store_true",
+                   help="bypass the on-disk Raider.io lookup cache for this run "
+                        "(always fetch fresh; only matters with --raiderio)")
     p.add_argument("--history-db", metavar="PATH",
                    help="also append this run to a SQLite run-history database "
                         "at PATH (created if missing) — see `index --db`")

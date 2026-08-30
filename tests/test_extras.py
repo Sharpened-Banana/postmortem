@@ -262,6 +262,53 @@ class TestRaiderIO:
         assert report["raiderio"]["enriched_players"] == 1
 
 
+class TestRaiderIOCliCache:
+    """WP-C1: the CLI wraps the real fetcher in an on-disk cache by
+    default, and --raiderio-no-cache bypasses it. These monkeypatch
+    mythic_analyzer.raiderio._default_fetcher (cmd_analyze imports it
+    fresh from the module each call) so no real network traffic happens,
+    and point MYTHIC_ANALYZER_CACHE at a tmp_path so the real
+    ~/.cache/mythic-analyzer is never touched."""
+
+    def _counting_fetcher(self, calls):
+        def fake(url):
+            calls.append(url)
+            return {"name": "Cached", "class": "Mage", "active_spec_name": "Fire"}
+        return fake
+
+    def test_default_second_analyze_hits_the_cache(self, log_file, tmp_path,
+                                                     monkeypatch):
+        monkeypatch.setenv("MYTHIC_ANALYZER_CACHE", str(tmp_path / "cache-home"))
+        calls = []
+        monkeypatch.setattr("mythic_analyzer.raiderio._default_fetcher",
+                             self._counting_fetcher(calls))
+
+        assert main(["analyze", str(log_file), "--raiderio", "us",
+                     "--out", str(tmp_path / "out1")]) == 0
+        first = len(calls)
+        assert first > 0
+
+        assert main(["analyze", str(log_file), "--raiderio", "us",
+                     "--out", str(tmp_path / "out2")]) == 0
+        assert len(calls) == first  # second run served entirely from cache
+
+    def test_no_cache_flag_refetches_every_time(self, log_file, tmp_path,
+                                                  monkeypatch):
+        monkeypatch.setenv("MYTHIC_ANALYZER_CACHE", str(tmp_path / "cache-home"))
+        calls = []
+        monkeypatch.setattr("mythic_analyzer.raiderio._default_fetcher",
+                             self._counting_fetcher(calls))
+
+        assert main(["analyze", str(log_file), "--raiderio", "us",
+                     "--raiderio-no-cache", "--out", str(tmp_path / "out1")]) == 0
+        first = len(calls)
+        assert first > 0
+
+        assert main(["analyze", str(log_file), "--raiderio", "us",
+                     "--raiderio-no-cache", "--out", str(tmp_path / "out2")]) == 0
+        assert len(calls) == first * 2  # bypassed the cache both times
+
+
 class TestRecorderHooks:
     def test_hooks_fire_with_env(self, tmp_path):
         log = tmp_path / "WoWCombatLog.txt"
