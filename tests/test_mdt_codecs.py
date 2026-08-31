@@ -5,14 +5,14 @@ import os
 
 import pytest
 
-from mythic_analyzer.mdt import ace_serializer, cbor
-from mythic_analyzer.mdt.decode import (
+from postmortem.mdt import ace_serializer, cbor
+from postmortem.mdt.decode import (
     MDTDecodeError,
     decode_mdt_string,
     encode_mdt_string,
 )
-from mythic_analyzer.mdt.print_codec import decode_for_print, encode_for_print
-from mythic_analyzer.mdt.route import Route
+from postmortem.mdt.print_codec import decode_for_print, encode_for_print
+from postmortem.mdt.route import Route
 
 
 class TestPrintCodec:

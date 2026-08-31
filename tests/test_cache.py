@@ -1,8 +1,8 @@
-"""Generic on-disk Fetcher cache (mythic_analyzer.cache)."""
+"""Generic on-disk Fetcher cache (postmortem.cache)."""
 
 from pathlib import Path
 
-from mythic_analyzer.cache import (
+from postmortem.cache import (
     DEFAULT_TTL_SECONDS,
     ENV_VAR,
     cache_dir,
@@ -13,7 +13,7 @@ from mythic_analyzer.cache import (
 class TestCacheDir:
     def test_default_is_under_home_cache(self, monkeypatch):
         monkeypatch.delenv(ENV_VAR, raising=False)
-        assert cache_dir() == Path.home() / ".cache" / "mythic-analyzer"
+        assert cache_dir() == Path.home() / ".cache" / "postmortem"
 
     def test_env_var_overrides_and_is_a_directory(self, monkeypatch, tmp_path):
         monkeypatch.setenv(ENV_VAR, str(tmp_path / "somewhere"))

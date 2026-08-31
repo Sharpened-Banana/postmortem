@@ -1,5 +1,5 @@
-"""Client-side upload plumbing (mythic_analyzer.upload): the local
-upload-token file and POSTing a report to a public mythic-analyzer site.
+"""Client-side upload plumbing (postmortem.upload): the local
+upload-token file and POSTing a report to a public postmortem site.
 """
 
 from __future__ import annotations
@@ -10,15 +10,15 @@ import urllib.error
 
 import pytest
 
-import mythic_analyzer.upload as upload
-from mythic_analyzer.cli import main
+import postmortem.upload as upload
+from postmortem.cli import main
 
 
 @pytest.fixture()
 def isolated_config_dir(tmp_path, monkeypatch):
     """A config dir under tmp_path, with appdirs.config_dir() patched to
     return it -- never touches the real user's home directory."""
-    fake_dir = tmp_path / "mythic-analyzer-config"
+    fake_dir = tmp_path / "postmortem-config"
     monkeypatch.setattr(upload.appdirs, "config_dir", lambda: fake_dir)
     return fake_dir
 
@@ -178,7 +178,7 @@ class TestCLIUploadFlag:
 
     def test_upload_failure_does_not_break_analysis(self, log_file, monkeypatch, capsys):
         monkeypatch.setattr(
-            "mythic_analyzer.upload.upload_report",
+            "postmortem.upload.upload_report",
             lambda report, url, **kwargs: {"ok": False, "error": "offline"},
         )
         exit_code = main(["analyze", str(log_file), "--upload", "https://example.com"])
@@ -189,7 +189,7 @@ class TestCLIUploadFlag:
 
     def test_upload_success_prints_url(self, log_file, monkeypatch, capsys):
         monkeypatch.setattr(
-            "mythic_analyzer.upload.upload_report",
+            "postmortem.upload.upload_report",
             lambda report, url, **kwargs: {"ok": True, "run_id": 7, "url": "/runs/7"},
         )
         exit_code = main(["analyze", str(log_file), "--upload", "https://example.com"])
@@ -204,7 +204,7 @@ class TestCLIUploadFlag:
             seen.update(kwargs)
             return {"ok": True, "run_id": 1, "url": "/runs/1"}
 
-        monkeypatch.setattr("mythic_analyzer.upload.upload_report", fake_upload_report)
+        monkeypatch.setattr("postmortem.upload.upload_report", fake_upload_report)
         main(["analyze", str(log_file), "--upload", "https://example.com",
               "--upload-token", "shared-team-token"])
         assert seen["token"] == "shared-team-token"
@@ -216,5 +216,5 @@ class TestCLIUploadFlag:
         def boom(*args, **kwargs):
             raise AssertionError("upload_report should not be called")
 
-        monkeypatch.setattr("mythic_analyzer.upload.upload_report", boom)
+        monkeypatch.setattr("postmortem.upload.upload_report", boom)
         assert main(["analyze", str(log_file)]) == 0

@@ -1,4 +1,4 @@
-# Mythic-Analyzer
+# Postmortem
 
 **Mythic+ route post-mortem companion.** Import your MDT (Mythic Dungeon
 Tools) route, let the companion parse `WoWCombatLog.txt` after (or during)
@@ -23,23 +23,29 @@ pip install -e ".[dev]" && pytest
 ```bash
 # 1. One-time: extract dungeon/enemy data from your MDT addon install
 #    (maps MDT pull indices to NPC ids, names and enemy-forces counts)
-mythic-analyzer extract-data "C:/Program Files (x86)/World of Warcraft/_retail_/Interface/AddOns/MythicDungeonTools" -o mdt_data.json
+postmortem extract-data "C:/Program Files (x86)/World of Warcraft/_retail_/Interface/AddOns/MythicDungeonTools" -o mdt_data.json
 
 # 2. Check your route (paste the MDT export string, or a file containing it)
-mythic-analyzer import-route '!~MDT2~...' --dungeon-data mdt_data.json
+postmortem import-route '!~MDT2~...' --dungeon-data mdt_data.json
 
 # 3. After the run: full post-mortem
-mythic-analyzer analyze "path/to/Logs/WoWCombatLog.txt" \
+postmortem analyze "path/to/Logs/WoWCombatLog.txt" \
     --route route.txt --dungeon-data mdt_data.json \
     --format text,html,json --out reports/
 
+# optional: pull the addon's self-built interruptible/uninterruptible spell
+# database out of its SavedVariables, then pass it to `analyze` for exact
+# kick-efficiency accounting (see "Kick efficiency" below)
+postmortem extract-interrupts "WTF/Account/<ACCOUNT>/SavedVariables/Postmortem.lua" -o interrupt_data.json
+postmortem analyze ... --interrupt-data interrupt_data.json
+
 # ...or record live while you play (saves each run to its own file and
 # auto-analyzes the moment the key ends)
-mythic-analyzer record "path/to/Logs/WoWCombatLog.txt" \
+postmortem record "path/to/Logs/WoWCombatLog.txt" \
     --route route.txt --dungeon-data mdt_data.json --analyze --out runs/
 ```
 
-`mythic-analyzer runs <log>` lists every M+ run found in a log so you can
+`postmortem runs <log>` lists every M+ run found in a log so you can
 pick one with `analyze --run N` (default: the last run).
 
 ### In-game setup
@@ -49,6 +55,47 @@ WoW only writes `WoWCombatLog.txt` while combat logging is on:
 - type `/combatlog` before the key (or use an addon that auto-enables it), and
 - turn on **advanced combat logging** (Options → Network) — this adds unit
   positions and HP to the log, which improves death recaps and pull mapping.
+
+## In-game addon
+
+`addon/Postmortem/` is a real WoW addon, developed in this repo and
+symlinked into your live AddOns folder so edits here are testable in-game
+with `/reload` — no manual copying:
+
+```bash
+ln -s "$(pwd)/addon/Postmortem" \
+  "/Applications/World of Warcraft/_retail_/Interface/AddOns/Postmortem"
+```
+
+(adjust the WoW path for your platform/install location). It's independent
+of the Python tool above — no shared code, just a companion that runs live
+in-game:
+
+- **Recording helper** — auto-toggles combat logging (and advanced combat
+  logging) on at `CHALLENGE_MODE_START`, off at completion/reset, so
+  `/combatlog` is never forgotten before a key.
+- **Live stats overlay** — a small draggable window shown only during a key:
+  forces progress, timer, death count (with time lost), and interrupt count.
+- **Route progress** (needs [MythicDungeonTools](https://www.curseforge.com/wow/addons/mythic-dungeon-tools)
+  installed and a route selected for the current dungeon) — "Pull N / M"
+  against your currently-selected MDT route, plus a coarse size-mismatch
+  signal when a pull looks bigger or smaller than planned. This is
+  pull-count/clone-count tracking only, not identity-level deviation
+  detection (early/off-route/missed by specific pack, the way the Python
+  report above works) — MDT's per-dungeon NPC data lives on its own private
+  addon table and isn't accessible from outside it, so this addon can't
+  resolve *which* pack you pulled, only how many enemies and which pull
+  number.
+
+Click the minimap icon (or run `/pm`) to open an in-game window laying out
+exactly what's live in the addon vs. what needs the companion app.
+
+No settings UI yet; toggle `combatLoggingEnabled` in
+`PostmortemDB.global` directly if you want to disable the recording
+helper. There's no automated test suite for this half of the project (WoW's
+Lua API isn't something `pytest` can exercise) — correctness here leans on
+grounding every API call in real, currently-shipping addon behavior and on
+in-game testing.
 
 ## What you get
 
@@ -78,7 +125,12 @@ WoW only writes `WoWCombatLog.txt` while combat logging is on:
   per-cast timeline is included in the JSON report.
 - **Kick efficiency** — every enemy hard-cast is tracked from
   `SPELL_CAST_START` to its outcome: kicked, got through, or died
-  mid-cast; per-spell table plus an overall efficiency percentage.
+  mid-cast; per-spell table plus an overall efficiency percentage. With
+  `--interrupt-data` (the addon's self-built database, via
+  `extract-interrupts`), spells confirmed genuinely uninterruptible are
+  excluded outright instead of looking like missed kicks, and confirmed-
+  interruptible spells count toward efficiency even if never kicked this
+  run; without it, falls back to counting only spells kicked at least once.
 - **Boss attempts** — encounter table with kills, wipes and durations.
 - **Per-player extras** — killing blows, casts per minute, purges vs.
   dispels, boss-damage share, potions/healthstones used, approximate
@@ -90,7 +142,7 @@ WoW only writes `WoWCombatLog.txt` while combat logging is on:
 - **Downtime** — the gaps between pulls where the timer kept running.
 - **Positions** — per-player position samples in the JSON (advanced
   logging), groundwork for route-vs-actual map overlays.
-- **Run history** — `mythic-analyzer index reports/` builds a static
+- **Run history** — `postmortem index reports/` builds a static
   history webpage over all saved reports: filterable, sortable, with
   per-dungeon best keys and links into each run's HTML report.
 - **Raider.io** — `analyze --raiderio us` (or eu/kr/tw/cn) adds each
@@ -119,7 +171,7 @@ All three MDT export wire formats are supported and auto-detected:
 | `!`        | LibDeflate print-encoding → Deflate → AceSerializer |
 | *(none)*   | LibCompress + AceSerializer (very old exports; only the uncompressed variant — re-export from current MDT otherwise) |
 
-`mythic_analyzer.mdt` contains stdlib-only implementations of CBOR,
+`postmortem.mdt` contains stdlib-only implementations of CBOR,
 AceSerializer-3.0 and LibDeflate's printable encoding (both directions, so
 you can also re-encode modified routes).
 
@@ -138,7 +190,7 @@ you can also re-encode modified routes).
 ## Development
 
 ```
-src/mythic_analyzer/
+src/postmortem/
   mdt/         MDT string decoding (cbor, ace_serializer, print_codec),
                route model, dungeon-data extraction from the addon's Lua
   combatlog/   WoWCombatLog tokenizer, event accessors, GUIDs, run splitting
@@ -160,7 +212,7 @@ uploaded run plus each run's full report page. Point `analyze` at a
 deployed instance to upload automatically:
 
 ```bash
-mythic-analyzer analyze "path/to/Logs/WoWCombatLog.txt" --upload https://your-tracker.example
+postmortem analyze "path/to/Logs/WoWCombatLog.txt" --upload https://your-tracker.example
 ```
 
 See [site/README.md](site/README.md) for local development and the

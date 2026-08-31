@@ -18,15 +18,16 @@ from conftest import (
     build_run_log,
 )
 
-from mythic_analyzer.analysis.avoidable import AvoidableData
-from mythic_analyzer.analysis.compare import compare_route
-from mythic_analyzer.analysis.pulls import ActualPull, UnitEngagement, detect_pulls
-from mythic_analyzer.analysis.run_analyzer import analyze_run
-from mythic_analyzer.analysis.stats import compute_stats
-from mythic_analyzer.combatlog.parser import iter_events
-from mythic_analyzer.combatlog.segmenter import segment_runs
-from mythic_analyzer.mdt.dungeon_data import DungeonData, DungeonDataStore, Enemy
-from mythic_analyzer.mdt.route import Pull, Route
+from postmortem.analysis.avoidable import AvoidableData
+from postmortem.analysis.compare import compare_route
+from postmortem.analysis.interruptibility import InterruptibilityData
+from postmortem.analysis.pulls import ActualPull, UnitEngagement, detect_pulls
+from postmortem.analysis.run_analyzer import _enemy_cast_summary, analyze_run
+from postmortem.analysis.stats import RunStats, compute_stats
+from postmortem.combatlog.parser import iter_events
+from postmortem.combatlog.segmenter import segment_runs
+from postmortem.mdt.dungeon_data import DungeonData, DungeonDataStore, Enemy
+from postmortem.mdt.route import Pull, Route
 
 
 @pytest.fixture()
@@ -245,7 +246,7 @@ class TestRouteComparisonDPAlignment:
         # even though the pull's composition is an exact match for B. This
         # is *why* compare_route needs the DP correction; the fix itself is
         # asserted in test_reordered_pulls_get_correct_primary below.
-        from mythic_analyzer.analysis.compare import _find_plan_pull
+        from postmortem.analysis.compare import _find_plan_pull
 
         plan_order = [p.index for p in route.pulls]
         remaining = {p.index: p.npc_counter(dungeon) for p in route.pulls}
@@ -457,6 +458,129 @@ class TestExpandedStats:
         assert dps.damage_to_bosses == 7 * 80000
 
 
+class TestEnemyCastSummary:
+    """_enemy_cast_summary(): the interrupt_data-aware kick-efficiency
+    filter (see run_analyzer.py). The three real spells in the synthetic
+    run fixture (Dark Bolt, Creeping Rot, Void Mending) exercise the
+    interrupt_data=None fallback path against the exact stats the rest of
+    this test module already asserts (see test_enemy_cast_outcomes above);
+    hand-built RunStats/enemy_cast_outcomes fixtures exercise the
+    known-True/known-False branches in isolation, where an exact expected
+    kick_efficiency_pct is easy to hand-compute.
+    """
+
+    @pytest.fixture()
+    def stats(self, run_segment, dungeon):
+        pulls = detect_pulls(run_segment.events)
+        return compute_stats(run_segment.events, pulls, dungeon)
+
+    def test_no_interrupt_data_matches_old_heuristic(self, stats):
+        """Regression guard: interrupt_data=None (or omitted) must produce
+        byte-for-byte the same spells/kick_efficiency_pct the pre-existing
+        heuristic produced, plus only the new interruptible: None field on
+        every spell. This is the path every existing caller that doesn't
+        pass --interrupt-data still takes."""
+        result = _enemy_cast_summary(stats)
+        assert result["kick_efficiency_pct"] == 42.9
+        by_name = {s["name"]: s for s in result["spells"]}
+        assert len(by_name) == 3
+        assert by_name["Dark Bolt"] == {
+            "spell_id": 1216538, "name": "Dark Bolt", "kicked": 1,
+            "got_through": 2, "expired": 0, "interruptible": None,
+        }
+        assert by_name["Creeping Rot"] == {
+            "spell_id": 777001, "name": "Creeping Rot", "kicked": 1,
+            "got_through": 1, "expired": 0, "interruptible": None,
+        }
+        assert by_name["Void Mending"] == {
+            "spell_id": 888001, "name": "Void Mending", "kicked": 1,
+            "got_through": 1, "expired": 1, "interruptible": None,
+        }
+
+    def test_confirmed_uninterruptible_spell_excluded(self):
+        """known is False (addon confirmed genuinely uninterruptible): the
+        spell is dropped from `spells` entirely, and never touches the
+        efficiency calculation -- excluded, not just zero-weighted."""
+        stats = RunStats(enemy_cast_outcomes={
+            111: {"name": "Unkickable Nuke", "kicked": 0, "landed": 5, "expired": 0},
+            222: {"name": "Kickable Bolt", "kicked": 2, "landed": 2, "expired": 0},
+        })
+        interrupt_data = InterruptibilityData(spells={
+            111: {"name": "Unkickable Nuke", "interruptible": False},
+            222: {"name": "Kickable Bolt", "interruptible": True},
+        })
+        result = _enemy_cast_summary(stats, interrupt_data)
+        names = [s["name"] for s in result["spells"]]
+        assert names == ["Kickable Bolt"]
+        # only Kickable Bolt (confirmed interruptible) feeds efficiency:
+        # 100 * 2 kicked / (2 kicked + 2 landed) = 50.0 -- unaffected by
+        # the excluded uninterruptible spell's 5 landed casts either way
+        assert result["kick_efficiency_pct"] == 50.0
+
+    def test_confirmed_uninterruptible_only_spell_yields_no_efficiency(self):
+        """Same exclusion, but as the *only* tracked spell: confirms
+        exclusion doesn't fabricate a 0%/100% efficiency out of nothing."""
+        stats = RunStats(enemy_cast_outcomes={
+            111: {"name": "Unkickable Nuke", "kicked": 0, "landed": 5, "expired": 0},
+        })
+        interrupt_data = InterruptibilityData(spells={
+            111: {"name": "Unkickable Nuke", "interruptible": False},
+        })
+        result = _enemy_cast_summary(stats, interrupt_data)
+        assert result["spells"] == []
+        assert result["kick_efficiency_pct"] is None
+
+    def test_confirmed_interruptible_zero_kicks_drags_efficiency_down(self):
+        """known is True but kicked == 0 this run: the old heuristic made
+        this spell invisible to the efficiency calc entirely (it only
+        counted spells kicked at least once); now that it's confirmed
+        kickable, it must appear and count as a missed kick."""
+        stats = RunStats(enemy_cast_outcomes={
+            333: {"name": "Missed Kick Spell", "kicked": 0, "landed": 4, "expired": 0},
+        })
+        interrupt_data = InterruptibilityData(spells={
+            333: {"name": "Missed Kick Spell", "interruptible": True},
+        })
+        result = _enemy_cast_summary(stats, interrupt_data)
+        assert len(result["spells"]) == 1
+        assert result["spells"][0]["interruptible"] is True
+        # 100 * 0 kicked / (0 kicked + 4 landed) = 0.0, not None/absent
+        assert result["kick_efficiency_pct"] == 0.0
+
+    def test_confirmed_interruptible_with_some_kicks(self):
+        """known is True and it was actually kicked some this run: normal
+        accounting, unaffected by the new confirmed-interruptible path."""
+        stats = RunStats(enemy_cast_outcomes={
+            444: {"name": "Sometimes Kicked", "kicked": 3, "landed": 7, "expired": 0},
+        })
+        interrupt_data = InterruptibilityData(spells={
+            444: {"name": "Sometimes Kicked", "interruptible": True},
+        })
+        result = _enemy_cast_summary(stats, interrupt_data)
+        assert result["spells"][0] == {
+            "spell_id": 444, "name": "Sometimes Kicked", "kicked": 3,
+            "got_through": 7, "expired": 0, "interruptible": True,
+        }
+        # 100 * 3 / (3 + 7) = 30.0
+        assert result["kick_efficiency_pct"] == 30.0
+
+    def test_spell_never_seen_by_addon_falls_back_to_heuristic(self, stats):
+        """known is None because the spell simply isn't in the loaded
+        InterruptibilityData at all (as opposed to interrupt_data=None
+        wholesale) -- Dark Bolt was kicked this run, so it must still
+        appear (today's heuristic, unchanged) tagged interruptible: None."""
+        interrupt_data = InterruptibilityData(spells={
+            999999: {"name": "Some Other Spell", "interruptible": True},
+        })
+        result = _enemy_cast_summary(stats, interrupt_data)
+        by_name = {s["name"]: s for s in result["spells"]}
+        assert by_name["Dark Bolt"]["interruptible"] is None
+        assert by_name["Dark Bolt"]["kicked"] == 1
+        # unchanged from the interrupt_data=None case, since none of this
+        # run's spells are in the loaded (unrelated) interrupt_data
+        assert result["kick_efficiency_pct"] == 42.9
+
+
 class TestAnalyzeRun:
     def test_full_report(self, run_segment, route, dungeon_data_file):
         store = DungeonDataStore.load(dungeon_data_file)
@@ -491,6 +615,9 @@ class TestAnalyzeRun:
         assert payload["enemy_casts"]["kick_efficiency_pct"] == 42.9
         through = {s["name"]: s for s in payload["enemy_casts"]["spells"]}
         assert through["Dark Bolt"]["got_through"] == 2
+        # no --interrupt-data passed to analyze_run(): every spell falls
+        # back to the unchanged heuristic, tagged interruptible: None
+        assert through["Dark Bolt"]["interruptible"] is None
         assert payload["death_cost"] == {"deaths": 1, "per_death_s": 15.0,
                                          "total_s": 15.0}
         assert payload["deaths"][0]["biggest_hit"] == 250000
@@ -525,8 +652,8 @@ class TestAnalyzeRun:
         assert "map" not in report
 
     def test_renderers(self, run_segment, route, dungeon_data_file):
-        from mythic_analyzer.report.html import render_html
-        from mythic_analyzer.report.text import render_text
+        from postmortem.report.html import render_html
+        from postmortem.report.text import render_text
 
         store = DungeonDataStore.load(dungeon_data_file)
         report = analyze_run(run_segment, route=route, store=store)
@@ -562,7 +689,7 @@ class TestAnalyzeRun:
         assert '"map":' in html
 
     def test_renderer_omits_map_without_dungeon_data(self, run_segment, route):
-        from mythic_analyzer.report.html import render_html
+        from postmortem.report.html import render_html
 
         report = analyze_run(run_segment, route=route, store=None)
         assert "map" not in report
@@ -582,7 +709,7 @@ class TestAnalyzeRun:
         # successful calibration, and confirming the renderer draws a
         # player path and a death marker rather than just the dim
         # fallback note.
-        from mythic_analyzer.report.html import render_html
+        from postmortem.report.html import render_html
 
         store = DungeonDataStore.load(dungeon_data_file)
         report = analyze_run(run_segment, route=route, store=store)
@@ -763,8 +890,8 @@ class TestAvoidableDamage:
 
     def test_renderers_show_section_when_present(self, run_segment, route,
                                                   dungeon_data_file, avoidable):
-        from mythic_analyzer.report.html import render_html
-        from mythic_analyzer.report.text import render_text
+        from postmortem.report.html import render_html
+        from postmortem.report.text import render_text
 
         store = DungeonDataStore.load(dungeon_data_file)
         report = analyze_run(run_segment, route=route, store=store, avoidable=avoidable)
@@ -784,8 +911,8 @@ class TestAvoidableDamage:
         assert '"Bigheals-Area52"' in html
 
     def test_renderers_omit_section_when_absent(self, run_segment, route, dungeon_data_file):
-        from mythic_analyzer.report.html import render_html
-        from mythic_analyzer.report.text import render_text
+        from postmortem.report.html import render_html
+        from postmortem.report.text import render_text
 
         store = DungeonDataStore.load(dungeon_data_file)
         report = analyze_run(run_segment, route=route, store=store)
@@ -933,8 +1060,8 @@ class TestDeathDefensives:
     def test_renderers_show_biggest_hit_damage_last_5s_and_defensive_status(
         self, run_segment, route, dungeon_data_file
     ):
-        from mythic_analyzer.report.html import render_html
-        from mythic_analyzer.report.text import render_text
+        from postmortem.report.html import render_html
+        from postmortem.report.text import render_text
 
         store = DungeonDataStore.load(dungeon_data_file)
         report = analyze_run(run_segment, route=route, store=store)

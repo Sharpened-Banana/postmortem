@@ -1,12 +1,12 @@
-# Dockerfile for the public Mythic Analyzer run-tracker site (site/mythic_site).
+# Dockerfile for the public Postmortem run-tracker site (site/postmortem_site).
 #
 # Build context MUST be the repo root (not site/) -- this image needs both
-# the parent `mythic_analyzer` package (src/, installed via the root
-# pyproject.toml) and the site's own code (site/mythic_site/) plus its
+# the parent `postmortem` package (src/, installed via the root
+# pyproject.toml) and the site's own code (site/postmortem_site/) plus its
 # site/requirements.txt. A context scoped to just site/ could not see the
 # parent package's source at all. Build from the repo root, e.g.:
 #
-#   docker build -t mythic-analyzer-site .
+#   docker build -t postmortem-site .
 #
 # This machine has no local Docker install, so this image has NOT been
 # built or run locally -- it can only be validated via Fly's remote
@@ -26,7 +26,7 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 COPY site/requirements.txt site/requirements.txt
 
-# The base package (mythic-analyzer) has zero unconditional runtime
+# The base package (postmortem) has zero unconditional runtime
 # dependencies -- see pyproject.toml's [project] section, which has no
 # `dependencies = [...]` list, only `optional-dependencies` (dev, site).
 # `pip install .` here installs it from source (src/ layout, resolved via
@@ -40,7 +40,7 @@ FROM python:3.12-slim
 # Non-root user for the app process. Note: Fly volumes are commonly
 # root-owned at first mount regardless of what this image's build-time
 # chown below sets on /data (a mountpoint's on-disk ownership isn't part
-# of the image layer) -- if `mythic_site` can't write to /data after a
+# of the image layer) -- if `postmortem_site` can't write to /data after a
 # real deploy, either fix ownership once via
 # `fly ssh console -C "chown -R appuser:appuser /data"`, or drop the
 # USER directive below and run as root. See site/README.md.
@@ -49,9 +49,9 @@ RUN useradd --system --create-home --home-dir /app --shell /usr/sbin/nologin app
 COPY --from=builder /install /usr/local
 
 WORKDIR /app/site
-COPY site/mythic_site /app/site/mythic_site
+COPY site/postmortem_site /app/site/postmortem_site
 
-# Makes `mythic_site` importable without it being pip-installed -- it's a
+# Makes `postmortem_site` importable without it being pip-installed -- it's a
 # plain directory, not a package on PyPI/in this image's site-packages.
 ENV PYTHONPATH=/app/site
 
@@ -62,4 +62,4 @@ USER appuser
 
 EXPOSE 8080
 
-CMD ["uvicorn", "mythic_site.app:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "postmortem_site.app:app", "--host", "0.0.0.0", "--port", "8080"]

@@ -1,8 +1,8 @@
-# Mythic Analyzer — public run tracker (`site/`)
+# Postmortem — public run tracker (`site/`)
 
-A small FastAPI service that lets anyone upload a `mythic-analyzer`
+A small FastAPI service that lets anyone upload a `postmortem`
 report and browse everyone's uploaded runs publicly. This is the site
-behind `mythic-analyzer analyze <log> --upload <url>`.
+behind `postmortem analyze <log> --upload <url>`.
 
 Reads are fully public — no account needed to browse. Writes are
 self-served: see [Auth model](#auth-model) below.
@@ -18,11 +18,11 @@ pip install -e ".[dev,site]"
 # for a Fly volume -- point it somewhere writable for local dev instead:
 export MYTHIC_SITE_DB="$(pwd)/site/.dev-runs.db"
 
-python -m uvicorn mythic_site.app:app --reload --app-dir site
+python -m uvicorn postmortem_site.app:app --reload --app-dir site
 ```
 
 This starts the service at `http://127.0.0.1:8000`. `--app-dir site`
-puts `site/` on `sys.path` so `mythic_site` is importable without being
+puts `site/` on `sys.path` so `postmortem_site` is importable without being
 a pip-installed package (it's a plain directory, same trick used by
 `site/tests/conftest.py`). Verified working this session (`GET
 /healthz` and `GET /runs` both returned `200` against this exact
@@ -111,7 +111,7 @@ image itself has never actually been built — see
    it as your default upload target:
 
    ```bash
-   mythic-analyzer analyze <log> --upload https://<your-app>.fly.dev
+   postmortem analyze <log> --upload https://<your-app>.fly.dev
    ```
 
 ## Endpoints
@@ -130,8 +130,8 @@ image itself has never actually been built — see
 ## Auth model
 
 There is **no real login system**. `X-Upload-Token` is a self-issued
-string the uploader picks themselves (`mythic-analyzer analyze --upload
-<url>` handles this automatically — see `src/mythic_analyzer/upload.py`
+string the uploader picks themselves (`postmortem analyze --upload
+<url>` handles this automatically — see `src/postmortem/upload.py`
 and `appdirs.py` for where the token is generated/stored). It provides:
 
 - **Attribution / update-your-own-run protection**: uploading a report
@@ -172,7 +172,7 @@ account system.
   structural correctness (paths, `WORKDIR`, `PYTHONPATH`, stage
   boundaries) but the only way to actually validate it is `fly deploy`'s
   remote builder, or a local Docker install if you have one
-  (`docker build -t mythic-analyzer-site .` from the repo root).
+  (`docker build -t postmortem-site .` from the repo root).
 - **The non-root user's write access to the Fly volume is unconfirmed.**
   The Dockerfile creates and runs as an `appuser` (not root) and
   `chown`s `/data` at build time as a best-effort default, but a Fly
