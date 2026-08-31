@@ -99,11 +99,20 @@ end
 -- something. Setting it in OnShow makes every dismissal path terminal. This
 -- is deliberate -- do not change it to only fire on button click.
 StaticPopupDialogs["MYTHICANALYZER_FIRST_LOAD"] = {
-  text = "", -- set at show-time from MA.INFO.popupText, see OnShow below
+  -- Static text, not set dynamically via self.text:SetText() in OnShow --
+  -- confirmed via a real in-game error (BugSack: "MythicAnalyzer/Info.lua:
+  -- attempt to index field 'text' (a nil value)") that self.text is NOT a
+  -- reliable accessor on a StaticPopup frame at OnShow time, despite it
+  -- looking plausible from other addons' unrelated use of a `.text`
+  -- FontString field on their OWN custom frames. MA.INFO is already fully
+  -- defined above in this same file by the time this table is built, so
+  -- there's no need to set this dynamically at all -- just reference it
+  -- directly, the same way MYTHICANALYZER_COPY_URL's `text` field above
+  -- does.
+  text = MA.INFO.popupText,
   button1 = "Show me",
   button2 = CLOSE,
   OnShow = function(self)
-    self.text:SetText(MA.INFO.popupText)
     local db = MA:GetDB()
     if db then db.infoPopupSeen = true end
   end,
@@ -131,6 +140,16 @@ StaticPopupDialogs["MYTHICANALYZER_FIRST_LOAD"] = {
 -- would be a real, bad UX bug). Same file-scope-event-frame convention as
 -- Tracker.lua's own event frames, decoupled from other files.
 --
+-- Deliberately does NOT call self:UnregisterEvent()/UnregisterAllEvents()
+-- here -- confirmed via a real in-game error (BugSack:
+-- "[ADDON_ACTION_FORBIDDEN] AddOn 'MythicAnalyzer' tried to call the
+-- protected function 'Frame:UnregisterEvent()'") that doing so from inside
+-- this handler is treated as a protected/forbidden action. There's no
+-- actual need to unregister anyway: PLAYER_LOGIN only ever fires once per
+-- UI load, and a fresh /reload recreates this whole frame from scratch, so
+-- leaving the registration in place costs nothing and avoids the taint
+-- issue entirely rather than just working around it.
+--
 -- The 5-second delay and the re-check-after-the-delay (both before AND
 -- after the C_Timer.After) are deliberate -- PLAYER_LOGIN can fire before
 -- other UI is settled, and re-checking infoPopupSeen/challenge-mode status
@@ -139,7 +158,6 @@ StaticPopupDialogs["MYTHICANALYZER_FIRST_LOAD"] = {
 local firstLoadFrame = CreateFrame("Frame")
 firstLoadFrame:RegisterEvent("PLAYER_LOGIN")
 firstLoadFrame:SetScript("OnEvent", function(self)
-  self:UnregisterAllEvents()
   local db = MA:GetDB()
   if not db or db.infoPopupSeen then return end
   C_Timer.After(5, function()
