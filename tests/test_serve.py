@@ -13,9 +13,9 @@ import urllib.request
 
 import pytest
 
-from mythic_analyzer.cli import build_parser, main
-from mythic_analyzer.history import serve as serve_module
-from mythic_analyzer.history.serve import make_server
+from postmortem.cli import build_parser, main
+from postmortem.history import serve as serve_module
+from postmortem.history.serve import make_server
 
 
 def _report(zone: str, start_ts: float, level: int = 10) -> dict:

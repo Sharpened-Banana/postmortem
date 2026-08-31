@@ -1,7 +1,7 @@
 """SQLite-backed run history store.
 
 WP-B1: a durable alternative to re-scanning a folder of report JSON files
-every time ``mythic-analyzer index`` runs. ``ingest()`` writes one run
+every time ``postmortem index`` runs. ``ingest()`` writes one run
 (plus its players and deaths) into a small ``runs.db``, keyed idempotently
 on ``(zone, start_ts)`` so re-ingesting the same run is a no-op update
 rather than a duplicate row. ``query_runs()`` reads them back out in

@@ -1,7 +1,9 @@
 __pycache__/
 *.pyc
 *.egg-info/
-build/
+build/*
+!build/mythic-analyzer.spec
+!build/entry.py
 dist/
 .pytest_cache/
 mdt_data.json

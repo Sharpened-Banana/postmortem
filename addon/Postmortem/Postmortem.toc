@@ -1,0 +1,19 @@
+## Interface: 120100
+## Title: Postmortem
+## Author: lonezebra
+## Version: 0.1.0
+## Notes: Live companion to the Postmortem analysis tool -- recording helper, live stats, route tracking.
+## SavedVariables: PostmortemDB, PostmortemSpellDB
+## LoadSavedVariablesFirst: 1
+
+libs\embeds.xml
+Bootstrap.lua
+InterruptDatabase.lua
+Info.lua
+CombatLogging.lua
+Tracker.lua
+Overlay.lua
+InfoWindow.lua
+Interrupts.lua
+RouteImport.lua
+MinimapButton.lua
