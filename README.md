@@ -151,3 +151,17 @@ src/mythic_analyzer/
 Run the tests with `pytest` — they cover the codecs (with known byte
 vectors), the Lua extractor, the log parser, and a synthetic end-to-end
 M+ run with deliberate route deviations.
+
+## Public run tracker
+
+`site/` is a small FastAPI service where anyone can upload an analyzed
+report and browse everyone's runs — a public, no-account feed of every
+uploaded run plus each run's full report page. Point `analyze` at a
+deployed instance to upload automatically:
+
+```bash
+mythic-analyzer analyze "path/to/Logs/WoWCombatLog.txt" --upload https://your-tracker.example
+```
+
+See [site/README.md](site/README.md) for local development and the
+Fly.io deploy runbook.
