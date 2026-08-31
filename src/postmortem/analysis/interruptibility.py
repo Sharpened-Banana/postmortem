@@ -5,12 +5,12 @@ community/user-maintained file), this data is captured live in-game by the
 WoW addon itself: every enemy cast the player has ever seen gets checked
 against WoW's own ``UnitCastingInfo()``/``UnitChannelInfo()`` return values
 and recorded, per spell id, with the game's own ground-truth interruptible
-flag (see ``addon/MythicAnalyzer/InterruptDatabase.lua``) -- no guessing or
+flag (see ``addon/Postmortem/InterruptDatabase.lua``) -- no guessing or
 manual curation involved, just an accumulating log of what the client has
 actually observed.
 
-The addon persists this as a ``MythicAnalyzerSpellDB`` SavedVariables
-table. ``mythic-analyzer extract-interrupts`` (see ``cli.py``) pulls that
+The addon persists this as a ``PostmortemSpellDB`` SavedVariables
+table. ``postmortem extract-interrupts`` (see ``cli.py``) pulls that
 table out of the addon's SavedVariables file and writes it out in the JSON
 shape this module reads:
 

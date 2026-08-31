@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from mythic_analyzer.mdt.decode import encode_mdt_string  # noqa: E402
+from postmortem.mdt.decode import encode_mdt_string  # noqa: E402
 
 # --- synthetic dungeon ------------------------------------------------------
 

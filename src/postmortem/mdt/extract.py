@@ -17,7 +17,7 @@ enough — no Lua runtime needed. Anything that isn't a literal (function
 calls, arithmetic) is skipped with a warning rather than failing the whole
 extraction.
 
-Usage:  mythic-analyzer extract-data <path-to-MythicDungeonTools> -o mdt_data.json
+Usage:  postmortem extract-data <path-to-MythicDungeonTools> -o mdt_data.json
 """
 
 from __future__ import annotations

@@ -43,7 +43,7 @@ local ADDON_NAME, MA = ...
 -- IMPORTANT: this must only be called lazily, on demand (from our own
 -- CHALLENGE_MODE_START handler below), never at ADDON_LOADED/OnInitialize
 -- time. Addon load order between separate addons isn't guaranteed --
--- alphabetically "MythicAnalyzer" sorts before "MythicDungeonTools", so at
+-- alphabetically "Postmortem" sorts before "MythicDungeonTools", so at
 -- the moment our own ADDON_LOADED fires, MDT may not have loaded yet and
 -- MythicDungeonToolsDB may not exist as a global. CHALLENGE_MODE_START fires
 -- long after login/PLAYER_ENTERING_WORLD, by which point every addon that
@@ -69,7 +69,7 @@ end
 -- current preset, and malformed preset data are all treated as the same
 -- "nothing to show" case -- not an error.
 --
--- Preset shape verified against src/mythic_analyzer/mdt/route.py's
+-- Preset shape verified against src/postmortem/mdt/route.py's
 -- Route.from_preset()/Pull class, which documents precisely how this
 -- project's Python side already round-trips this exact real MDT format:
 -- preset.value.pulls is a table keyed by pull index (1, 2, 3, ...), each
@@ -138,7 +138,7 @@ local CONTROL_PLAYER = COMBATLOG_OBJECT_CONTROL_PLAYER or 0x00000100
 local TYPE_NPC = COMBATLOG_OBJECT_TYPE_NPC or 0x00000800
 local TYPE_GUARDIAN = COMBATLOG_OBJECT_TYPE_GUARDIAN or 0x00002000
 
--- Ported from src/mythic_analyzer/combatlog/events.py's is_hostile_npc():
+-- Ported from src/postmortem/combatlog/events.py's is_hostile_npc():
 -- NPC-or-guardian type, hostile reaction, and not currently player-
 -- controlled (e.g. via Mind Control).
 local function IsHostileNPC(flags)
@@ -148,7 +148,7 @@ local function IsHostileNPC(flags)
       and band(flags, CONTROL_PLAYER) == 0
 end
 
--- Ported from src/mythic_analyzer/combatlog/events.py's is_group_owned():
+-- Ported from src/postmortem/combatlog/events.py's is_group_owned():
 -- "Player, pet or guardian belonging to the group." This is the check the
 -- module docstring/comments below already assumed was here ("a hostile GUID
 -- first seen taking group damage") but the source's own affiliation was

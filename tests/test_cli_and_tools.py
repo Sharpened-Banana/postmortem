@@ -5,11 +5,11 @@ import textwrap
 
 from conftest import build_run_log
 
-from mythic_analyzer.cli import _pick_run, main
-from mythic_analyzer.combatlog.parser import parse_file
-from mythic_analyzer.combatlog.segmenter import segment_runs
-from mythic_analyzer.mdt.extract import extract_dungeon_file
-from mythic_analyzer.recorder import Recorder
+from postmortem.cli import _pick_run, main
+from postmortem.combatlog.parser import parse_file
+from postmortem.combatlog.segmenter import segment_runs
+from postmortem.mdt.extract import extract_dungeon_file
+from postmortem.recorder import Recorder
 
 
 class TestExtractor:
@@ -334,9 +334,9 @@ class TestRecorder:
         assert completed == [run]
 
         # the recorded slice is itself analyzable
-        from mythic_analyzer.analysis.run_analyzer import analyze_run
-        from mythic_analyzer.combatlog.parser import parse_file
-        from mythic_analyzer.combatlog.segmenter import segment_runs
+        from postmortem.analysis.run_analyzer import analyze_run
+        from postmortem.combatlog.parser import parse_file
+        from postmortem.combatlog.segmenter import segment_runs
         (seg,) = list(segment_runs(parse_file(run.path)))
         report = analyze_run(seg)
         assert len(report["pulls"]) == 3

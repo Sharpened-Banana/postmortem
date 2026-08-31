@@ -11,13 +11,13 @@ A Mythic+ route post-mortem companion: import an MDT (Mythic Dungeon
 Tools) route export, parse `WoWCombatLog.txt`, and compare the plan
 against what actually happened — pulls, deviations, damage, healing,
 deaths, kicks, cooldowns, forces, downtime. Pure Python 3.10+, **stdlib
-only at runtime** (pytest for dev). CLI entry point: `mythic-analyzer`
-(`src/mythic_analyzer/cli.py`).
+only at runtime** (pytest for dev). CLI entry point: `postmortem`
+(`src/postmortem/cli.py`).
 
 ## State as of this note
 
 `main` (`5ef5c7c`) has everything merged via PR #1
-(https://github.com/Sharpened-Banana/Mythic-Analyzer/pull/1). 86 tests
+(https://github.com/Sharpened-Banana/Postmortem/pull/1). 86 tests
 pass (`python3 -m pytest tests -q`).
 
 Shipped:
@@ -113,8 +113,8 @@ almost verbatim.
 ## Quick start for a new local session
 
 ```bash
-git clone https://github.com/Sharpened-Banana/Mythic-Analyzer
-cd Mythic-Analyzer
+git clone https://github.com/Sharpened-Banana/Postmortem
+cd Postmortem
 git checkout main
 python3 -m pip install -e ".[dev]"
 python3 -m pytest tests -q          # should show 86 passed

@@ -25,7 +25,7 @@ local function applyDefaults(target, defaults)
   end
 end
 
--- Default values for MythicAnalyzerDB.global. Later work packages will add
+-- Default values for PostmortemDB.global. Later work packages will add
 -- more settings here -- keep this list limited to what each work package
 -- actually reads.
 local defaults = {
@@ -47,8 +47,8 @@ local defaults = {
   },
 }
 
--- Default values for MythicAnalyzerSpellDB.global -- a separate
--- SavedVariables table from MythicAnalyzerDB (above) because this holds a
+-- Default values for PostmortemSpellDB.global -- a separate
+-- SavedVariables table from PostmortemDB (above) because this holds a
 -- growing, self-built spell interrupt-flag database (InterruptDatabase.lua),
 -- not user settings. An empty table is the only meaningful default: there's
 -- nothing to pre-fill, just a well-formed table to grow into.
@@ -56,26 +56,26 @@ local spellDbDefaults = {
   global = {},
 }
 
--- Ensures MythicAnalyzerDB (declared via ## SavedVariables in the .toc) is a
+-- Ensures PostmortemDB (declared via ## SavedVariables in the .toc) is a
 -- well-formed table before anything reads or writes it, then points MA.db
 -- at the live table so the rest of the addon never touches the global
 -- directly.
 -- verified against MythicDungeonTools/Core/Bootstrap.lua (InitializeSavedVariables)
 local function InitializeSavedVariables()
-  if type(MythicAnalyzerDB) ~= "table" then MythicAnalyzerDB = {} end
-  if type(MythicAnalyzerDB.global) ~= "table" then MythicAnalyzerDB.global = {} end
-  applyDefaults(MythicAnalyzerDB.global, defaults.global)
-  MA.db = MythicAnalyzerDB.global
+  if type(PostmortemDB) ~= "table" then PostmortemDB = {} end
+  if type(PostmortemDB.global) ~= "table" then PostmortemDB.global = {} end
+  applyDefaults(PostmortemDB.global, defaults.global)
+  MA.db = PostmortemDB.global
 
   -- Same guard pattern, second SavedVariables table -- see spellDbDefaults
-  -- above for why this is kept separate from MythicAnalyzerDB.
-  if type(MythicAnalyzerSpellDB) ~= "table" then MythicAnalyzerSpellDB = {} end
-  if type(MythicAnalyzerSpellDB.global) ~= "table" then MythicAnalyzerSpellDB.global = {} end
-  applyDefaults(MythicAnalyzerSpellDB.global, spellDbDefaults.global)
-  MA.spellDb = MythicAnalyzerSpellDB.global
+  -- above for why this is kept separate from PostmortemDB.
+  if type(PostmortemSpellDB) ~= "table" then PostmortemSpellDB = {} end
+  if type(PostmortemSpellDB.global) ~= "table" then PostmortemSpellDB.global = {} end
+  applyDefaults(PostmortemSpellDB.global, spellDbDefaults.global)
+  MA.spellDb = PostmortemSpellDB.global
 end
 
--- Accessor other files should use instead of touching MythicAnalyzerDB
+-- Accessor other files should use instead of touching PostmortemDB
 -- directly, so a future WP can change the storage mechanism in one place.
 -- verified against MythicDungeonTools/Core/Bootstrap.lua (MDT:GetDB)
 function MA:GetDB()
@@ -84,7 +84,7 @@ end
 
 -- Sibling accessor for the spell interrupt-flag database (see
 -- spellDbDefaults above). InterruptDatabase.lua reads/writes through this
--- rather than touching MythicAnalyzerSpellDB directly.
+-- rather than touching PostmortemSpellDB directly.
 function MA:GetSpellDB()
   return self.spellDb
 end

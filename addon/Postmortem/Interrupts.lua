@@ -22,7 +22,7 @@ local ADDON_NAME, MA = ...
 -- SpecSage/Modules/Combat.lua:83-85 ("local AFFILIATION_MINE =
 -- COMBATLOG_OBJECT_AFFILIATION_MINE or 0x00000001", etc.). The bit values
 -- themselves are also cross-checked against this project's own Python side,
--- src/mythic_analyzer/combatlog/events.py (AFFILIATION_MINE/PARTY/RAID,
+-- src/postmortem/combatlog/events.py (AFFILIATION_MINE/PARTY/RAID,
 -- TYPE_PLAYER/TYPE_PET/TYPE_GUARDIAN), which reads the identical combat log
 -- flag values from log files.
 local AFFILIATION_MINE = COMBATLOG_OBJECT_AFFILIATION_MINE or 0x00000001

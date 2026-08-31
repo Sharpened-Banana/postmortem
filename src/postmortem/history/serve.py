@@ -1,6 +1,6 @@
 """Local dev web server over a directory of saved reports (WP-B3).
 
-``mythic-analyzer serve reports/`` serves the directory as a plain static
+``postmortem serve reports/`` serves the directory as a plain static
 web root: ``GET /`` and ``GET /index.html`` return the history page, and
 ``GET /<run>.html`` serves an individual run's report page directly. Both
 of those fall straight out of ``http.server.SimpleHTTPRequestHandler``'s

@@ -319,7 +319,7 @@ def analyze_run(
         else:
             report["comparison"] = {
                 "error": "no dungeon data for this dungeon — run "
-                         "`mythic-analyzer extract-data` and pass --dungeon-data "
+                         "`postmortem extract-data` and pass --dungeon-data "
                          "to resolve planned pulls to NPCs"
             }
 

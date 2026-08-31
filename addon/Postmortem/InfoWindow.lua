@@ -1,7 +1,7 @@
 -- InfoWindow.lua
 -- The full "what's live vs. what needs the companion app" window: renders
 -- MA.INFO (Info.lua, WP-1) as a draggable, ESC-closable frame, plus the
--- /ma slash command that opens it. MinimapButton.lua's left-click already
+-- /pm slash command that opens it. MinimapButton.lua's left-click already
 -- calls MA.Info_Toggle(MA) through a guarded fallback -- this file is what
 -- makes that call actually do something instead of falling back to the
 -- copy-link popup.
@@ -24,7 +24,7 @@
 -- ("tinsert(UISpecialFrames, "MDTFrame")") and
 -- MythicDungeonTools/Modules/ErrorHandling.lua:77. It only works because the
 -- frame is given an explicit global name in CreateFrame's second argument
--- ("MythicAnalyzerInfoFrame" below) -- UISpecialFrames stores frame names,
+-- ("PostmortemInfoFrame" below) -- UISpecialFrames stores frame names,
 -- not frame references.
 --
 -- Computing the frame's height by summing each FontString's GetStringHeight()
@@ -49,7 +49,7 @@ local function CreateInfoFrame()
   -- BackdropTemplate, backdrop shape, and backdrop colors are copied
   -- verbatim from Overlay.lua's CreateOverlayFrame() -- same established
   -- visual identity, see that file's own citations for their origin.
-  local f = CreateFrame("Frame", "MythicAnalyzerInfoFrame", UIParent, "BackdropTemplate")
+  local f = CreateFrame("Frame", "PostmortemInfoFrame", UIParent, "BackdropTemplate")
   f:SetSize(460, 1) -- height set below, computed from actual text content
   f:SetFrameStrata("DIALOG") -- above the overlay's MEDIUM strata
   f:SetClampedToScreen(true)
@@ -201,26 +201,26 @@ local function CreateInfoFrame()
   f:SetPoint(pos.point, UIParent, pos.relativePoint, pos.x, pos.y)
 
   -- ESC-to-close. Only works because the frame was given the explicit
-  -- global name "MythicAnalyzerInfoFrame" above.
-  tinsert(UISpecialFrames, "MythicAnalyzerInfoFrame")
+  -- global name "PostmortemInfoFrame" above.
+  tinsert(UISpecialFrames, "PostmortemInfoFrame")
 
   f:Hide()
   return f
 end
 
 -- Public toggle, called by MinimapButton.lua's left-click handler and by
--- the /ma slash command below. Checks _G.MythicAnalyzerInfoFrame first so
+-- the /pm slash command below. Checks _G.PostmortemInfoFrame first so
 -- repeated calls don't rebuild the frame every time.
 function MA:Info_Toggle()
-  local f = _G.MythicAnalyzerInfoFrame or CreateInfoFrame()
+  local f = _G.PostmortemInfoFrame or CreateInfoFrame()
   f:SetShown(not f:IsShown())
 end
 
--- /ma and /mythicanalyzer. WoW's Lua 5.1 has no string.trim -- the gsub
+-- /pm and /postmortem. WoW's Lua 5.1 has no string.trim -- the gsub
 -- pair below is the correct, always-available way to trim whitespace.
-SLASH_MYTHICANALYZER1 = "/ma"
-SLASH_MYTHICANALYZER2 = "/mythicanalyzer"
-SlashCmdList["MYTHICANALYZER"] = function(msg)
+SLASH_POSTMORTEM1 = "/pm"
+SLASH_POSTMORTEM2 = "/postmortem"
+SlashCmdList["POSTMORTEM"] = function(msg)
   msg = (msg or ""):lower()
   msg = msg:gsub("^%s+", ""):gsub("%s+$", "") -- trim
   if msg == "" then
@@ -230,7 +230,7 @@ SlashCmdList["MYTHICANALYZER"] = function(msg)
   elseif msg == "minimap" then
     if MA.MinimapButton_Toggle then MA.MinimapButton_Toggle(MA) end
   else
-    print("|cffd7a94cMythic-Analyzer|r: /ma (info window), /ma link (copy download link), "
-      .. "/ma minimap (toggle minimap icon)")
+    print("|cffd7a94cPostmortem|r: /pm (info window), /pm link (copy download link), "
+      .. "/pm minimap (toggle minimap icon)")
   end
 end

@@ -1,5 +1,5 @@
 -- MinimapButton.lua
--- Minimap icon / Data Broker launcher for Mythic-Analyzer, built on the
+-- Minimap icon / Data Broker launcher for Postmortem, built on the
 -- vendored LibDataBroker-1.1 + LibDBIcon-1.0 (see libs/, loaded first via
 -- libs/embeds.xml). Left-click will open the full info window once a later
 -- WP defines MA.Info_Toggle; right-click shows the copy-download-link popup
@@ -29,7 +29,7 @@ function MA:MinimapButton_Initialize()
 
   local dataObject = LDB:NewDataObject(ADDON_NAME, {
     type = "launcher",
-    text = "Mythic-Analyzer",
+    text = "Postmortem",
     icon = "Interface\\Icons\\INV_Relics_Hourglass_02",
     OnClick = function(_, button)
       if button == "RightButton" then
@@ -42,7 +42,7 @@ function MA:MinimapButton_Initialize()
     end,
     OnTooltipShow = function(tooltip)
       local version = C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version")
-      tooltip:AddLine("Mythic-Analyzer" .. (version and (" " .. version) or ""))
+      tooltip:AddLine("Postmortem" .. (version and (" " .. version) or ""))
       tooltip:AddLine("Left-click: what the companion app adds", 1, 1, 1)
       tooltip:AddLine("Right-click: copy download link", 1, 1, 1)
     end,

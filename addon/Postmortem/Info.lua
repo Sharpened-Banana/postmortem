@@ -21,9 +21,9 @@ local ADDON_NAME, MA = ...
 -- info window, and the recap-panel reminder all read from this table --
 -- none of them should ever have this text typed a second time.
 MA.INFO = {
-  url = "https://github.com/Sharpened-Banana/Mythic-Analyzer/releases",
+  url = "https://github.com/Sharpened-Banana/Postmortem/releases",
 
-  headline = "Mythic-Analyzer -- live in-game half",
+  headline = "Postmortem -- live in-game half",
   subhead = "The deep post-mortem runs in the free companion desktop app.",
 
   liveTitle = "Live, in the addon",
@@ -55,9 +55,9 @@ MA.INFO = {
   -- Shown on the post-key recap panel (Overlay.lua, a later WP) -- kept to
   -- an explicit two lines (not left to word-wrap) since that panel is only
   -- 220px wide.
-  recapLine = "Full analysis: companion app\n(minimap icon or /ma)",
+  recapLine = "Full analysis: companion app\n(minimap icon or /pm)",
 
-  popupText = "Mythic-Analyzer tracks your key live: forces, timer, deaths, interrupts, and auto combat logging.\n\nThe full post-mortem -- kick value, per-player breakdowns, death recaps, route deviation by pack -- runs in the free companion desktop app.\n\nTake a look at what it adds?",
+  popupText = "Postmortem tracks your key live: forces, timer, deaths, interrupts, and auto combat logging.\n\nThe full post-mortem -- kick value, per-player breakdowns, death recaps, route deviation by pack -- runs in the free companion desktop app.\n\nTake a look at what it adds?",
 }
 
 -- Standard copy-URL popup: addons cannot open a web browser directly, so the
@@ -65,7 +65,7 @@ MA.INFO = {
 -- highlighted so Ctrl+C works immediately.
 -- verified this session against a real installed addon's hasEditBox
 -- StaticPopup.
-StaticPopupDialogs["MYTHICANALYZER_COPY_URL"] = {
+StaticPopupDialogs["POSTMORTEM_COPY_URL"] = {
   text = "Press Ctrl+C to copy",
   button1 = CLOSE,
   hasEditBox = 1,
@@ -86,7 +86,7 @@ StaticPopupDialogs["MYTHICANALYZER_COPY_URL"] = {
 }
 
 function MA:Info_ShowLinkPopup()
-  StaticPopup_Show("MYTHICANALYZER_COPY_URL", nil, nil, MA.INFO.url)
+  StaticPopup_Show("POSTMORTEM_COPY_URL", nil, nil, MA.INFO.url)
 end
 
 -- Shown exactly once per WoW account, ever (gated by db.infoPopupSeen; see
@@ -98,16 +98,16 @@ end
 -- the popup would come back every single login until they explicitly click
 -- something. Setting it in OnShow makes every dismissal path terminal. This
 -- is deliberate -- do not change it to only fire on button click.
-StaticPopupDialogs["MYTHICANALYZER_FIRST_LOAD"] = {
+StaticPopupDialogs["POSTMORTEM_FIRST_LOAD"] = {
   -- Static text, not set dynamically via self.text:SetText() in OnShow --
-  -- confirmed via a real in-game error (BugSack: "MythicAnalyzer/Info.lua:
+  -- confirmed via a real in-game error (BugSack: "Postmortem/Info.lua:
   -- attempt to index field 'text' (a nil value)") that self.text is NOT a
   -- reliable accessor on a StaticPopup frame at OnShow time, despite it
   -- looking plausible from other addons' unrelated use of a `.text`
   -- FontString field on their OWN custom frames. MA.INFO is already fully
   -- defined above in this same file by the time this table is built, so
   -- there's no need to set this dynamically at all -- just reference it
-  -- directly, the same way MYTHICANALYZER_COPY_URL's `text` field above
+  -- directly, the same way POSTMORTEM_COPY_URL's `text` field above
   -- does.
   text = MA.INFO.popupText,
   button1 = "Show me",
@@ -142,7 +142,7 @@ StaticPopupDialogs["MYTHICANALYZER_FIRST_LOAD"] = {
 --
 -- Deliberately does NOT call self:UnregisterEvent()/UnregisterAllEvents()
 -- here -- confirmed via a real in-game error (BugSack:
--- "[ADDON_ACTION_FORBIDDEN] AddOn 'MythicAnalyzer' tried to call the
+-- "[ADDON_ACTION_FORBIDDEN] AddOn 'Postmortem' tried to call the
 -- protected function 'Frame:UnregisterEvent()'") that doing so from inside
 -- this handler is treated as a protected/forbidden action. There's no
 -- actual need to unregister anyway: PLAYER_LOGIN only ever fires once per
@@ -164,6 +164,6 @@ firstLoadFrame:SetScript("OnEvent", function(self)
     if C_ChallengeMode.GetActiveChallengeMapID() then return end
     local db2 = MA:GetDB()
     if not db2 or db2.infoPopupSeen then return end
-    StaticPopup_Show("MYTHICANALYZER_FIRST_LOAD")
+    StaticPopup_Show("POSTMORTEM_FIRST_LOAD")
   end)
 end)
