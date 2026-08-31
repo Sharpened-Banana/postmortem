@@ -20,9 +20,9 @@ from pathlib import Path
 
 import pytest
 
-from mythic_analyzer.chapters import build_chapters
-from mythic_analyzer.cli import main
-from mythic_analyzer.clips import (
+from postmortem.chapters import build_chapters
+from postmortem.cli import main
+from postmortem.clips import (
     ClipSpec,
     FfmpegNotFoundError,
     build_ffmpeg_command,
@@ -209,13 +209,13 @@ class TestFfmpegMissing:
     a raw subprocess.FileNotFoundError traceback."""
 
     def test_cut_clips_raises_ffmpeg_not_found(self, monkeypatch, tmp_path):
-        monkeypatch.setattr("mythic_analyzer.clips.shutil.which", lambda name: None)
+        monkeypatch.setattr("postmortem.clips.shutil.which", lambda name: None)
         specs = [ClipSpec(0.0, 10.0, "pull", "Pull 1", tmp_path / "pull01.mp4")]
         with pytest.raises(FfmpegNotFoundError):
             cut_clips(tmp_path / "video.mp4", specs)
 
     def test_cli_clean_systemexit_when_ffmpeg_missing(self, monkeypatch, tmp_path):
-        monkeypatch.setattr("mythic_analyzer.cli.shutil.which", lambda name: None)
+        monkeypatch.setattr("postmortem.cli.shutil.which", lambda name: None)
         report_path = tmp_path / "run.json"
         report_path.write_text(json.dumps(_report()), encoding="utf-8")
         video_path = tmp_path / "video.mp4"

@@ -13,7 +13,7 @@ Two layers:
   handful of ops this tool needs (StartRecord, StopRecord,
   SaveReplayBuffer).
 
-This exists so ``mythic_analyzer.recorder`` can drive OBS directly instead
+This exists so ``postmortem.recorder`` can drive OBS directly instead
 of shelling out to a third-party tool like ``obs-cmd`` -- see
 ``recorder.py``'s module docstring. Every failure here is meant to be
 caught by the caller and turned into a warning; nothing in this module

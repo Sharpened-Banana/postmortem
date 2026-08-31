@@ -12,17 +12,17 @@ import re
 import pytest
 
 from conftest import build_run_log
-from mythic_analyzer.analysis.run_analyzer import analyze_run
-from mythic_analyzer.chapters import (
+from postmortem.analysis.run_analyzer import analyze_run
+from postmortem.chapters import (
     build_chapters,
     video_offset,
     write_chapter_files,
     write_chapters_json,
     write_vtt,
 )
-from mythic_analyzer.combatlog.parser import parse_file
-from mythic_analyzer.combatlog.segmenter import segment_runs
-from mythic_analyzer.mdt.dungeon_data import DungeonDataStore
+from postmortem.combatlog.parser import parse_file
+from postmortem.combatlog.segmenter import segment_runs
+from postmortem.mdt.dungeon_data import DungeonDataStore
 
 _VTT_TS_RE = re.compile(
     r"^(\d{2}):(\d{2}):(\d{2})\.(\d{3}) --> (\d{2}):(\d{2}):(\d{2})\.(\d{3})$"
