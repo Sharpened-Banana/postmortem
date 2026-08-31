@@ -15,10 +15,12 @@ from .pulls import detect_pulls
 from .stats import compute_stats
 
 
-def _relativize(entries: list[dict[str, Any]], start_ts: float, key: str = "ts") -> None:
+def _relativize(
+    entries: list[dict[str, Any]], start_ts: float, key: str = "ts", target: str = "t",
+) -> None:
     for e in entries:
         if key in e and isinstance(e[key], (int, float)):
-            e["t"] = round(e[key] - start_ts, 1)
+            e[target] = round(e[key] - start_ts, 1)
 
 
 def _kick_value_summary(stats) -> dict[str, Any]:
@@ -176,6 +178,71 @@ def _avoidable_damage_summary(stats, avoidable: AvoidableData) -> dict[str, Any]
     }
 
 
+def _cc_summary(stats) -> dict[str, Any]:
+    """Hard-CC uptime landed on hostile targets (see gamedata.CC_SPELLS /
+    stats.cc_events) -- distinct from interrupts (already its own summary,
+    _enemy_cast_summary/_kick_value_summary): this is about control that
+    was applied and held, not casts that were stopped."""
+    by_player: dict[str, dict[str, Any]] = {}
+    by_type: dict[str, dict[str, Any]] = {}
+    for ev in stats.cc_events:
+        caster = ev["caster"] or "Unknown"
+        p = by_player.setdefault(caster, {"name": caster, "casts": 0, "total_duration_s": 0.0})
+        p["casts"] += 1
+        p["total_duration_s"] += ev["duration_s"]
+
+        t = by_type.setdefault(ev["cc_type"], {"cc_type": ev["cc_type"], "casts": 0, "total_duration_s": 0.0})
+        t["casts"] += 1
+        t["total_duration_s"] += ev["duration_s"]
+
+    for entry in by_player.values():
+        entry["total_duration_s"] = round(entry["total_duration_s"], 1)
+    for entry in by_type.values():
+        entry["total_duration_s"] = round(entry["total_duration_s"], 1)
+
+    players = sorted(by_player.values(), key=lambda e: -e["total_duration_s"])
+    types = sorted(by_type.values(), key=lambda e: -e["total_duration_s"])
+    return {
+        "total_duration_s": round(sum(ev["duration_s"] for ev in stats.cc_events), 1),
+        "by_player": players,
+        "by_type": types,
+        "events": stats.cc_events,
+    }
+
+
+def _unplanned_pulls_summary(comparison: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    """Actual pulls that included enemies not part of the pasted route --
+    surfaced directly rather than requiring a reader to dig through every
+    pull's matched/early/late/off_route/untracked breakdown to notice one.
+    Derived entirely from compare_route()'s own output (off_route: in the
+    dungeon data but never planned; untracked: not in the dungeon data at
+    all, e.g. mid-fight summons) -- no new tracking, just a clearer view of
+    data that already existed. None when there's no route to deviate from.
+    """
+    if not comparison or "pulls" not in comparison:
+        return None
+    unplanned = []
+    total_off_route = 0
+    total_untracked = 0
+    for p in comparison["pulls"]:
+        off_route = p.get("off_route") or []
+        untracked = p.get("untracked") or []
+        if not off_route and not untracked:
+            continue
+        total_off_route += sum(e["n"] for e in off_route)
+        total_untracked += sum(e["n"] for e in untracked)
+        unplanned.append({
+            "actual_pull": p["actual_pull"],
+            "off_route": off_route,
+            "untracked": untracked,
+        })
+    return {
+        "pulls": unplanned,
+        "total_off_route_mobs": total_off_route,
+        "total_untracked_mobs": total_untracked,
+    }
+
+
 def _timer_summary(par_ms: int, duration_ms: Optional[int]) -> dict[str, Any]:
     """+2/+3 keystone-upgrade thresholds at 80%/60% of par time -- a fixed
     WoW Mythic+ formula since the system's introduction, not season- or
@@ -291,6 +358,8 @@ def analyze_run(
             for name, dmg in stats.enemy_damage_taken.most_common(20)
         ],
         "kick_value": _kick_value_summary(stats),
+        "cc": _cc_summary(stats),
+        "close_calls": stats.close_calls,
         "cast_timeline": stats.cast_timeline,
         # per-player position samples [t, x, y] from advanced logging —
         # groundwork for map overlays; empty without advanced combat logging
@@ -322,6 +391,9 @@ def analyze_run(
                          "`postmortem extract-data` and pass --dungeon-data "
                          "to resolve planned pulls to NPCs"
             }
+        unplanned = _unplanned_pulls_summary(report.get("comparison"))
+        if unplanned is not None:
+            report["unplanned_pulls"] = unplanned
 
     if data is not None:
         player_names = {g: (p.name or g) for g, p in stats.players.items()}
@@ -331,11 +403,13 @@ def analyze_run(
         )
 
     for key in ("pulls", "deaths", "interrupts", "dispels", "lust", "brez",
-                "cast_timeline", "consumables"):
+                "cast_timeline", "consumables", "close_calls"):
         _relativize(report[key], start)
     _relativize(report["encounters"], start, key="start_ts")
     _relativize(report["forces"]["timeline"], start)
     _relativize(report["downtime"]["windows"], start, key="start_ts")
+    _relativize(report["cc"]["events"], start, key="start_ts", target="t_start")
+    _relativize(report["cc"]["events"], start, key="end_ts", target="t_end")
     for p in report["pulls"]:
         p["t_start"] = round(p["start_ts"] - start, 1)
         p["t_end"] = round(p["end_ts"] - start, 1)

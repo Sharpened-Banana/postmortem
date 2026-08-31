@@ -132,6 +132,7 @@ function render() {
   html += enemyCasts();
   html += encounters();
   html += deaths();
+  html += closeCalls();
   html += utility();
   html += downtime();
   document.getElementById("app").innerHTML = html;
@@ -418,6 +419,20 @@ function deaths() {
     ${rows}</table></div>`;
 }
 
+function closeCalls() {
+  const list = R.close_calls || [];
+  if (!list.length) return "";
+  const rows = list.map(c => `<tr><td>${mmss(c.t)}</td><td>${esc(c.player)}</td>
+    <td class="num">${c.pull ?? ""}</td>
+    <td class="num dev-off">${c.hp_pct}%</td>
+    <td>${esc(c.spell)}</td><td>${esc(c.source)}</td>
+    <td class="num">${num(c.amount)}</td></tr>`).join("");
+  return `<h2>Close calls</h2><div class="wrap"><table>
+    <tr><th>Time</th><th>Player</th><th class="num">Pull</th><th class="num">HP left</th>
+      <th>Spell</th><th>Source</th><th class="num">Amount</th></tr>
+    ${rows}</table></div>`;
+}
+
 function utility() {
   const rows = [];
   (R.lust||[]).forEach(l => rows.push([l.t, "Bloodlust", `${esc(l.spell)}${l.source ? " (" + esc(l.source) + ")" : ""}`, l.pull]));
@@ -436,9 +451,11 @@ function utility() {
     rows.push([i.t, "Interrupt", `${esc(i.player)} kicked ${esc(i.interrupted_spell || "?")} on ${esc(i.target)}${suffix}`, i.pull]);
   });
   (R.dispels||[]).forEach(d => rows.push([d.t, "Dispel", `${esc(d.player)} dispelled ${esc(d.dispelled_spell || "?")} on ${esc(d.target)}`, d.pull]));
+  ((R.cc||{}).events||[]).forEach(c => rows.push([c.t_start, "CC",
+    `${esc(c.caster || "?")} ${esc(c.spell)} on ${esc(c.target || "?")} (${c.duration_s.toFixed(1)}s)`, c.pull]));
   if (!rows.length) return "";
   rows.sort((a, b) => a[0] - b[0]);
-  return `<h2>Utility timeline (lust · brez · kicks · dispels)</h2>
+  return `<h2>Utility timeline (lust · brez · kicks · dispels · CC)</h2>
     <div class="wrap"><table><tr><th>Time</th><th>Kind</th><th>What</th><th class="num">Pull</th></tr>
     ${rows.map(r => `<tr><td>${mmss(r[0])}</td><td>${r[1]}</td><td>${r[2]}</td><td class="num">${r[3] ?? ""}</td></tr>`).join("")}
     </table></div>`;

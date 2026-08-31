@@ -11,6 +11,7 @@ import pytest
 
 from postmortem.analysis.mapping import (
     MAX_RESIDUAL,
+    MIN_ANCHORS_AFTER_TRIM,
     MIN_FINAL_ANCHORS,
     build_map_report,
     calibrate,
@@ -262,6 +263,110 @@ class TestCalibrate:
         result = calibrate([pull], dungeon)
         assert result.ok is True
         assert 0 < result.residual < MAX_RESIDUAL
+
+
+def _dungeon_with_n_solo_clones(n: int) -> DungeonData:
+    """n single-clone NPCs spread across canvas space -- enough unambiguous
+    seed anchors to test outlier trimming, which needs headroom above
+    MIN_ANCHORS_AFTER_TRIM to have anything meaningful to trim."""
+    enemies = []
+    for i in range(n):
+        npc_id = 910000 + i
+        cx = 50.0 + (i % 5) * 150.0
+        cy = -50.0 - (i // 5) * 150.0
+        enemies.append(Enemy(enemy_idx=i + 1, npc_id=npc_id, name=f"Solo {i}",
+                              count=1, clones=[EnemyClone(x=cx, y=cy, sublevel=1)]))
+    return DungeonData(dungeon_idx=999, name="Trim Test Dungeon", enemies=enemies)
+
+
+class TestOutlierTrimming:
+    """Real production incident (2026-08-31): every real live upload's map
+    calibration failed with "residual too high" despite healthy anchor
+    counts (12-24) -- confirmed via a synthetic repro that a small fraction
+    of noisy/mismatched anchors (a mob that moved before its first logged
+    interaction, or a wrong npc_id/clone pairing) is enough to drag an
+    otherwise-correct fit's RMS residual from ~0 to 100+ on its own. Fixed
+    by iteratively dropping the single worst-fitting anchor and refitting
+    (_trim_outliers, called from calibrate()) until the residual clears
+    MAX_RESIDUAL or MIN_ANCHORS_AFTER_TRIM is hit -- these tests pin that
+    behavior down directly, independent of the live incident."""
+
+    def test_a_few_bad_anchors_are_trimmed_and_fit_recovers(self):
+        dungeon = _dungeon_with_n_solo_clones(10)
+        units = [
+            _unit(910000 + i, _world_for(50.0 + (i % 5) * 150.0, -50.0 - (i // 5) * 150.0), f"{i:04d}")
+            for i in range(10)
+        ]
+        # Corrupt 2 of the 10 with a wildly-wrong world position -- e.g. a
+        # mob that had already moved a long way before its first logged hit.
+        units[3] = _unit(910003, (units[3].first_pos[0] + 500, units[3].first_pos[1] - 500), "0003")
+        units[7] = _unit(910007, (units[7].first_pos[0] - 400, units[7].first_pos[1] + 600), "0007")
+        pull = ActualPull(index=1, units=units)
+
+        result = calibrate([pull], dungeon)
+        assert result.ok is True
+        assert result.residual < MAX_RESIDUAL
+        # the two corrupted anchors should have been dropped, the 8 clean
+        # ones kept -- exactly at the trim floor in this construction.
+        assert result.anchor_count == 8
+
+    def test_too_many_bad_anchors_still_fails_safe(self):
+        # Corrupting more anchors than trimming can discard while staying
+        # at/above MIN_ANCHORS_AFTER_TRIM must still fail rather than being
+        # explained away -- "a wrong map is worse than no map" stays true.
+        dungeon = _dungeon_with_n_solo_clones(10)
+        units = [
+            _unit(910000 + i, _world_for(50.0 + (i % 5) * 150.0, -50.0 - (i // 5) * 150.0), f"{i:04d}")
+            for i in range(10)
+        ]
+        for i in (1, 3, 5, 7, 9):
+            wx, wy = units[i].first_pos
+            units[i] = _unit(910000 + i, (wx + 500, wy - 500), f"{i:04d}")
+        pull = ActualPull(index=1, units=units)
+
+        result = calibrate([pull], dungeon)
+        assert result.ok is False
+        assert result.reason == "residual too high"
+
+    def test_clean_anchor_set_is_unaffected_by_trimming(self):
+        # Regression guard: a fit that's already within MAX_RESIDUAL must
+        # come out of _trim_outliers completely untouched (same anchor
+        # count, same residual) -- trimming only ever activates on a
+        # failing fit.
+        dungeon = _dungeon_with_n_solo_clones(10)
+        units = [
+            _unit(910000 + i, _world_for(50.0 + (i % 5) * 150.0, -50.0 - (i // 5) * 150.0), f"{i:04d}")
+            for i in range(10)
+        ]
+        pull = ActualPull(index=1, units=units)
+        result = calibrate([pull], dungeon)
+        assert result.ok is True
+        assert result.anchor_count == 10
+        assert result.residual < 1.0
+
+    def test_min_anchors_after_trim_floor_is_respected(self):
+        # Only exactly MIN_ANCHORS_AFTER_TRIM clean anchors plus a couple of
+        # bad ones: trimming must stop at the floor rather than trimming
+        # down to a tiny, unreliable anchor set even if that would clear
+        # MAX_RESIDUAL.
+        n = MIN_ANCHORS_AFTER_TRIM + 2
+        dungeon = _dungeon_with_n_solo_clones(n)
+        units = [
+            _unit(910000 + i, _world_for(50.0 + (i % 5) * 150.0, -50.0 - (i // 5) * 150.0), f"{i:04d}")
+            for i in range(n)
+        ]
+        for i in range(n - 2, n):
+            wx, wy = units[i].first_pos
+            units[i] = _unit(910000 + i, (wx + 500, wy - 500), f"{i:04d}")
+        pull = ActualPull(index=1, units=units)
+
+        result = calibrate([pull], dungeon)
+        # Trimming the 2 bad anchors lands exactly at the floor -- still a
+        # legitimate pass, not a violation of it.
+        if result.ok:
+            assert result.anchor_count >= MIN_ANCHORS_AFTER_TRIM
+        else:
+            assert result.reason == "residual too high"
 
 
 class TestPlanGeometry:

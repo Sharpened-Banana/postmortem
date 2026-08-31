@@ -123,6 +123,8 @@ def render_text(report: dict[str, Any]) -> str:
                 flags.append("LATE: " + _npcs(m["picked_up_late"]))
             if m["off_route"]:
                 flags.append("OFF-ROUTE: " + _npcs(m["off_route"]))
+            if m["untracked"]:
+                flags.append("ADDS: " + _npcs(m["untracked"]))
             marker = "  " if not flags else "! "
             add(f"{marker}{label} -> {plan_label}"
                 + ("  |  " + "  |  ".join(flags) if flags else ""))
@@ -175,6 +177,16 @@ def render_text(report: dict[str, Any]) -> str:
                 detail.append("no defensive used")
             if detail:
                 add(f"    {'  |  '.join(detail)}")
+
+    # --- close calls ---
+    close_calls = report.get("close_calls") or []
+    if close_calls:
+        add("")
+        add("-- CLOSE CALLS " + "-" * 57)
+        for c in close_calls:
+            add(f"{_fmt_time(c.get('t'))}  {c['player']} dropped to {c['hp_pct']}% hp"
+                f"  (pull {c.get('pull', '?')})  -- {c['spell']} from {c['source']}"
+                f" for {_fmt_num(c['amount'])}")
 
     # --- enemy casts / kick efficiency ---
     spells = (report.get("enemy_casts") or {}).get("spells") or []
@@ -248,6 +260,19 @@ def render_text(report: dict[str, Any]) -> str:
             add(f"    {_fmt_time(i.get('t'))}  {i['player']} kicked "
                 f"{i.get('interrupted_spell') or '?'} on {i['target']}"
                 + (f": {' + '.join(what)} prevented{basis}" if what else basis))
+
+    # --- crowd control ---
+    cc = report.get("cc") or {}
+    if cc.get("by_player"):
+        add("")
+        add("-- CROWD CONTROL " + "-" * 55)
+        add(f"Total CC time landed: {_fmt_time(cc['total_duration_s'])}")
+        for entry in cc["by_player"]:
+            add(f"  {entry['name']:<24}{entry['casts']} casts, "
+                f"{_fmt_time(entry['total_duration_s'])} total")
+        for ev in sorted(cc["events"], key=lambda e: e.get("t_start", 0)):
+            add(f"    {_fmt_time(ev.get('t_start'))}  {ev['caster'] or '?'} {ev['spell']}"
+                f" on {ev['target'] or '?'}  ({ev['duration_s']:.1f}s)")
 
     # --- avoidable damage ---
     avoidable = report.get("avoidable_damage")
