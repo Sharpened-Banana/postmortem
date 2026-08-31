@@ -1,0 +1,18 @@
+{
+  "_comment": "Example --avoidable-data file. 'spells' is the master list of spell ids tagged as avoidable (stand-in-fire / easily-dodged mechanics); 'dungeons' is optional metadata mapping a dungeon_idx (matching mdt_data.json) to the subset of tagged spells relevant to that dungeon. We ship the format + this one example, not a full spell database -- extend it yourself, or with a community-maintained file.",
+  "spells": [
+    {
+      "id": 1216538,
+      "name": "Fel Detonation",
+      "note": "Murder Row (Felwyrm) -- AOE ground effect, easily sidestepped"
+    },
+    {
+      "id": 1217099,
+      "name": "Fel-Infused Freight",
+      "note": "Murder Row (Forbidden Freight) -- AOE, avoidable"
+    }
+  ],
+  "dungeons": {
+    "160": [1216538, 1217099]
+  }
+}

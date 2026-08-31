@@ -1,0 +1,49 @@
+# Keeps the Docker build context (and therefore image layers/cache) free
+# of things the image doesn't need to run site/postmortem_site. Build context
+# is the repo root -- see Dockerfile's top comment for why.
+
+.git/
+.claude/
+
+# Test suites -- not needed at runtime; site/tests/ is excluded
+# specifically (not just tests/) so it doesn't get pulled in separately.
+tests/
+site/tests/
+.pytest_cache/
+
+# Docs -- not needed by the running service. README.md is a deliberate
+# exception: pyproject.toml declares `readme = "README.md"`, so the
+# Dockerfile's `pip install .` needs it present in the build context (see
+# Dockerfile's own COPY step) -- excluding it here would break the build.
+docs/
+ROADMAP.md
+
+# The in-game WoW addon -- unrelated to the site image. (Not present on
+# every branch's tree, but excluded here in case it lands alongside this
+# one later.)
+addon/
+
+# Local build/dist artifacts (PyInstaller etc.) and Python bytecode.
+build/
+dist/
+*.egg-info/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# Virtualenvs -- never belong in a build context.
+.venv/
+venv/
+
+# Local SQLite databases -- the real DB lives on a Fly volume at
+# /data/runs.db, never baked into the image.
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+data/*.db
+
+# Editor/OS cruft.
+.DS_Store
+.vscode/
+.idea/

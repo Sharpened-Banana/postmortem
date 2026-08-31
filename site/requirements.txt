@@ -1,0 +1,10 @@
+# Dependencies for the postmortem_site FastAPI service itself.
+#
+# NOTE: this file does NOT list `postmortem` (the parent package
+# this service imports from `src/`). A later WP's Docker build installs
+# that separately from the monorepo root (e.g. `pip install -e .` or
+# `pip install .` against the repo root's pyproject.toml) -- it isn't
+# pip-installable from this requirements.txt alone.
+fastapi>=0.110
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
