@@ -1,4 +1,4 @@
-# Builds the Mythic Analyzer desktop app for macOS and Windows and
+# Builds the Postmortem desktop app for macOS and Windows and
 # attaches both to a GitHub Release whenever a tag is pushed.
 #
 # Why a build matrix instead of one job: PyInstaller is NOT a
@@ -39,7 +39,7 @@ jobs:
         run: pip install ".[dev,desktop]"
 
       - name: Build with PyInstaller
-        run: pyinstaller build/mythic-analyzer.spec
+        run: pyinstaller build/postmortem.spec
 
       # macOS: zip the .app bundle with ditto, not plain `zip -r` --
       # ditto is Apple's own recommended way to archive a .app for
@@ -49,16 +49,16 @@ jobs:
       - name: Package macOS build
         if: runner.os == 'macOS'
         run: |
-          ditto -c -k --sequesterRsrc --keepParent dist/MythicAnalyzer.app MythicAnalyzer-macos.zip
+          ditto -c -k --sequesterRsrc --keepParent dist/Postmortem.app Postmortem-macos.zip
 
       # Windows: the spec builds a onedir (COLLECT) layout rather than
-      # --onefile, so zip the whole dist/MythicAnalyzer/ folder as the
+      # --onefile, so zip the whole dist/Postmortem/ folder as the
       # single downloadable artifact.
       - name: Package Windows build
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Compress-Archive -Path dist/MythicAnalyzer/* -DestinationPath MythicAnalyzer-windows.zip
+          Compress-Archive -Path dist/Postmortem/* -DestinationPath Postmortem-windows.zip
 
       # softprops/action-gh-release creates the tag's release on first
       # call and appends to it on subsequent calls, so both matrix jobs
@@ -70,4 +70,4 @@ jobs:
       - name: Publish release asset
         uses: softprops/action-gh-release@v2
         with:
-          files: MythicAnalyzer-*.zip
+          files: Postmortem-*.zip

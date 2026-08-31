@@ -3,19 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mythic Analyzer</title>
+<title>Postmortem</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
 <div id="boot-loading" class="boot-loading">
   <div class="spinner"></div>
-  <div class="boot-text">Starting Mythic Analyzer…</div>
+  <div class="boot-text">Starting Postmortem…</div>
 </div>
 
 <div class="app-shell">
   <header class="topbar">
-    <div class="brand"><span class="brand-mark">⚔</span> Mythic Analyzer</div>
+    <div class="brand"><span class="brand-mark">⚔</span> Postmortem</div>
     <nav class="topnav">
       <button type="button" class="navbtn" data-screen="home">Home</button>
       <button type="button" class="navbtn" data-screen="new">New Analysis</button>
@@ -179,7 +179,7 @@
 
         <div class="field">
           <label>History database path</label>
-          <input type="text" id="hist-db-path" placeholder="e.g. /Users/you/mythic-analyzer/history.db">
+          <input type="text" id="hist-db-path" placeholder="e.g. /Users/you/postmortem/history.db">
           <div class="help">A SQLite database written by the CLI's <code>index --db</code> mode. Set a default in Settings to have this pre-filled.</div>
         </div>
 
@@ -265,7 +265,7 @@
 
         <div class="field">
           <label>Public tracker site URL</label>
-          <input type="text" id="set-site-url" placeholder="e.g. https://mythic-analyzer.fly.dev">
+          <input type="text" id="set-site-url" placeholder="e.g. https://postmortem.fly.dev">
           <div class="help">Where "Upload to site" on a report screen sends runs. Anyone can browse an uploaded run — see the site's own /about page for what "uploading" means.</div>
         </div>
 
