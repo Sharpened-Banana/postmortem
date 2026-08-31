@@ -119,8 +119,19 @@ class LogBuilder:
 
     @staticmethod
     def _advanced(info_guid: str, hp=500000, max_hp=1000000, x=100.0, y=-200.0):
+        # 19 fields, matching the real (2026-era, BUILD_VERSION 12.1.0)
+        # client's advanced-logging block -- confirmed field-by-field
+        # against two independent real combat-log lines during live
+        # in-game testing (see events.py's ADVANCED_LEN comment and
+        # memory/advanced_block_parsing_bug.md). The two "0,0" fields
+        # right after powerCost are real, currently-unidentified fields
+        # observed as 0 in every real sample seen so far -- not one of
+        # AdvancedInfo's named fields, just present-and-skipped so the
+        # fixture's field COUNT matches reality (that's what
+        # ADVANCED_LEN/_advanced_offset() actually depend on, not their
+        # semantics).
         return (f"{info_guid},0000000000000000,{hp},{max_hp},2000,1000,500,0,3,"
-                f"100,100,0,{x:.2f},{y:.2f},2200,1.57,80")
+                f"100,100,0,0,0,{x:.2f},{y:.2f},2200,1.57,80")
 
     # -- combat events --
 

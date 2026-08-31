@@ -186,7 +186,21 @@ _GUID_PREFIXES = (
     "Player-", "Creature-", "Pet-", "Vehicle-", "GameObject-", "Corpse-",
 )
 
-ADVANCED_LEN = 17
+# Was 17 -- confirmed wrong against two independent real combat-log lines
+# (a SPELL_DAMAGE and a SPELL_HEAL, both from a real 2026-era client,
+# BUILD_VERSION 12.1.0) captured during real in-game testing: the true
+# block is 19 fields, with two extra fields (both observed as "0" in every
+# sample so far, semantics unknown -- not one of the named AdvancedInfo
+# fields below) inserted between powerCost and pos_x. Under the old
+# ADVANCED_LEN=17, every field read *after* the advanced block -- which
+# includes the damage/heal "amount" suffix field, not just pos_x/pos_y/
+# ui_map_id/facing/level inside the block itself -- was shifted by 2,
+# silently corrupting damage/healing totals project-wide whenever advanced
+# combat logging is on (i.e. on every real M+ run recorded through this
+# addon, which forces advanced logging on). See memory/
+# advanced_block_parsing_bug.md for the full real-line-by-real-line
+# derivation.
+ADVANCED_LEN = 19
 
 
 def _looks_like_guid(value: str) -> bool:
@@ -234,11 +248,14 @@ def advanced_info(event: Event) -> Optional[AdvancedInfo]:
         power_type=p[off + 8],
         current_power=to_int(p[off + 9]),
         max_power=to_int(p[off + 10]),
-        pos_x=to_float(p[off + 12]),
-        pos_y=to_float(p[off + 13]),
-        ui_map_id=to_int(p[off + 14]),
-        facing=to_float(p[off + 15]),
-        level=to_int(p[off + 16]),
+        # off + 11 is powerCost; off + 12/13 are the two newly-discovered
+        # fields (see ADVANCED_LEN's own comment) -- both skipped here since
+        # AdvancedInfo has no field for them and their meaning is unknown.
+        pos_x=to_float(p[off + 14]),
+        pos_y=to_float(p[off + 15]),
+        ui_map_id=to_int(p[off + 16]),
+        facing=to_float(p[off + 17]),
+        level=to_int(p[off + 18]),
     )
 
 
