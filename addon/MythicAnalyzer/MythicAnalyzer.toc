@@ -8,3 +8,5 @@
 
 Bootstrap.lua
 CombatLogging.lua
+Tracker.lua
+Overlay.lua
