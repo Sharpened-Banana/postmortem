@@ -1,0 +1,24 @@
+package-as: MythicAnalyzer
+
+# The addon lives in addon/MythicAnalyzer/, not the repo root (this repo also
+# holds the unrelated Python post-mortem tool). move-folders relocates it to
+# become the package root -- the source path is package-as + the file's real
+# repo-relative path, matching the exact pattern this session verified
+# against EllesmereGaming/EllesmereUI's own real, currently-shipping
+# .pkgmeta (a monorepo of several addons using this same mechanism).
+move-folders:
+  MythicAnalyzer/addon/MythicAnalyzer: MythicAnalyzer
+
+# Everything else in this monorepo is the unrelated Python tool (or repo
+# plumbing) and must not end up in the addon zip.
+ignore:
+  - src
+  - tests
+  - docs
+  - data
+  - pyproject.toml
+  - README.md
+  - ROADMAP.md
+  - .gitignore
+  - .github
+  - .pytest_cache
