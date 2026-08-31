@@ -35,6 +35,15 @@ local defaults = {
     -- frame:GetPoint(), restored via frame:SetPoint() when the overlay
     -- frame is first created.
     overlayPosition = { point = "CENTER", relativePoint = "CENTER", x = 0, y = 0 },
+    -- Below: shape reserved for Info.lua (this WP) and two later work
+    -- packages (a minimap button and an info window) so those WPs don't
+    -- need to touch Bootstrap.lua again. infoPopupSeen is set by Info.lua's
+    -- first-load popup; minimapIcon and infoWindowPosition are consumed by
+    -- the not-yet-built minimap button and info window respectively -- no
+    -- functionality for either is implemented here.
+    infoPopupSeen = false,
+    minimapIcon = { hide = false, showInCompartment = true },
+    infoWindowPosition = { point = "CENTER", relativePoint = "CENTER", x = 0, y = 0 },
   },
 }
 
