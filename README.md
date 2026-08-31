@@ -50,6 +50,44 @@ WoW only writes `WoWCombatLog.txt` while combat logging is on:
 - turn on **advanced combat logging** (Options → Network) — this adds unit
   positions and HP to the log, which improves death recaps and pull mapping.
 
+## In-game addon
+
+`addon/MythicAnalyzer/` is a real WoW addon, developed in this repo and
+symlinked into your live AddOns folder so edits here are testable in-game
+with `/reload` — no manual copying:
+
+```bash
+ln -s "$(pwd)/addon/MythicAnalyzer" \
+  "/Applications/World of Warcraft/_retail_/Interface/AddOns/MythicAnalyzer"
+```
+
+(adjust the WoW path for your platform/install location). It's independent
+of the Python tool above — no shared code, just a companion that runs live
+in-game:
+
+- **Recording helper** — auto-toggles combat logging (and advanced combat
+  logging) on at `CHALLENGE_MODE_START`, off at completion/reset, so
+  `/combatlog` is never forgotten before a key.
+- **Live stats overlay** — a small draggable window shown only during a key:
+  forces progress, timer, death count (with time lost), and interrupt count.
+- **Route progress** (needs [MythicDungeonTools](https://www.curseforge.com/wow/addons/mythic-dungeon-tools)
+  installed and a route selected for the current dungeon) — "Pull N / M"
+  against your currently-selected MDT route, plus a coarse size-mismatch
+  signal when a pull looks bigger or smaller than planned. This is
+  pull-count/clone-count tracking only, not identity-level deviation
+  detection (early/off-route/missed by specific pack, the way the Python
+  report above works) — MDT's per-dungeon NPC data lives on its own private
+  addon table and isn't accessible from outside it, so this addon can't
+  resolve *which* pack you pulled, only how many enemies and which pull
+  number.
+
+No settings UI yet; toggle `combatLoggingEnabled` in
+`MythicAnalyzerDB.global` directly if you want to disable the recording
+helper. There's no automated test suite for this half of the project (WoW's
+Lua API isn't something `pytest` can exercise) — correctness here leans on
+grounding every API call in real, currently-shipping addon behavior and on
+in-game testing.
+
 ## What you get
 
 - **Route vs. actual** — every actual pull is matched against the planned
