@@ -26,11 +26,15 @@ local function applyDefaults(target, defaults)
 end
 
 -- Default values for MythicAnalyzerDB.global. Later work packages will add
--- more settings here (e.g. overlayPosition) -- keep this list limited to
--- what this work package actually reads.
+-- more settings here -- keep this list limited to what each work package
+-- actually reads.
 local defaults = {
   global = {
     combatLoggingEnabled = true,
+    -- Overlay.lua's draggable status frame: saved on OnDragStop via
+    -- frame:GetPoint(), restored via frame:SetPoint() when the overlay
+    -- frame is first created.
+    overlayPosition = { point = "CENTER", relativePoint = "CENTER", x = 0, y = 0 },
   },
 }
 
