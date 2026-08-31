@@ -9,7 +9,7 @@ import math
 
 import pytest
 
-from mythic_analyzer.analysis.mapping import (
+from postmortem.analysis.mapping import (
     MAX_RESIDUAL,
     MIN_FINAL_ANCHORS,
     build_map_report,
@@ -17,9 +17,9 @@ from mythic_analyzer.analysis.mapping import (
     fit_transform,
     plan_geometry,
 )
-from mythic_analyzer.analysis.pulls import ActualPull, UnitEngagement
-from mythic_analyzer.mdt.dungeon_data import DungeonData, Enemy, EnemyClone, MapPOI
-from mythic_analyzer.mdt.route import Pull, Route
+from postmortem.analysis.pulls import ActualPull, UnitEngagement
+from postmortem.mdt.dungeon_data import DungeonData, Enemy, EnemyClone, MapPOI
+from postmortem.mdt.route import Pull, Route
 
 
 def _apply_known(pts, s, theta, tx, ty, reflect=False):
@@ -342,7 +342,7 @@ class TestBuildMapReport:
         wx, wy = _world_for(300.0, -150.0)
         samples = {"Player-1": [[0.0, wx, wy, 111]]}
 
-        from mythic_analyzer.analysis.stats import DeathRecord
+        from postmortem.analysis.stats import DeathRecord
         deaths = [DeathRecord(ts=0.0, player_guid="Player-1", player_name="Zug",
                                pull_index=1, killing_blow=None)]
 

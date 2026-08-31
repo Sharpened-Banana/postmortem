@@ -1,4 +1,4 @@
-"""Shared fixtures for the mythic_site test suite.
+"""Shared fixtures for the postmortem_site test suite.
 
 ``pytest.importorskip("fastapi")`` at module scope means this whole file
 -- and therefore this whole test suite -- just skips cleanly if fastapi
@@ -22,9 +22,9 @@ _SRC = _REPO_ROOT / "src"
 _SITE = _REPO_ROOT / "site"
 
 # Mirrors the sys.path setup the main tests/conftest.py already does for
-# `src` (this repo also has an editable install of mythic-analyzer, so
+# `src` (this repo also has an editable install of postmortem, so
 # this is mostly a belt-and-suspenders fallback); `site` needs the same
-# treatment so `import mythic_site` resolves without the package being
+# treatment so `import postmortem_site` resolves without the package being
 # separately pip-installed.
 for _p in (str(_SRC), str(_SITE)):
     if _p not in sys.path:
@@ -45,7 +45,7 @@ for _p in (str(_SRC), str(_SITE)):
 # pytest's own "import file mismatch" error. A distinct module name
 # sidesteps the whole question.
 _conftest_spec = importlib.util.spec_from_file_location(
-    "_mythic_site_shared_test_helpers", _REPO_ROOT / "tests" / "conftest.py"
+    "_postmortem_site_shared_test_helpers", _REPO_ROOT / "tests" / "conftest.py"
 )
 _shared = importlib.util.module_from_spec(_conftest_spec)
 sys.modules[_conftest_spec.name] = _shared
@@ -53,19 +53,19 @@ _conftest_spec.loader.exec_module(_shared)
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from mythic_analyzer.analysis.run_analyzer import analyze_run  # noqa: E402
-from mythic_analyzer.combatlog.parser import iter_events  # noqa: E402
-from mythic_analyzer.combatlog.segmenter import segment_runs  # noqa: E402
-from mythic_analyzer.mdt.dungeon_data import DungeonDataStore  # noqa: E402
-from mythic_analyzer.mdt.route import Route  # noqa: E402
+from postmortem.analysis.run_analyzer import analyze_run  # noqa: E402
+from postmortem.combatlog.parser import iter_events  # noqa: E402
+from postmortem.combatlog.segmenter import segment_runs  # noqa: E402
+from postmortem.mdt.dungeon_data import DungeonDataStore  # noqa: E402
+from postmortem.mdt.route import Route  # noqa: E402
 
-from mythic_site import config as site_config  # noqa: E402
-from mythic_site.app import app  # noqa: E402
+from postmortem_site import config as site_config  # noqa: E402
+from postmortem_site.app import app  # noqa: E402
 
 
 @pytest.fixture()
 def site_db(tmp_path, monkeypatch) -> Path:
-    """Point mythic_site.config.DB_PATH at a fresh per-test SQLite file
+    """Point postmortem_site.config.DB_PATH at a fresh per-test SQLite file
     so tests never touch a real /data/runs.db.
 
     Monkeypatching the module attribute (not an env var) works because

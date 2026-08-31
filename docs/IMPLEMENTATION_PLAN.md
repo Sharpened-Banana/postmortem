@@ -85,7 +85,7 @@ regeneration after adding a report.
 ## Phase C — Raider.io depth
 
 **WP-C1: Disk cache.** `raiderio.py`: cache GETs in
-`~/.cache/mythic-analyzer/raiderio.json` (override via env
+`~/.cache/postmortem/raiderio.json` (override via env
 `MYTHIC_ANALYZER_CACHE`), TTL 6 h, `--raiderio-no-cache` flag. Tests:
 fetcher called once across two enrichments with cache on (tmp cache dir).
 

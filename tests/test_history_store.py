@@ -12,14 +12,14 @@ import sqlite3
 import pytest
 from conftest import ROUTE_PRESET, build_run_log
 
-from mythic_analyzer.analysis.run_analyzer import analyze_run
-from mythic_analyzer.cli import main
-from mythic_analyzer.combatlog.parser import iter_events
-from mythic_analyzer.combatlog.segmenter import segment_runs
-from mythic_analyzer.history.store import Store, ingest, query_runs
-from mythic_analyzer.mdt.dungeon_data import DungeonDataStore
-from mythic_analyzer.mdt.route import Route
-from mythic_analyzer.report.index import collect_reports, render_index
+from postmortem.analysis.run_analyzer import analyze_run
+from postmortem.cli import main
+from postmortem.combatlog.parser import iter_events
+from postmortem.combatlog.segmenter import segment_runs
+from postmortem.history.store import Store, ingest, query_runs
+from postmortem.mdt.dungeon_data import DungeonDataStore
+from postmortem.mdt.route import Route
+from postmortem.report.index import collect_reports, render_index
 
 
 @pytest.fixture()

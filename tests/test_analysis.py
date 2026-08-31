@@ -18,16 +18,16 @@ from conftest import (
     build_run_log,
 )
 
-from mythic_analyzer.analysis.avoidable import AvoidableData
-from mythic_analyzer.analysis.compare import compare_route
-from mythic_analyzer.analysis.interruptibility import InterruptibilityData
-from mythic_analyzer.analysis.pulls import ActualPull, UnitEngagement, detect_pulls
-from mythic_analyzer.analysis.run_analyzer import _enemy_cast_summary, analyze_run
-from mythic_analyzer.analysis.stats import RunStats, compute_stats
-from mythic_analyzer.combatlog.parser import iter_events
-from mythic_analyzer.combatlog.segmenter import segment_runs
-from mythic_analyzer.mdt.dungeon_data import DungeonData, DungeonDataStore, Enemy
-from mythic_analyzer.mdt.route import Pull, Route
+from postmortem.analysis.avoidable import AvoidableData
+from postmortem.analysis.compare import compare_route
+from postmortem.analysis.interruptibility import InterruptibilityData
+from postmortem.analysis.pulls import ActualPull, UnitEngagement, detect_pulls
+from postmortem.analysis.run_analyzer import _enemy_cast_summary, analyze_run
+from postmortem.analysis.stats import RunStats, compute_stats
+from postmortem.combatlog.parser import iter_events
+from postmortem.combatlog.segmenter import segment_runs
+from postmortem.mdt.dungeon_data import DungeonData, DungeonDataStore, Enemy
+from postmortem.mdt.route import Pull, Route
 
 
 @pytest.fixture()
@@ -246,7 +246,7 @@ class TestRouteComparisonDPAlignment:
         # even though the pull's composition is an exact match for B. This
         # is *why* compare_route needs the DP correction; the fix itself is
         # asserted in test_reordered_pulls_get_correct_primary below.
-        from mythic_analyzer.analysis.compare import _find_plan_pull
+        from postmortem.analysis.compare import _find_plan_pull
 
         plan_order = [p.index for p in route.pulls]
         remaining = {p.index: p.npc_counter(dungeon) for p in route.pulls}
@@ -652,8 +652,8 @@ class TestAnalyzeRun:
         assert "map" not in report
 
     def test_renderers(self, run_segment, route, dungeon_data_file):
-        from mythic_analyzer.report.html import render_html
-        from mythic_analyzer.report.text import render_text
+        from postmortem.report.html import render_html
+        from postmortem.report.text import render_text
 
         store = DungeonDataStore.load(dungeon_data_file)
         report = analyze_run(run_segment, route=route, store=store)
@@ -689,7 +689,7 @@ class TestAnalyzeRun:
         assert '"map":' in html
 
     def test_renderer_omits_map_without_dungeon_data(self, run_segment, route):
-        from mythic_analyzer.report.html import render_html
+        from postmortem.report.html import render_html
 
         report = analyze_run(run_segment, route=route, store=None)
         assert "map" not in report
@@ -709,7 +709,7 @@ class TestAnalyzeRun:
         # successful calibration, and confirming the renderer draws a
         # player path and a death marker rather than just the dim
         # fallback note.
-        from mythic_analyzer.report.html import render_html
+        from postmortem.report.html import render_html
 
         store = DungeonDataStore.load(dungeon_data_file)
         report = analyze_run(run_segment, route=route, store=store)
@@ -890,8 +890,8 @@ class TestAvoidableDamage:
 
     def test_renderers_show_section_when_present(self, run_segment, route,
                                                   dungeon_data_file, avoidable):
-        from mythic_analyzer.report.html import render_html
-        from mythic_analyzer.report.text import render_text
+        from postmortem.report.html import render_html
+        from postmortem.report.text import render_text
 
         store = DungeonDataStore.load(dungeon_data_file)
         report = analyze_run(run_segment, route=route, store=store, avoidable=avoidable)
@@ -911,8 +911,8 @@ class TestAvoidableDamage:
         assert '"Bigheals-Area52"' in html
 
     def test_renderers_omit_section_when_absent(self, run_segment, route, dungeon_data_file):
-        from mythic_analyzer.report.html import render_html
-        from mythic_analyzer.report.text import render_text
+        from postmortem.report.html import render_html
+        from postmortem.report.text import render_text
 
         store = DungeonDataStore.load(dungeon_data_file)
         report = analyze_run(run_segment, route=route, store=store)
@@ -1060,8 +1060,8 @@ class TestDeathDefensives:
     def test_renderers_show_biggest_hit_damage_last_5s_and_defensive_status(
         self, run_segment, route, dungeon_data_file
     ):
-        from mythic_analyzer.report.html import render_html
-        from mythic_analyzer.report.text import render_text
+        from postmortem.report.html import render_html
+        from postmortem.report.text import render_text
 
         store = DungeonDataStore.load(dungeon_data_file)
         report = analyze_run(run_segment, route=route, store=store)

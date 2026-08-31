@@ -1,6 +1,6 @@
-# Dependencies for the mythic_site FastAPI service itself.
+# Dependencies for the postmortem_site FastAPI service itself.
 #
-# NOTE: this file does NOT list `mythic-analyzer` (the parent package
+# NOTE: this file does NOT list `postmortem` (the parent package
 # this service imports from `src/`). A later WP's Docker build installs
 # that separately from the monorepo root (e.g. `pip install -e .` or
 # `pip install .` against the repo root's pyproject.toml) -- it isn't
