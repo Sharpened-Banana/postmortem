@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 from pathlib import Path
 from typing import Iterable, Optional
@@ -11,6 +12,7 @@ from typing import Iterable, Optional
 from .analysis.avoidable import AvoidableData
 from .analysis.run_analyzer import analyze_run
 from .chapters import write_chapter_files
+from .clips import DEFAULT_PAD_S, FfmpegNotFoundError, clip_specs_for_chapters, cut_clips, load_chapters
 from .combatlog.parser import parse_file
 from .combatlog.segmenter import RunSegment, segment_runs
 from .mdt.decode import MDTDecodeError, decode_mdt_string
@@ -441,6 +443,48 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_clips(args: argparse.Namespace) -> int:
+    # Checked up front (rather than letting subprocess.run raise
+    # FileNotFoundError partway through) so a missing ffmpeg is always a
+    # clean, single-line message -- matching _load_avoidable/_load_store's
+    # SystemExit convention for a clear, expected CLI error.
+    if shutil.which("ffmpeg") is None:
+        raise SystemExit(
+            "error: ffmpeg not found on PATH -- install it to use the clips command"
+        )
+
+    video = Path(args.video)
+    report_path = Path(args.report)
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"error: could not load report {report_path}: {exc}")
+
+    chapters = load_chapters(report_path, report)
+    out_dir = Path(args.out) if args.out else video.parent / "clips"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    specs = clip_specs_for_chapters(chapters, out_dir, pad=args.pad)
+    if not specs:
+        print("no pull/death chapters found in the report -- nothing to cut",
+              file=sys.stderr)
+        return 0
+
+    try:
+        written = cut_clips(video, specs)
+    except FfmpegNotFoundError:
+        # Defensive: shutil.which already checked above, but cut_clips
+        # re-checks (it's also usable standalone), so handle this the
+        # same clean way if PATH somehow changed in between.
+        raise SystemExit(
+            "error: ffmpeg not found on PATH -- install it to use the clips command"
+        )
+
+    for path in written:
+        print(f"wrote {path}", file=sys.stderr)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mythic-analyzer",
@@ -575,6 +619,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--bind", default="127.0.0.1",
                    help="address to bind to (default: 127.0.0.1, loopback-only)")
     p.set_defaults(func=cmd_serve)
+
+    p = sub.add_parser(
+        "clips",
+        help="cut one video clip per pull and per death via ffmpeg",
+    )
+    p.add_argument("video", help="path to the recorded video file")
+    p.add_argument("report", metavar="REPORT_JSON",
+                   help="analyzed run report JSON (see analyze/record --analyze); "
+                        "clip offsets prefer a <report>.chapters.json sidecar next "
+                        "to it if one exists, else are recomputed assuming the "
+                        "video starts exactly at run start")
+    p.add_argument("--out", metavar="DIR",
+                   help="directory to write clips into (default: a 'clips' "
+                        "subdirectory next to the video)")
+    p.add_argument("--pad", type=float, default=DEFAULT_PAD_S,
+                   help=f"seconds of padding before/after each clip "
+                        f"(default {DEFAULT_PAD_S:.0f})")
+    p.set_defaults(func=cmd_clips)
 
     return parser
 
