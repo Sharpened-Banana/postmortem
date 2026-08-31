@@ -14,6 +14,19 @@ anything, most usefully video capture, e.g. with obs-cmd (OBS WebSocket):
 
 so every key gets its own video alongside the log slice and reports.
 
+As of WP-D1, OBS can also be driven natively (no third-party ``obs-cmd``
+needed) via ``--obs [ws://host:port]`` (default ``ws://127.0.0.1:4455``
+when passed with no value), ``--obs-password`` and
+``--obs-replay-on-death`` (saves the replay buffer on every detected
+player death) -- see :mod:`postmortem.obsws`. If a shell hook is
+*also* configured for a given event (start/end), the shell hook takes
+precedence for that event and the native client is not additionally
+invoked, to avoid double-triggering OBS; ``--obs-replay-on-death`` always
+uses the native client when ``--obs`` is set, since there's no
+equivalent shell hook to conflict with. Any native-OBS failure (can't
+connect, bad auth, a request errors) is caught and reported as a
+warning; the log-slice recording itself is never interrupted by it.
+
 WoW only writes the combat log when logging is enabled — either
 `/combatlog` or the "advanced combat logging" checkbox (Options → Network).
 Advanced combat logging is strongly recommended: it adds positions and HP
@@ -44,6 +57,7 @@ class RecordedRun:
     line_count: int = 0
     player_deaths: int = 0
     completed: bool = False
+    obs_output_path: Optional[str] = None  # from OBS's StopRecord, if native OBS was used
 
 
 @dataclass
@@ -55,9 +69,13 @@ class Recorder:
     on_run_complete: Optional[Callable[[RecordedRun], None]] = None
     on_start_cmd: Optional[str] = None  # shell hook (e.g. start OBS recording)
     on_end_cmd: Optional[str] = None    # shell hook (e.g. stop OBS recording)
+    obs_url: Optional[str] = None       # e.g. ws://127.0.0.1:4455 -- native OBS control
+    obs_password: Optional[str] = None
+    obs_replay_on_death: bool = False
     echo: Callable[[str], None] = print
     _current: Optional[RecordedRun] = None
     _out_fh: Optional[object] = field(default=None, repr=False)
+    _obs: Optional[object] = field(default=None, repr=False)  # live OBSClient for this run
 
     def watch(self, stop_after_runs: Optional[int] = None) -> list[RecordedRun]:
         """Blocking watch loop. Ctrl-C to stop. Returns completed runs."""
@@ -116,6 +134,8 @@ class Recorder:
             if re.search(r'UNIT_DIED,[^,]*,[^,]*,[^,]*,[^,]*,Player-', line):
                 self._current.player_deaths += 1
                 self.echo(f"  death #{self._current.player_deaths}")
+                if self.obs_replay_on_death and self._obs is not None:
+                    self._obs_call(self._obs.save_replay_buffer, "SaveReplayBuffer")
 
         if _END_RE.search(line):
             self._close_run(completed=True)
@@ -147,6 +167,10 @@ class Recorder:
         self.echo(f"▶ recording: {zone} +{level or '?'} -> {path}")
         self._run_hook(self.on_start_cmd, "on-run-start")
 
+        self._obs = self._connect_obs() if self._obs_wanted() else None
+        if self._obs is not None and self.on_start_cmd is None:
+            self._obs_call(self._obs.start_record, "StartRecord")
+
     def _close_run(self, completed: bool) -> None:
         if self._current is None:
             return
@@ -158,6 +182,52 @@ class Recorder:
             f"{self._current.line_count} events -> {self._current.path}"
         )
         self._run_hook(self.on_end_cmd, "on-run-end")
+
+        if self._obs is not None:
+            if self.on_end_cmd is None:
+                output_path = self._obs_call(self._obs.stop_record, "StopRecord")
+                if output_path:
+                    self._current.obs_output_path = output_path
+            self._obs_call(self._obs.close, "close")
+            self._obs = None
+
+    def _obs_wanted(self) -> bool:
+        """Whether a native OBS connection is worth opening for this run.
+
+        Shell-hook precedence means the native client only has a start or
+        stop call to make when the corresponding shell hook is *not*
+        configured; when both hooks are set and replay-on-death isn't
+        requested, there's nothing for the native client to do, so we
+        skip connecting to OBS at all (rather than connecting and simply
+        not calling anything) -- see the docstring at the top of this
+        file and WP-D1's acceptance criteria on shell-hook precedence.
+        """
+        return bool(self.obs_url) and (
+            self.on_start_cmd is None or self.on_end_cmd is None
+            or self.obs_replay_on_death
+        )
+
+    def _connect_obs(self):
+        """Open (and Identify on) a fresh OBS WebSocket connection for the
+        run that's just starting. Connect failures -- unreachable OBS,
+        failed handshake, bad password -- are warnings, never fatal."""
+        from .obsws import OBSClient
+
+        try:
+            client = OBSClient(self.obs_url, self.obs_password)
+            client.connect()
+            return client
+        except Exception as exc:
+            self.echo(f"  warning: obs connect failed: {exc}")
+            return None
+
+    def _obs_call(self, fn: Callable[[], object], label: str):
+        """Run one OBS request, turning any failure into a warning."""
+        try:
+            return fn()
+        except Exception as exc:
+            self.echo(f"  warning: obs {label} failed: {exc}")
+            return None
 
     def _run_hook(self, cmd: Optional[str], label: str) -> None:
         """Fire-and-forget shell hook with run context in the environment."""
