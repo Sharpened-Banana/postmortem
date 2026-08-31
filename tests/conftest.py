@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from mythic_analyzer.mdt.decode import encode_mdt_string  # noqa: E402
+from postmortem.mdt.decode import encode_mdt_string  # noqa: E402
 
 # --- synthetic dungeon ------------------------------------------------------
 
@@ -119,8 +119,19 @@ class LogBuilder:
 
     @staticmethod
     def _advanced(info_guid: str, hp=500000, max_hp=1000000, x=100.0, y=-200.0):
+        # 19 fields, matching the real (2026-era, BUILD_VERSION 12.1.0)
+        # client's advanced-logging block -- confirmed field-by-field
+        # against two independent real combat-log lines during live
+        # in-game testing (see events.py's ADVANCED_LEN comment and
+        # memory/advanced_block_parsing_bug.md). The two "0,0" fields
+        # right after powerCost are real, currently-unidentified fields
+        # observed as 0 in every real sample seen so far -- not one of
+        # AdvancedInfo's named fields, just present-and-skipped so the
+        # fixture's field COUNT matches reality (that's what
+        # ADVANCED_LEN/_advanced_offset() actually depend on, not their
+        # semantics).
         return (f"{info_guid},0000000000000000,{hp},{max_hp},2000,1000,500,0,3,"
-                f"100,100,0,{x:.2f},{y:.2f},2200,1.57,80")
+                f"100,100,0,0,0,{x:.2f},{y:.2f},2200,1.57,80")
 
     # -- combat events --
 
@@ -352,6 +363,44 @@ def build_run_log() -> LogBuilder:
     return b
 
 
+def build_three_run_log() -> LogBuilder:
+    """Three M+ runs in one log: an abandoned key, then two completed ones.
+
+    Used to exercise streaming run-selection (WP-A0): `runs` must list all
+    three, `analyze --run N` must pick the right one without needing to
+    hold every run's events in memory, and 'last' must skip past the
+    abandoned first run to land on the true last completed run.
+    """
+    b = LogBuilder()
+    fA = b.npc_guid(FELWYRM, "0001")
+    dA = b.npc_guid(DUSKBLADE, "0002")
+    boss = b.npc_guid(BOSS, "0003")
+
+    # run 1 (t=0..10): abandoned - no CHALLENGE_MODE_END. The next START
+    # is for a different key (different challenge_map_id/level), so
+    # segment_runs yields this one as an incomplete/abandoned segment.
+    b.start(0, zone="Cave One", instance=1001, cm=100, lvl=5)
+    b.player_damage(5, DPS1, fA, "Felwyrm", 133, "Fireball", 50000)
+    b.party_kill(6, DPS1, fA, "Felwyrm")
+    b.unit_died(6.5, fA, "Felwyrm", HOSTILE)
+
+    # run 2 (t=50..60): completed, timed
+    b.start(50, zone="Cave Two", instance=1002, cm=200, lvl=10)
+    b.player_damage(55, TANK, dA, "Duskblade", 31935, "Avenger's Shield", 40000)
+    b.party_kill(56, TANK, dA, "Duskblade")
+    b.unit_died(56.5, dA, "Duskblade", HOSTILE)
+    b.end(60, success=1, lvl=10, ms=500000, instance=1002)
+
+    # run 3 (t=100..110): completed, over timer
+    b.start(100, zone="Cave Three", instance=1003, cm=300, lvl=15)
+    b.player_damage(105, DPS1, boss, "Big Boss", 133, "Fireball", 90000)
+    b.party_kill(106, DPS1, boss, "Big Boss")
+    b.unit_died(106.5, boss, "Big Boss", HOSTILE)
+    b.end(110, success=0, lvl=15, ms=900000, instance=1003)
+
+    return b
+
+
 @pytest.fixture()
 def dungeon_data_file(tmp_path) -> Path:
     path = tmp_path / "mdt_data.json"
@@ -368,4 +417,11 @@ def route_string() -> str:
 def log_file(tmp_path) -> Path:
     path = tmp_path / "WoWCombatLog.txt"
     path.write_text(build_run_log().text(), encoding="utf-8")
+    return path
+
+
+@pytest.fixture()
+def three_run_log_file(tmp_path) -> Path:
+    path = tmp_path / "WoWCombatLog3.txt"
+    path.write_text(build_three_run_log().text(), encoding="utf-8")
     return path

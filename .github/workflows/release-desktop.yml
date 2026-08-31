@@ -1,0 +1,73 @@
+# Builds the Mythic Analyzer desktop app for macOS and Windows and
+# attaches both to a GitHub Release whenever a tag is pushed.
+#
+# Why a build matrix instead of one job: PyInstaller is NOT a
+# cross-compiler -- it can only produce a native build for the OS it
+# runs on, so a macOS .app and a Windows .exe genuinely require two
+# separate runners. No Linux build target exists for this app yet.
+#
+# Known, accepted limitation: the macOS build is unsigned and
+# un-notarized (no paid Apple Developer account available for this
+# project), so first launch will show a Gatekeeper "unidentified
+# developer" warning (right-click -> Open works around it). This is a
+# deliberate scope cut for this pass, not a bug to fix here.
+
+name: Release desktop app
+
+on:
+  push:
+    tags:
+      - "**"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package + build tooling
+        run: pip install ".[dev,desktop]"
+
+      - name: Build with PyInstaller
+        run: pyinstaller build/mythic-analyzer.spec
+
+      # macOS: zip the .app bundle with ditto, not plain `zip -r` --
+      # ditto is Apple's own recommended way to archive a .app for
+      # distribution because it preserves resource forks, extended
+      # attributes, and executable permission bits that a generic zip
+      # can silently mangle.
+      - name: Package macOS build
+        if: runner.os == 'macOS'
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent dist/MythicAnalyzer.app MythicAnalyzer-macos.zip
+
+      # Windows: the spec builds a onedir (COLLECT) layout rather than
+      # --onefile, so zip the whole dist/MythicAnalyzer/ folder as the
+      # single downloadable artifact.
+      - name: Package Windows build
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/MythicAnalyzer/* -DestinationPath MythicAnalyzer-windows.zip
+
+      # softprops/action-gh-release creates the tag's release on first
+      # call and appends to it on subsequent calls, so both matrix jobs
+      # (macOS and Windows) can safely call it independently and both
+      # artifacts end up attached to the same release -- unlike the
+      # deprecated actions/create-release + actions/upload-release-asset
+      # combo, which has no built-in "release already exists, just
+      # attach this file too" handling for concurrent jobs.
+      - name: Publish release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: MythicAnalyzer-*.zip
