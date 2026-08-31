@@ -139,13 +139,22 @@ does this in CI for both platforms on every tag push.
   MDT pulls: mobs **pulled early** (taken from a later planned pull), packs
   **picked up late**, **off-route** packs the plan never contained, planned
   packs that were **never engaged**, and untracked mid-fight summons. Plus
-  an overall route-adherence percentage.
+  an overall route-adherence percentage and an **unplanned pulls** summary
+  that surfaces exactly which actual pulls included off-route/untracked
+  enemies, without digging through every pull's own breakdown.
 - **Pull detection** — engagement windows per enemy GUID, grouped into
   pulls, with boss fights labeled from `ENCOUNTER_START/END`.
 - **Per-player stats** — damage (with per-spell and per-pull breakdown),
   healing + overhealing + absorbs, damage taken, DPS/HPS, interrupts,
   dispels, deaths; specs/roles resolved from `COMBATANT_INFO`.
 - **Deaths** — killing blow and a last-hits recap with remaining HP.
+- **Close calls** — any hit that dropped a player below 20% HP without
+  actually killing them (only the transition into danger is reported, not
+  every low hit, and never the hit that turned out to be fatal — that's
+  already covered by Deaths).
+- **Crowd control uptime** — hard-CC landed on enemies (polymorph, traps,
+  stuns, fears, banishes, ...) with real duration, not just a cast count:
+  per-caster and per-type totals plus a full timeline.
 - **Avoidable damage** — `analyze --avoidable-data FILE` tags spell ids as
   "stand in the fire" mechanics (a small community/user-maintained JSON
   file, format + example in `docs/avoidable_spells.example.json`) and

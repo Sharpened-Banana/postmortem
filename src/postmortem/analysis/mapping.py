@@ -20,7 +20,9 @@ numpy/scipy per this project's stdlib-only runtime constraint.
 
 from __future__ import annotations
 
+import itertools
 import math
+import random
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -58,6 +60,38 @@ MAX_RESIDUAL = 50.0
 # ICP refinement: a few iterations is enough for the assignment to settle;
 # bail early once nothing changes.
 MAX_ICP_ITERS = 5
+# Outlier trimming (see _trim_outliers): floor on how many correspondences
+# a fit may be reduced to while trying to clear MAX_RESIDUAL. Set well
+# above MIN_FINAL_ANCHORS so a fit that only clears the residual bar by
+# trimming down to a near-minimal anchor set (i.e. barely more redundancy
+# than degrees of freedom) is rejected as unreliable rather than accepted --
+# trimming should discard a handful of bad correspondences from an
+# otherwise-solid set, not explain away most of the data.
+MIN_ANCHORS_AFTER_TRIM = 8
+# Per-point inlier distance for RANSAC-style outlier rejection (see
+# _trim_outliers) -- deliberately the same value as MAX_RESIDUAL: a point
+# within this distance of a *candidate* transform's prediction is
+# consistent with the overall RMS bar the final refit must also clear.
+_RANSAC_INLIER_DIST = MAX_RESIDUAL
+# Minimal-subset size for each RANSAC candidate transform. A 2D similarity
+# transform has 4 degrees of freedom (scale, rotation, 2 translation) and
+# is technically solvable from 2 points, but 3 gives a little redundancy
+# over that theoretical minimum -- same reasoning as MIN_SEED_ANCHORS, and
+# small enough that a genuinely clean 3-point subset is likely to exist
+# even when a meaningful fraction of the full anchor set is corrupted
+# (unlike fitting -- and thus being biased by -- the *whole* contaminated
+# set at once, which is what made naive greedy worst-point-removal
+# unreliable here: a least-squares fit dragged by outliers can make a
+# *good* anchor's residual look worse than an actual outlier's).
+_RANSAC_SAMPLE_SIZE = 3
+# Cap on how many candidate subsets to evaluate. Exhaustive
+# itertools.combinations(n, 3) is cheap for realistic anchor counts (a
+# dungeon has at most a few dozen distinct single-clone npc_ids engaged in
+# one run), but this bounds runtime for a pathological anchor count --
+# beyond it, a deterministically-seeded random sample of subsets is used
+# instead (deterministic so this stays reproducible/testable, not because
+# non-determinism would be unsafe).
+_RANSAC_MAX_CANDIDATES = 2000
 
 
 @dataclass
@@ -259,6 +293,99 @@ def _icp_refine(
     return transform, residual, correspondences
 
 
+def _trim_outliers(
+    transform: Transform,
+    residual: float,
+    correspondences: dict[int, tuple[Point, int]],
+    data: DungeonData,
+) -> tuple[Transform, float, dict[int, tuple[Point, int]]]:
+    """If the fit's residual exceeds MAX_RESIDUAL, find the largest
+    consistent (inlier) subset of the anchors via RANSAC and refit from
+    just those.
+
+    A handful of noisy/mismatched anchors -- a mob that moved before its
+    first logged interaction, or (rarer) a genuinely wrong npc_id/clone
+    pairing -- can drag an otherwise-solid fit's RMS residual well past the
+    threshold on their own, even though the fitted transform is correct for
+    the bulk of the data (confirmed empirically: a handful of outlier
+    anchors with 150-250 unit offsets is enough to push a near-zero
+    residual up into the 100+ range this project saw on every real
+    production upload before this existed). Naive greedy trimming (fit all
+    anchors, drop the single worst-residual one, repeat) was tried first
+    and rejected: with a small anchor set and a meaningful outlier
+    fraction, the *initial* least-squares fit is itself dragged far enough
+    off by the outliers that a genuinely clean anchor can end up looking
+    worse than an actual outlier, so greedy removal deletes the wrong
+    points (confirmed empirically against a 10-anchor/2-outlier case).
+    RANSAC sidesteps this: it never trusts a fit built from the whole
+    contaminated set. Instead it builds many small-subset candidate
+    transforms (_RANSAC_SAMPLE_SIZE points each -- small enough that a
+    genuinely clean subset almost certainly exists even when several
+    anchors are bad), scores each by how many of *all* the anchors it
+    explains within _RANSAC_INLIER_DIST, and keeps the winning candidate's
+    inlier set for a final refit.
+
+    This is a well-justified correction for a real, verified failure mode,
+    not a threshold loosened to paper over bad data -- MAX_RESIDUAL itself
+    is untouched, and MIN_ANCHORS_AFTER_TRIM keeps this from explaining
+    away most of the anchor set to force a pass. If no candidate reaches
+    that floor, the original fit is returned unchanged and the caller's
+    existing residual gate rejects it exactly as before -- this only ever
+    helps, never masks a genuinely bad fit.
+    """
+    if residual <= MAX_RESIDUAL or len(correspondences) < MIN_ANCHORS_AFTER_TRIM:
+        return transform, residual, correspondences
+
+    items: list[tuple[int, Point, Point]] = []
+    for npc_id, (world_pos, clone_idx) in correspondences.items():
+        enemy = data.enemy_by_npc_id(npc_id)
+        if enemy is None or clone_idx >= len(enemy.clones):
+            continue
+        clone = enemy.clones[clone_idx]
+        items.append((npc_id, world_pos, (clone.x, clone.y)))
+    n = len(items)
+    if n < _RANSAC_SAMPLE_SIZE:
+        return transform, residual, correspondences
+
+    all_combos = itertools.combinations(range(n), _RANSAC_SAMPLE_SIZE)
+    index_combos = list(itertools.islice(all_combos, _RANSAC_MAX_CANDIDATES + 1))
+    if len(index_combos) > _RANSAC_MAX_CANDIDATES:
+        rng = random.Random(0)
+        index_combos = [
+            tuple(sorted(rng.sample(range(n), _RANSAC_SAMPLE_SIZE)))
+            for _ in range(_RANSAC_MAX_CANDIDATES)
+        ]
+
+    inlier_dist_sq = _RANSAC_INLIER_DIST ** 2
+    best_inliers: Optional[list[int]] = None
+    for combo in index_combos:
+        sample_pairs = [(items[i][1], items[i][2]) for i in combo]
+        candidate = fit_transform(sample_pairs)
+        if candidate is None:
+            continue
+        cand_transform, _ = candidate
+        inliers = []
+        for i, (_npc_id, world_pos, canvas_pos) in enumerate(items):
+            px, py = cand_transform.apply(*world_pos)
+            if (px - canvas_pos[0]) ** 2 + (py - canvas_pos[1]) ** 2 <= inlier_dist_sq:
+                inliers.append(i)
+        if best_inliers is None or len(inliers) > len(best_inliers):
+            best_inliers = inliers
+
+    if best_inliers is None or len(best_inliers) < MIN_ANCHORS_AFTER_TRIM:
+        return transform, residual, correspondences
+
+    final_pairs = [(items[i][1], items[i][2]) for i in best_inliers]
+    fit = fit_transform(final_pairs)
+    if fit is None:
+        return transform, residual, correspondences
+    new_transform, new_residual = fit
+    new_correspondences = {
+        items[i][0]: (items[i][1], correspondences[items[i][0]][1]) for i in best_inliers
+    }
+    return new_transform, new_residual, new_correspondences
+
+
 def calibrate(pulls: list[ActualPull], data: DungeonData) -> CalibrationResult:
     """Attempt to fit a world->canvas transform for this run. Fails safe:
     returns ``ok=False`` with a human-readable ``reason`` whenever the data
@@ -287,6 +414,9 @@ def calibrate(pulls: list[ActualPull], data: DungeonData) -> CalibrationResult:
     seed_correspondences = {npc_id: (world_pos, 0) for npc_id, (world_pos, _) in seeds.items()}
     transform, residual, correspondences = _icp_refine(
         transform, residual, pulls, data, seed_correspondences
+    )
+    transform, residual, correspondences = _trim_outliers(
+        transform, residual, correspondences, data
     )
     anchor_count = len(correspondences)
 
