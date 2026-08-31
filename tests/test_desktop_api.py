@@ -377,6 +377,35 @@ class TestWatchMode:
     def test_stop_watch_with_nothing_running_is_a_noop_ok(self, api, events):
         assert api.stop_watch() == {"ok": True}
 
+    def test_starting_watch_before_the_log_file_exists_waits_and_recovers(
+        self, api, events, tmp_path,
+    ):
+        # Real UX gap (2026-08-31): WoW only creates the combat log once
+        # logging actually turns on -- with this addon, that's automatic
+        # at the start of the session's first key. Clicking Start before
+        # that (completely normal -- open the app, click Start, then go
+        # play) used to crash the watch thread immediately.
+        from conftest import build_run_log
+
+        log = tmp_path / "WoWCombatLog.txt"
+        assert not log.exists()
+
+        result = api.start_watch({
+            "log_path": str(log), "site_url": "https://example.test",
+            "out_dir": str(tmp_path / "watch-runs"),
+        })
+        assert result == {"ok": True}
+
+        waiting_event = self._wait_for(events, "waiting_for_log")
+        assert waiting_event["log_path"] == str(log)
+        assert api._watch_thread.is_alive()  # still watching, not crashed
+
+        log.write_text(build_run_log().text(), encoding="utf-8")
+        run_event = self._wait_for(events, "run_complete")
+        assert run_event["zone"] == "Murder Row"
+
+        api.stop_watch()
+
     def test_full_cycle_analyzes_and_uploads_each_completed_run(
         self, api, events, tmp_path, monkeypatch,
     ):

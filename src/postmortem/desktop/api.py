@@ -277,7 +277,20 @@ class DesktopAPI:
     # switches on it. The full set, in the order a normal session emits
     # them:
     #   {"type": "watching", "log_path": str}
-    #     -- start_watch() succeeded; watching has begun.
+    #     -- start_watch() succeeded; the watch thread is running. Note
+    #        this fires immediately even if the log file doesn't exist
+    #        yet (a completely normal thing -- see "waiting_for_log"
+    #        below): "watching" means the thread is alive and will start
+    #        tailing the moment there's something to tail, not that it's
+    #        actively reading lines right now.
+    #   {"type": "waiting_for_log", "log_path": str}
+    #     -- log_path doesn't exist yet (WoW hasn't started writing it
+    #        this session -- see Recorder.watch()'s own docstring). Not an
+    #        error: watching continues, waiting for the file to appear
+    #        (e.g. once the first key of the session starts). No event
+    #        marks the transition out of this state -- the next event
+    #        (run_complete, or another watching session's normal
+    #        progress) means it resolved.
     #   {"type": "run_complete", "zone": str, "level": int|None}
     #     -- a key just ended; analysis is starting.
     #   {"type": "analyzed", "zone": str, "level": int|None, "timed": bool|None}
@@ -359,6 +372,9 @@ class DesktopAPI:
             log_path=Path(log_path),
             out_dir=Path(out_dir),
             on_run_complete=on_run_complete,
+            on_waiting_for_log=lambda: self._emit_watch_event(
+                {"type": "waiting_for_log", "log_path": str(log_path)}
+            ),
             echo=lambda _msg: None,  # the UI gets structured events instead
         )
 
