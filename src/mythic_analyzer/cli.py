@@ -285,6 +285,23 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         )
         print(f"history: run {run_id} -> {args.history_db}", file=sys.stderr)
 
+    if args.upload:
+        # Local import: keeps upload.py's urllib/secrets usage (and its
+        # first-use token-file write) off the hot path for every other
+        # `analyze` invocation that doesn't pass --upload.
+        from .upload import upload_report
+
+        result = upload_report(report, args.upload, token=args.upload_token)
+        if result.get("ok"):
+            print(f"uploaded: {args.upload.rstrip('/')}{result['url']}")
+        else:
+            # Uploading is a best-effort bonus step, same philosophy as
+            # --raiderio enrichment above: a failure here (offline, the
+            # server rejected it, ...) never changes cmd_analyze's exit
+            # code or blocks its normal output -- analysis succeeding is
+            # the primary outcome.
+            print(f"upload failed: {result.get('error')}", file=sys.stderr)
+
     return 0
 
 
@@ -477,6 +494,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--history-db", metavar="PATH",
                    help="also append this run to a SQLite run-history database "
                         "at PATH (created if missing) — see `index --db`")
+    p.add_argument("--upload", metavar="URL",
+                   help="also upload this run's report to a public "
+                        "mythic-analyzer site at URL (e.g. "
+                        "https://mythic-analyzer.fly.dev) so it's browsable "
+                        "there; needs internet access, and never fails the "
+                        "analysis itself if the upload doesn't go through")
+    p.add_argument("--upload-token", metavar="TOKEN",
+                   help="upload token to use with --upload, overriding the "
+                        "one auto-generated and stored locally on first use "
+                        "(only needed to use a specific/shared token)")
     p.set_defaults(func=cmd_analyze)
 
     p = sub.add_parser(
