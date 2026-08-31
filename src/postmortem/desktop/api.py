@@ -30,6 +30,8 @@ testable exactly like the rest of this codebase (see
 
 from __future__ import annotations
 
+import threading
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional
 
@@ -37,6 +39,7 @@ from .. import cli as _cli
 from ..combatlog.parser import parse_file
 from ..combatlog.segmenter import segment_runs
 from ..mdt.extract import write_dungeon_data
+from ..recorder import Recorder
 from ..report.html import render_html
 from ..report.index import collect_reports, render_index
 from . import config as _config
@@ -51,6 +54,13 @@ class DesktopAPI:
     installed at all (only the three ``pick_*`` dialog methods do, at
     call time).
     """
+
+    def __init__(self) -> None:
+        # Watch-mode state (see start_watch/stop_watch below). None
+        # until a watch is started; every other method on this class is
+        # stateless, so this is the one place instance state lives.
+        self._watch_recorder: Optional[Recorder] = None
+        self._watch_thread: Optional[threading.Thread] = None
 
     # -- run listing --------------------------------------------------------
 
@@ -251,6 +261,200 @@ class DesktopAPI:
             return {"ok": False, "error": "no site URL configured"}
         from .. import upload as _upload
         return _upload.upload_report(report, target)
+
+    # -- live watch mode (auto-analyze + auto-upload every run) -------------
+    #
+    # Unlike every other method here, start_watch() doesn't do its work
+    # synchronously and return a result -- Recorder.watch() blocks for
+    # the whole play session, so it runs on a background thread, and
+    # progress is pushed to the UI via _emit_watch_event() (which calls
+    # webview.windows[0].evaluate_js(...) to invoke window.onWatchEvent()
+    # in shell/app.js) rather than a return value, since there's no
+    # "return value" for something that happens minutes after the JS
+    # call that started it already returned.
+    #
+    # Every event is a dict with a "type" key; window.onWatchEvent()
+    # switches on it. The full set, in the order a normal session emits
+    # them:
+    #   {"type": "watching", "log_path": str}
+    #     -- start_watch() succeeded; watching has begun.
+    #   {"type": "run_complete", "zone": str, "level": int|None}
+    #     -- a key just ended; analysis is starting.
+    #   {"type": "analyzed", "zone": str, "level": int|None, "timed": bool|None}
+    #     -- analysis finished; upload is starting.
+    #   {"type": "uploaded", "url": str}
+    #     -- the full URL (site_url + the site's own path) of the report.
+    #   {"type": "run_failed", "error": str}
+    #     -- this one run's analysis raised; watching continues.
+    #   {"type": "analyze_failed", "error": str} / {"type": "upload_failed", "error": str}
+    #     -- this one run's analysis/upload came back as a clean failure
+    #        (not an exception); watching continues either way.
+    #   {"type": "crashed", "error": str}
+    #     -- the watch thread itself exited (e.g. log_path stopped being
+    #        readable); NOT watching anymore, unlike every event above.
+    #   {"type": "stopped"}
+    #     -- stop_watch() completed.
+
+    def start_watch(self, params: dict) -> dict:
+        """Start live-watching a combat log: as each Mythic+ run
+        completes, it's automatically analyzed and uploaded, with no
+        further clicks. Runs until ``stop_watch()`` is called or the app
+        closes.
+
+        ``params``: ``log_path`` (str, required), ``route``/
+        ``dungeon_data_path``/``avoidable_data_path`` (optional, same
+        meaning as ``analyze()``'s own params), ``site_url`` (str,
+        optional -- defaults to the saved Settings value), ``out_dir``
+        (str, optional -- defaults to the saved ``default_output_dir``
+        setting, then a per-user app-data folder so this works with zero
+        setup).
+
+        Returns ``{"ok": True}`` once the watch thread is actually
+        running, or ``{"ok": False, "error": "..."}`` if a watch is
+        already active, ``log_path``/a site URL is missing, or route/
+        dungeon-data/avoidable-data fail to load. Never raises.
+        """
+        if self._watch_thread is not None and self._watch_thread.is_alive():
+            return {"ok": False, "error": "already watching"}
+
+        params = dict(params or {})
+        log_path = params.get("log_path")
+        if not log_path:
+            return {"ok": False, "error": "log_path is required"}
+
+        settings = _config.load_settings()
+        site_url = params.get("site_url") or settings.get("site_url")
+        if not site_url:
+            return {"ok": False, "error": "no site URL configured -- set one in Settings first"}
+
+        try:
+            route = _cli._load_route(params["route"]) if params.get("route") else None
+            store = _cli._load_store(params.get("dungeon_data_path"))
+            avoidable = _cli._load_avoidable(params.get("avoidable_data_path"))
+        except SystemExit as exc:
+            return {"ok": False, "error": str(exc)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        out_dir = params.get("out_dir") or settings.get("default_output_dir")
+        if not out_dir:
+            from ..appdirs import config_dir
+            out_dir = str(config_dir() / "watch-runs")
+
+        def on_run_complete(run: Any) -> None:
+            # Runs on the watch thread itself (Recorder calls this
+            # synchronously from inside watch()'s loop) -- keep it
+            # resilient, since an unhandled exception here would kill
+            # the whole watch thread mid-session. "run_failed" (this one
+            # run didn't analyze/upload) is deliberately a different
+            # event type than run_watch()'s "crashed" below (the whole
+            # watch stopped) -- the UI needs to tell "still watching,
+            # one run had a problem" apart from "not watching anymore".
+            try:
+                self._handle_watched_run(run, route, store, avoidable, site_url)
+            except Exception as exc:
+                self._emit_watch_event({"type": "run_failed", "error": str(exc)})
+
+        recorder = Recorder(
+            log_path=Path(log_path),
+            out_dir=Path(out_dir),
+            on_run_complete=on_run_complete,
+            echo=lambda _msg: None,  # the UI gets structured events instead
+        )
+
+        def run_watch() -> None:
+            # watch() itself never raises for anything mid-session (every
+            # per-line/per-hook failure is already caught internally),
+            # but opening log_path for the first time can (missing file,
+            # unreadable) -- report that as a "crashed" event (distinct
+            # from on_run_complete's "run_failed" above: this means the
+            # watch thread itself exited, not just one run) instead of
+            # letting the thread die with an unhandled exception no one
+            # would see.
+            try:
+                recorder.watch()
+            except Exception as exc:
+                self._emit_watch_event({"type": "crashed", "error": str(exc)})
+
+        self._watch_recorder = recorder
+        self._watch_thread = threading.Thread(
+            target=run_watch, name="postmortem-watch", daemon=True,
+        )
+        self._watch_thread.start()
+        self._emit_watch_event({"type": "watching", "log_path": str(log_path)})
+        return {"ok": True}
+
+    def stop_watch(self) -> dict:
+        """Stop a watch started by ``start_watch()``. Returns
+        ``{"ok": True}`` whether or not a watch was actually running
+        (idempotent, matching this codebase's other start/stop
+        conventions -- e.g. the addon's own combat-logging toggle).
+        Blocks briefly (up to ``poll_interval``, 0.5s by default) for the
+        watch thread to actually exit. Never raises."""
+        if self._watch_recorder is not None:
+            self._watch_recorder.request_stop()
+        if self._watch_thread is not None:
+            self._watch_thread.join(timeout=5.0)
+        self._watch_recorder = None
+        self._watch_thread = None
+        self._emit_watch_event({"type": "stopped"})
+        return {"ok": True}
+
+    def _handle_watched_run(self, run, route, store, avoidable, site_url) -> None:
+        """One completed run, from Recorder's ``on_run_complete``:
+        analyze it and upload it automatically, pushing progress to the
+        UI as each step happens. Reuses ``cli.py``'s own
+        ``_write_recorded_reports`` (not reimplemented) so this writes
+        the exact same JSON/HTML/text/chapters files the CLI's
+        ``record --analyze`` does, then uploads via the same
+        ``upload.upload_report()`` every other upload path in this app
+        uses.
+        """
+        self._emit_watch_event({
+            "type": "run_complete", "zone": run.zone, "level": run.keystone_level,
+        })
+
+        report = _cli._write_recorded_reports(run, route, store)
+        if report is None:
+            self._emit_watch_event({
+                "type": "analyze_failed",
+                "error": "no run found in the recorded slice",
+            })
+            return
+
+        self._emit_watch_event({
+            "type": "analyzed",
+            "zone": report["run"].get("zone"),
+            "level": report["run"].get("keystone_level"),
+            "timed": report["run"].get("timed"),
+        })
+
+        from .. import upload as _upload
+        result = _upload.upload_report(report, site_url)
+        if result.get("ok"):
+            self._emit_watch_event({
+                "type": "uploaded",
+                "url": f"{site_url.rstrip('/')}{result.get('url', '')}",
+            })
+        else:
+            self._emit_watch_event({"type": "upload_failed", "error": result.get("error")})
+
+    def _emit_watch_event(self, event: dict) -> None:
+        """Push a live status update to the UI (``window.onWatchEvent``
+        in shell/app.js). Best-effort: with no active window (closed
+        mid-watch, or pywebview not running at all -- e.g. under test),
+        the event is just dropped rather than raising. This always runs
+        on the background watch thread, which must never crash the app.
+        A separate method (rather than inlined at each call site) so
+        tests can monkeypatch it to capture emitted events without a
+        real pywebview window.
+        """
+        try:
+            import json as _json
+            import webview
+            webview.windows[0].evaluate_js(f"window.onWatchEvent({_json.dumps(event)})")
+        except Exception:
+            pass
 
     # -- settings -----------------------------------------------------------
 
