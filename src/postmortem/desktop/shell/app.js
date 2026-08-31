@@ -547,6 +547,16 @@ window.onWatchEvent = function (event) {
       setWatchStatus(true, `Watching ${event.log_path}`);
       addWatchLogEntry("info", `Watching <code>${esc(event.log_path)}</code>`);
       break;
+    case "waiting_for_log":
+      // Not an error -- WoW only creates this file once combat logging
+      // actually turns on (the addon does this automatically at the
+      // start of your first key this session). Starting Watch Live
+      // before that has happened is completely normal.
+      setWatchStatus(true, "Waiting for your first key to start…");
+      addWatchLogEntry("info",
+        `No combat log yet at <code>${esc(event.log_path)}</code> — `
+        + "it'll appear automatically once you start a Mythic+ key.");
+      break;
     case "run_complete":
       addWatchLogEntry("info", `${esc(watchRunLabel(event.zone, event.level))} complete — analyzing…`);
       break;

@@ -73,6 +73,13 @@ class Recorder:
     obs_password: Optional[str] = None
     obs_replay_on_death: bool = False
     echo: Callable[[str], None] = print
+    # Called once, right before the wait loop below begins, if log_path
+    # doesn't exist yet when watch() starts -- lets a caller (the desktop
+    # app) show a dedicated "waiting for your first key" status instead of
+    # a flat "watching" that would otherwise look identical to actively
+    # tailing a real file. CLI usage doesn't need this (the echo() message
+    # below already covers it); left None there.
+    on_waiting_for_log: Optional[Callable[[], None]] = None
     _current: Optional[RecordedRun] = None
     _out_fh: Optional[object] = field(default=None, repr=False)
     _obs: Optional[object] = field(default=None, repr=False)  # live OBSClient for this run
@@ -89,13 +96,41 @@ class Recorder:
 
     def watch(self, stop_after_runs: Optional[int] = None) -> list[RecordedRun]:
         """Blocking watch loop. Ctrl-C (or another thread calling
-        ``request_stop()``) to stop. Returns completed runs."""
+        ``request_stop()``) to stop. Returns completed runs.
+
+        ``log_path`` not existing yet is not an error: WoW only creates the
+        combat log the moment logging is actually enabled (``/combatlog``,
+        the advanced-combat-logging checkbox, or -- with this project's own
+        addon installed -- automatically at the start of your first key
+        this session, see CombatLogging.lua). Starting a watch *before*
+        that has happened (a completely normal thing to do -- open the app,
+        click Start, then go play) used to crash immediately with
+        ``FileNotFoundError``; it now waits quietly for the file to show
+        up, same as it already waits for new lines once open.
+        """
         self.out_dir.mkdir(parents=True, exist_ok=True)
         runs: list[RecordedRun] = []
         self.echo(f"watching {self.log_path} (Ctrl-C to stop)")
         self.echo("make sure combat logging is on in game: /combatlog")
+        waited_for_file = False
+        if not self.log_path.exists():
+            waited_for_file = True
+            self.echo(f"{self.log_path} doesn't exist yet -- waiting for it "
+                      "to appear (start a key, or enable combat logging)")
+            if self.on_waiting_for_log is not None:
+                self.on_waiting_for_log()
+            while not self._stop_requested and not self.log_path.exists():
+                time.sleep(self.poll_interval)
+            if self._stop_requested:
+                return runs
         fh = self._open()
-        if not self.from_start:
+        # from_start=False's usual "skip whatever's already in the file"
+        # behavior only makes sense for a file that already existed when
+        # watch() started (skip past a previous session's history). A file
+        # that just appeared *because we were waiting for it* has no such
+        # history to skip -- everything in it is fresh, from right now --
+        # so seeking to its end here would silently miss it entirely.
+        if not self.from_start and not waited_for_file:
             fh.seek(0, os.SEEK_END)
         try:
             while not self._stop_requested:
