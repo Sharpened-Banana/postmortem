@@ -386,3 +386,59 @@ class TestRecorder:
         vtt_text = vtt_path.read_text(encoding="utf-8")
         assert vtt_text.startswith("WEBVTT\n\n")
         assert "-->" in vtt_text
+
+    def test_write_recorded_reports_returns_the_analyzed_report(self, tmp_path):
+        """_write_recorded_reports' return value (added for the desktop
+        app's watch mode, and for `record --upload`'s CLI parity with
+        `analyze --upload`) is the same report dict its own JSON file
+        holds -- callers shouldn't need to re-read that file to act on
+        the result of an auto-analyzed run."""
+        log = tmp_path / "WoWCombatLog.txt"
+        log.write_text(build_run_log().text(), encoding="utf-8")
+        out_dir = tmp_path / "runs"
+        rec = Recorder(log_path=log, out_dir=out_dir, from_start=True, echo=lambda s: None)
+        (run,) = rec.watch(stop_after_runs=1)
+
+        from postmortem.cli import _write_recorded_reports
+        report = _write_recorded_reports(run, route=None, store=None)
+
+        assert report is not None
+        assert report["run"]["zone"] == "Murder Row"
+        base = run.path.with_suffix("")
+        on_disk = json.loads(Path(f"{base}.json").read_text(encoding="utf-8"))
+        assert report == on_disk
+
+    def test_request_stop_ends_a_live_watch_loop(self, tmp_path):
+        """request_stop() (added for the desktop app's watch mode, which
+        runs watch() on a background thread it can't send a
+        KeyboardInterrupt to) makes an in-progress watch() return, from
+        another thread, within about one poll tick -- and, like the
+        existing KeyboardInterrupt path, closes out any run that was
+        still being recorded as incomplete rather than dropping it."""
+        import threading
+        import time
+
+        log = tmp_path / "WoWCombatLog.txt"
+        log.write_text("", encoding="utf-8")
+        rec = Recorder(
+            log_path=log, out_dir=tmp_path / "runs",
+            poll_interval=0.05, echo=lambda s: None,
+        )
+        results = []
+        t = threading.Thread(target=lambda: results.append(rec.watch()))
+        t.start()
+        time.sleep(0.2)  # let watch() actually open+seek before we act
+
+        # A run that never gets a CHALLENGE_MODE_END -- request_stop()
+        # should still close it out as incomplete, same as Ctrl-C would.
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write(build_run_log().lines[0] + "\n")
+
+        time.sleep(0.2)
+        rec.request_stop()
+        t.join(timeout=3)
+        assert not t.is_alive()
+        assert len(results) == 1
+        (runs,) = results
+        assert len(runs) == 1
+        assert runs[0].completed is False

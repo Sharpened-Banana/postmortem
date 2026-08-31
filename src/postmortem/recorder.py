@@ -76,9 +76,20 @@ class Recorder:
     _current: Optional[RecordedRun] = None
     _out_fh: Optional[object] = field(default=None, repr=False)
     _obs: Optional[object] = field(default=None, repr=False)  # live OBSClient for this run
+    _stop_requested: bool = field(default=False, repr=False)
+
+    def request_stop(self) -> None:
+        """Ask a running ``watch()`` loop to stop after its current poll
+        tick. Cooperative, not a hard interrupt -- checked once per
+        iteration, so stopping can lag by up to ``poll_interval``. Exists
+        for callers that can't send this process a KeyboardInterrupt,
+        e.g. the desktop app's watch mode, which runs ``watch()`` on a
+        background thread."""
+        self._stop_requested = True
 
     def watch(self, stop_after_runs: Optional[int] = None) -> list[RecordedRun]:
-        """Blocking watch loop. Ctrl-C to stop. Returns completed runs."""
+        """Blocking watch loop. Ctrl-C (or another thread calling
+        ``request_stop()``) to stop. Returns completed runs."""
         self.out_dir.mkdir(parents=True, exist_ok=True)
         runs: list[RecordedRun] = []
         self.echo(f"watching {self.log_path} (Ctrl-C to stop)")
@@ -87,7 +98,7 @@ class Recorder:
         if not self.from_start:
             fh.seek(0, os.SEEK_END)
         try:
-            while True:
+            while not self._stop_requested:
                 line = fh.readline()
                 if not line:
                     if self._truncated(fh):
@@ -103,10 +114,10 @@ class Recorder:
                         return runs
         except KeyboardInterrupt:
             self.echo("\nstopped.")
+        finally:
             if self._current is not None:
                 self._close_run(completed=False)
                 runs.append(self._current)
-        finally:
             fh.close()
         return runs
 

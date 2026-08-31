@@ -125,7 +125,9 @@ image itself has never actually been built — see
 | `/api/runs`         | GET    | Public feed (JSON) — same rows as `/runs`, minus the full report.   |
 | `/api/runs/{run_id}`| GET    | Full per-run report (JSON) — the same payload a client uploaded.    |
 | `/about`            | GET    | Static about/help page (HTML).                                     |
-| `/api/runs`         | POST   | Upload a report. Requires `X-Upload-Token` header. See below.       |
+| `/api/runs`         | POST   | Upload an already-analyzed report. Requires `X-Upload-Token` header. See below. |
+| `/upload`           | GET    | A raw-combat-log upload form (HTML) — no CLI/app needed.            |
+| `/upload`           | POST   | Analyzes a raw `WoWCombatLog.txt` (multipart file) server-side and posts every completed run it contains. Token is auto-issued via a cookie, not a header. |
 
 ## Auth model
 

@@ -4,7 +4,9 @@ A small JSON file, stored in the OS's standard per-user config
 directory, holding the fields a user would otherwise have to retype on
 every CLI invocation: ``wow_addon_path`` (for one-click dungeon-data
 extraction, see ``extract_dungeon_data`` in api.py), ``raiderio_region``,
-``avoidable_data_path``, ``default_output_dir`` and ``history_db_path``.
+``avoidable_data_path``, ``default_output_dir``, ``history_db_path`` and
+``wow_log_path`` (the live ``WoWCombatLog.txt`` to watch -- see
+``start_watch`` in api.py).
 
 Directory resolution follows each OS's own convention rather than
 assuming ``~/.config`` works everywhere (it doesn't on Windows, and isn't
@@ -46,6 +48,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "default_output_dir": None,
     "history_db_path": None,
     "site_url": None,
+    "wow_log_path": None,
 }
 
 
