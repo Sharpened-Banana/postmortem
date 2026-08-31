@@ -68,7 +68,9 @@ end
 
 -- Empty init stub for later work packages to extend. Called once, after
 -- SavedVariables are ready, from the ADDON_LOADED handler below.
-function MA:OnInitialize() end
+function MA:OnInitialize()
+  if MA.MinimapButton_Initialize then MA.MinimapButton_Initialize(MA) end
+end
 
 -- True if the Mythic Dungeon Tools addon is fully loaded. Wired here
 -- (rather than in a later file) because it is small and multiple future
