@@ -28,10 +28,23 @@ from ..combatlog.events import (
 from ..combatlog.guid import parse_guid
 from ..mdt.dungeon_data import DungeonData
 from .avoidable import AvoidableData
-from .gamedata import BREZ_SPELLS, DEFENSIVES, LUST_SPELLS, spec_info
+from .gamedata import BREZ_SPELLS, CC_SPELLS, DEFENSIVES, LUST_SPELLS, spec_info
 from .pulls import ActualPull
 
 PET_BUCKET = "_pets"
+
+# HP fraction (of max_hp, from the advanced block) below which a hit that
+# drops a player counts as a "close call" -- see RunStats.close_calls and
+# _tag_close_calls. 20% is deliberately generous (a real "oh no" moment,
+# not every dip below half health) -- this is meant to surface genuine
+# near-misses worth reviewing, not to fire on routine chip damage.
+CLOSE_CALL_HP_PCT = 0.20
+# Window (seconds) around a player's actual death ts within which a
+# close-call entry for that same player is dropped as "that's the death
+# itself, not a survived close call" -- see _tag_close_calls. Matches the
+# spirit of _AOE_WINDOW below (same-instant combat log events don't always
+# share an identical timestamp).
+_CLOSE_CALL_DEATH_WINDOW = 1.0
 
 
 @dataclass
@@ -138,6 +151,16 @@ class RunStats:
     deaths: list[DeathRecord] = field(default_factory=list)
     interrupt_events: list[dict[str, Any]] = field(default_factory=list)
     dispel_events: list[dict[str, Any]] = field(default_factory=list)
+    # a hard-CC application (see gamedata.CC_SPELLS) landed on a hostile
+    # target and later ended (removed, target died, or run ended) --
+    # {caster, spell_id, spell, cc_type, target, start_ts, end_ts, duration_s}
+    cc_events: list[dict[str, Any]] = field(default_factory=list)
+    # damage that dropped a player below CLOSE_CALL_HP_PCT without killing
+    # them -- {ts, player, pull, hp_pct, spell, amount, source}. Only the
+    # transition INTO the danger zone is recorded (not every hit while
+    # already low), and never for a hit that turned out to be the killing
+    # blow -- see _tag_close_calls.
+    close_calls: list[dict[str, Any]] = field(default_factory=list)
     lust_events: list[dict[str, Any]] = field(default_factory=list)
     brez_events: list[dict[str, Any]] = field(default_factory=list)
     cast_timeline: list[dict[str, Any]] = field(default_factory=list)
@@ -225,6 +248,13 @@ def compute_stats(
         if _new_cast_instance(src, sp.spell_id, "aura", ts):
             entry["dot_casts"] += 1
 
+    # hard-CC applications in flight on a hostile target: (enemy_guid,
+    # spell_id) -> {caster, spell, cc_type, target, start_ts}. Closed on
+    # SPELL_AURA_REMOVED, the target's UNIT_DIED, or run end (see below).
+    open_cc: dict[tuple[str, int], dict[str, Any]] = {}
+    # last recorded HP fraction per player guid, for detecting the
+    # transition into CLOSE_CALL_HP_PCT (see _tag_close_calls).
+    last_hp_pct: dict[str, float] = {}
     # enemy hard-casts in flight: caster guid -> (spell_id, spell_name, ts)
     open_enemy_casts: dict[str, tuple[int, str, float]] = {}
     # buff uptime windows: (player_guid, spell_id) -> window start ts
@@ -256,6 +286,20 @@ def compute_stats(
             "name": spell_name, "kicked": 0, "landed": 0, "expired": 0,
         })
         entry[outcome] += 1
+
+    def close_cc(target_guid: str, spell_id: int, end_ts: float) -> None:
+        window = open_cc.pop((target_guid, spell_id), None)
+        if window is None:
+            return
+        stats.cc_events.append({
+            **window,
+            "end_ts": end_ts,
+            "duration_s": round(end_ts - window["start_ts"], 1),
+        })
+
+    def close_all_cc_on(target_guid: str, end_ts: float) -> None:
+        for key in [k for k in open_cc if k[0] == target_guid]:
+            close_cc(key[0], key[1], end_ts)
 
     def track_movement(guid: str, ts: float, x: float, y: float, ui_map_id: int) -> None:
         prev = last_position.get(guid)
@@ -373,6 +417,10 @@ def compute_stats(
             elif g.is_npc and dst_guid not in killed_guids:
                 killed_guids.add(dst_guid)
                 close_enemy_cast(dst_guid, "expired")
+                # a dead unit's active auras don't get an explicit
+                # SPELL_AURA_REMOVED -- count any open CC as having held
+                # for its full duration up to death, not lost entirely.
+                close_all_cc_on(dst_guid, event.ts)
                 if data is not None and g.npc_id is not None:
                     count = data.npc_count(g.npc_id)
                     if count > 0:
@@ -442,6 +490,28 @@ def compute_stats(
                     if adv.pos_x or adv.pos_y:
                         track_movement(dst_guid, event.ts, adv.pos_x, adv.pos_y,
                                        adv.ui_map_id)
+                    if adv.max_hp:
+                        hp_pct = hp_left / adv.max_hp
+                        prev_pct = last_hp_pct.get(dst_guid)
+                        if hp_pct < CLOSE_CALL_HP_PCT and (
+                            prev_pct is None or prev_pct >= CLOSE_CALL_HP_PCT
+                        ):
+                            # whether this hit was actually survived isn't
+                            # knowable yet -- UNIT_DIED for the player, if
+                            # it happens, hasn't been seen. _tag_close_calls
+                            # drops any entry too close to that player's
+                            # real death after the full pass finishes.
+                            stats.close_calls.append({
+                                "ts": event.ts,
+                                "player_guid": dst_guid,
+                                "player": dst_name,
+                                "pull": pull_idx,
+                                "hp_pct": round(hp_pct * 100, 1),
+                                "spell": sp.spell_name if sp else "Melee",
+                                "amount": damage.amount,
+                                "source": src_name or src_guid,
+                            })
+                        last_hp_pct[dst_guid] = hp_pct
                 buf.append({
                     "ts": event.ts,
                     "spell": sp.spell_name if sp else "Melee",
@@ -596,6 +666,19 @@ def compute_stats(
                     # enemy buffing an ally (HoTs, empowerments): heal-side
                     observe_aura(stats.enemy_heal_observations, src_guid, sp,
                                  event.ts)
+            if sp is not None and sp.spell_id in CC_SPELLS and is_hostile_npc(dst_flags):
+                caster = resolve_source(src_guid, src_name, src_flags)
+                cc_name, cc_type = CC_SPELLS[sp.spell_id]
+                key = (dst_guid, sp.spell_id)
+                open_cc[key] = {
+                    "pull": pull_idx,
+                    "caster": caster.name if caster else (src_name or None),
+                    "spell_id": sp.spell_id,
+                    "spell": cc_name,
+                    "cc_type": cc_type,
+                    "target": dst_name or None,
+                    "start_ts": event.ts,
+                }
             if sp is not None and is_group_player(dst_flags):
                 aura_kind = event.params[11] if len(event.params) > 11 else ""
                 if aura_kind == "BUFF":
@@ -624,6 +707,8 @@ def compute_stats(
 
         if name == "SPELL_AURA_REMOVED":
             sp = spell_info(event)
+            if sp is not None and sp.spell_id in CC_SPELLS and is_hostile_npc(dst_flags):
+                close_cc(dst_guid, sp.spell_id, event.ts)
             if sp is not None and is_group_player(dst_flags):
                 key = (dst_guid, sp.spell_id)
                 start = open_buffs.pop(key, None)
@@ -634,6 +719,10 @@ def compute_stats(
                     if windows and windows[-1][1] is None:
                         windows[-1][1] = event.ts
             continue
+
+    # CC still active when the run ends counts until the last event
+    for target_guid, spell_id in list(open_cc.keys()):
+        close_cc(target_guid, spell_id, run_end_ts)
 
     # buffs still up when the run ends count until the last event
     for key, start in open_buffs.items():
@@ -660,9 +749,32 @@ def compute_stats(
     _estimate_kick_value(stats)
     _finish_pull_stats(stats, pulls, data)
     _tag_death_defensives(stats, defensive_windows, full_cast_timeline)
+    _tag_close_calls(stats)
     if avoidable is not None:
         _tag_avoidable_damage(stats, avoidable)
     return stats
+
+
+def _tag_close_calls(stats: RunStats) -> None:
+    """Drop any close_calls entry that's actually the lead-up to a real
+    death (within _CLOSE_CALL_DEATH_WINDOW of that same player's death ts)
+    -- those aren't survived close calls, they're just the death itself,
+    already covered by DeathRecord.recap. Whether a given low-HP hit turned
+    out fatal isn't knowable until the whole pass has seen every UNIT_DIED,
+    so this runs once at the end rather than filtering inline."""
+    death_ts_by_player: dict[str, list[float]] = {}
+    for d in stats.deaths:
+        death_ts_by_player.setdefault(d.player_guid, []).append(d.ts)
+
+    def near_a_death(player_guid: str, ts: float) -> bool:
+        return any(
+            abs(ts - death_ts) <= _CLOSE_CALL_DEATH_WINDOW
+            for death_ts in death_ts_by_player.get(player_guid, ())
+        )
+
+    stats.close_calls = [
+        c for c in stats.close_calls if not near_a_death(c["player_guid"], c["ts"])
+    ]
 
 
 def _tag_death_defensives(

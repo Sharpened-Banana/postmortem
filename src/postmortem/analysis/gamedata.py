@@ -135,6 +135,87 @@ DEFENSIVES: dict[int, tuple[str, Optional[tuple[int, ...]]]] = {
 }
 
 
+# Hard crowd-control effects: the kind of thing worth asking "was that
+# caster ever CC'd" about in a M+ post-mortem -- incapacitates, roots,
+# stuns, fears, banishes. Deliberately NOT interrupts (already tracked
+# separately, see stats.enemy_cast_outcomes) and NOT generic slows/snares
+# (a slow isn't "control" in the sense this stat cares about -- the target
+# can still act). Applied *by* the group *onto* a hostile target is the
+# only direction tracked (stats.compute_stats gates on is_hostile_npc(dst)).
+#
+# spell_id -> (name, cc_type). cc_type is a coarse label for grouping in a
+# report, not a mechanical distinction the code itself branches on.
+#
+# Correctness over completeness, same discipline as DEFENSIVES above: a
+# representative sample of spells I'm confident are accurate, not an
+# exhaustive list -- a CC spell missing from this table simply doesn't
+# count towards CC uptime, it's never misreported as something else.
+CC_SPELLS: dict[int, tuple[str, str]] = {
+    # -- Mage --
+    118: ("Polymorph", "incapacitate"),
+    28271: ("Polymorph", "incapacitate"),  # Turtle
+    28272: ("Polymorph", "incapacitate"),  # Pig
+    61305: ("Polymorph", "incapacitate"),  # Black Cat
+    61780: ("Polymorph", "incapacitate"),  # Turkey
+    61721: ("Polymorph", "incapacitate"),  # Rabbit
+    82691: ("Ring of Frost", "incapacitate"),
+    122: ("Frost Nova", "root"),
+
+    # -- Rogue --
+    6770: ("Sap", "incapacitate"),
+    2094: ("Blind", "incapacitate"),
+    1776: ("Gouge", "incapacitate"),
+
+    # -- Hunter --
+    3355: ("Freezing Trap", "incapacitate"),
+    19386: ("Wyvern Sting", "incapacitate"),
+
+    # -- Paladin --
+    20066: ("Repentance", "incapacitate"),
+    853: ("Hammer of Justice", "stun"),
+
+    # -- Priest --
+    9484: ("Shackle Undead", "incapacitate"),
+    8122: ("Psychic Scream", "fear"),
+    605: ("Mind Control", "incapacitate"),
+
+    # -- Warlock --
+    710: ("Banish", "incapacitate"),
+    6358: ("Seduction", "incapacitate"),  # Succubus
+    5782: ("Fear", "fear"),
+    118699: ("Fear", "fear"),  # Howl of Terror
+
+    # -- Druid --
+    2637: ("Hibernate", "incapacitate"),
+    339: ("Entangling Roots", "root"),
+    5211: ("Mighty Bash", "stun"),
+    99: ("Incapacitating Roar", "incapacitate"),
+
+    # -- Shaman --
+    51514: ("Hex", "incapacitate"),
+    211015: ("Hex", "incapacitate"),  # Cockroach
+    211010: ("Hex", "incapacitate"),  # Snake
+    211004: ("Hex", "incapacitate"),  # Spider
+
+    # -- Death Knight --
+    47476: ("Strangulate", "silence"),
+    108194: ("Asphyxiate", "stun"),
+
+    # -- Monk --
+    115078: ("Paralysis", "incapacitate"),
+
+    # -- Demon Hunter --
+    179057: ("Chaos Nova", "stun"),
+    217832: ("Imprison", "incapacitate"),
+
+    # -- Warrior --
+    5246: ("Intimidating Shout", "fear"),
+
+    # -- Evoker --
+    360806: ("Sleep Walk", "incapacitate"),
+}
+
+
 def spec_info(spec_id: int | None) -> tuple[str | None, str | None, str | None]:
     if spec_id is None:
         return None, None, None
