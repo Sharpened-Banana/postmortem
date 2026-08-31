@@ -101,6 +101,12 @@ function MA:Tracker_OnTick()
 
   UpdateForces()
 
+  -- RouteImport.lua's pull-boundary detection is timer-based (a gap since
+  -- the last engagement), so it needs to be checked on a regular tick too,
+  -- not just when a new combat log event arrives. Reuses this existing
+  -- once-per-second tick instead of an OnUpdate of its own; same guarded-
+  -- call pattern as Overlay_Refresh below.
+  if MA.RouteImport_OnTick then MA.RouteImport_OnTick(MA) end
   if MA.Overlay_Refresh then MA.Overlay_Refresh(MA) end
 end
 
