@@ -1,6 +1,6 @@
 """Generic on-disk cache for ``Fetcher``-shaped API lookups.
 
-``Fetcher`` here means the same shape used by :mod:`mythic_analyzer.raiderio`:
+``Fetcher`` here means the same shape used by :mod:`postmortem.raiderio`:
 a callable that takes a URL and returns a parsed JSON dict, or ``None`` on
 failure (network error, 404, etc.). ``cached_fetcher`` wraps any such
 callable with a JSON-file-backed cache keyed by the request URL, so
@@ -42,14 +42,14 @@ def _resolve_cache_dir() -> Path:
     override = os.environ.get(ENV_VAR)
     if override:
         return Path(override)
-    return Path.home() / ".cache" / "mythic-analyzer"
+    return Path.home() / ".cache" / "postmortem"
 
 
 def cache_dir() -> Path:
     """Directory cache files live in.
 
     Honors ``$MYTHIC_ANALYZER_CACHE`` (interpreted as a directory) when
-    set; otherwise defaults to ``~/.cache/mythic-analyzer``. Other cached
+    set; otherwise defaults to ``~/.cache/postmortem``. Other cached
     data sources should call this (or pass their own ``cache_dir=`` through
     to :func:`cached_fetcher`) rather than re-deriving the override logic.
     """

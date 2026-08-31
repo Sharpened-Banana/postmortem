@@ -1,5 +1,5 @@
 """Optional client for POSTing an analyzed run report to the public
-mythic-analyzer site (a separate web service; see ``site/mythic_site/``).
+postmortem site (a separate web service; see ``site/postmortem_site/``).
 
 Stdlib-only (``urllib.request``, no ``requests`` dependency), matching
 this project's other HTTP client (``raiderio.py``): narrow exception
@@ -29,7 +29,7 @@ from . import appdirs
 #: ``version`` by reusing the package's own ``__version__`` (both are
 #: hand-maintained; there's no build-time sync between them) rather than
 #: hardcoding a second copy of the version number here.
-USER_AGENT = f"mythic-analyzer/{__version__}"
+USER_AGENT = f"postmortem/{__version__}"
 
 TOKEN_FILENAME = "upload_token.json"
 

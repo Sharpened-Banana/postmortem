@@ -1,6 +1,6 @@
 """Historical run index: one static webpage over all your saved reports.
 
-``mythic-analyzer index reports/`` scans a directory for report JSON files
+``postmortem index reports/`` scans a directory for report JSON files
 (written by ``analyze --format json`` or ``record --analyze``) and builds a
 single self-contained index.html: every run with result, time, deaths,
 route adherence and kick efficiency, filterable by dungeon, with links to

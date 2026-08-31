@@ -1,4 +1,4 @@
-"""mythic-analyzer command line interface."""
+"""postmortem command line interface."""
 
 from __future__ import annotations
 
@@ -6,15 +6,16 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Any, Iterable, Optional
 
 from .analysis.avoidable import AvoidableData
+from .analysis.interruptibility import InterruptibilityData
 from .analysis.run_analyzer import analyze_run
 from .combatlog.parser import parse_file
 from .combatlog.segmenter import RunSegment, segment_runs
 from .mdt.decode import MDTDecodeError, decode_mdt_string
 from .mdt.dungeon_data import DungeonDataStore
-from .mdt.extract import write_dungeon_data
+from .mdt.extract import LuaLiteralParser, LuaParseError, _find_assignment, write_dungeon_data
 from .mdt.route import Route
 from .recorder import Recorder
 from .report.html import render_html
@@ -55,6 +56,20 @@ def _load_avoidable(path: Optional[str]) -> Optional[AvoidableData]:
         return AvoidableData.load(path)
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
         raise SystemExit(f"error: could not load avoidable-damage data {path}: {exc}")
+
+
+def _load_interruptibility(path: Optional[str]) -> Optional[InterruptibilityData]:
+    """Load --interrupt-data. Like --avoidable-data/--dungeon-data, an
+    explicitly-passed path that fails to load is a clear CLI error
+    (SystemExit) -- the user typed a path, and silently ignoring a typo
+    there would just be confusing. Omitting the flag entirely just skips
+    addon-captured interruptibility data (see analyze_run)."""
+    if not path:
+        return None
+    try:
+        return InterruptibilityData.load(path)
+    except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"error: could not load interrupt data {path}: {exc}")
 
 
 def _resolve_timer_par_ms(args: argparse.Namespace, challenge_map_id: Optional[int]) -> Optional[int]:
@@ -172,7 +187,7 @@ def cmd_import_route(args: argparse.Namespace) -> int:
             print(f"  pull {pull['pull']:>3}: {mobs}")
     if not store:
         print("\n(hint: pass --dungeon-data mdt_data.json to resolve enemy names "
-              "— create it with `mythic-analyzer extract-data`)")
+              "— create it with `postmortem extract-data`)")
     return 0
 
 
@@ -182,6 +197,74 @@ def cmd_extract_data(args: argparse.Namespace) -> int:
     print(f"extracted {n} dungeons -> {args.output}")
     for d in sorted(payload["dungeons"].values(), key=lambda d: d["dungeon_idx"]):
         print(f"  [{d['dungeon_idx']:>3}] {d['name']}: {len(d['enemies'])} enemy types")
+    return 0
+
+
+def cmd_extract_interrupts(args: argparse.Namespace) -> int:
+    """Extract the addon's PostmortemSpellDB SavedVariables table into
+    the JSON shape InterruptibilityData.load() reads.
+
+    Unlike extract-data (which walks a whole MDT addon folder of
+    per-dungeon files), this reads one specific SavedVariables file --
+    the addon declares two SavedVariables tables in one .toc
+    (PostmortemDB, PostmortemSpellDB), so WoW writes both as
+    separate top-level assignments into the same
+    .../SavedVariables/Postmortem.lua file. We locate the
+    PostmortemSpellDB assignment specifically and ignore
+    PostmortemDB.
+    """
+    path = Path(args.savedvariables_path)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise SystemExit(f"error: could not read {path}: {exc}")
+
+    pos = _find_assignment(text, r"PostmortemSpellDB\s*=\s*")
+    if pos is None:
+        raise SystemExit(
+            f"error: no PostmortemSpellDB assignment found in {path} "
+            "(wrong SavedVariables file? or the addon hasn't recorded "
+            "any casts yet)"
+        )
+
+    warnings: list[str] = []
+    parser = LuaLiteralParser(text, warnings)
+    try:
+        raw = parser.parse_value_at(pos)
+    except LuaParseError as exc:
+        raise SystemExit(
+            f"error: could not parse PostmortemSpellDB in {path}: {exc}"
+        )
+
+    global_table = raw.get("global") if isinstance(raw, dict) else None
+    if not isinstance(global_table, dict):
+        global_table = {}
+
+    spells: dict[str, Any] = {}
+    n_interruptible = 0
+    n_not = 0
+    for spell_id, entry in global_table.items():
+        if not isinstance(spell_id, int) or not isinstance(entry, dict):
+            continue
+        interruptible = bool(entry.get("interruptible"))
+        spells[str(spell_id)] = {
+            "name": entry.get("name") if isinstance(entry.get("name"), str)
+            else f"spell:{spell_id}",
+            "interruptible": interruptible,
+        }
+        if interruptible:
+            n_interruptible += 1
+        else:
+            n_not += 1
+
+    payload = {"spells": spells}
+    with open(args.output, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, indent=1)
+
+    print(f"extracted {len(spells)} spells -> {args.output}")
+    print(f"  {n_interruptible} known interruptible, {n_not} known uninterruptible")
+    for w in warnings:
+        print(f"warning: {w}", file=sys.stderr)
     return 0
 
 
@@ -210,6 +293,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     route = _load_route(args.route) if args.route else None
     store = _load_store(args.dungeon_data)
     avoidable = _load_avoidable(args.avoidable_data)
+    interrupt_data = _load_interruptibility(args.interrupt_data)
     # Stream segments directly into _pick_run rather than list(...)-ing them
     # all up front — for a numeric --run it stops parsing once the wanted
     # run is found, and never retains other runs' event lists either way.
@@ -222,6 +306,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         route=route,
         store=store,
         avoidable=avoidable,
+        interrupt_data=interrupt_data,
         pull_gap_seconds=args.pull_gap,
         full_cast_timeline=not args.no_cast_timeline,
         death_penalty_s=args.death_penalty,
@@ -428,7 +513,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="mythic-analyzer",
+        prog="postmortem",
         description="Mythic+ route post-mortem: MDT route vs. what actually happened.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -448,6 +533,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--output", default="mdt_data.json")
     p.set_defaults(func=cmd_extract_data)
 
+    p = sub.add_parser(
+        "extract-interrupts",
+        help="extract addon-captured spell-interruptibility data from the "
+             "Postmortem addon's SavedVariables file",
+    )
+    p.add_argument("savedvariables_path",
+                   help="path to the Postmortem SavedVariables file "
+                        "(e.g. WTF/Account/<ACCOUNT>/SavedVariables/"
+                        "Postmortem.lua) -- both PostmortemDB and "
+                        "PostmortemSpellDB live in this one file; "
+                        "only PostmortemSpellDB is read")
+    p.add_argument("-o", "--output", default="interrupt_data.json")
+    p.set_defaults(func=cmd_extract_interrupts)
+
     p = sub.add_parser("runs", help="list Mythic+ runs found in a combat log")
     p.add_argument("log", help="path to WoWCombatLog.txt")
     p.set_defaults(func=cmd_runs)
@@ -462,6 +561,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="JSON file tagging avoidable-damage spell ids (community/"
                         "user-maintained; see docs/avoidable_spells.example.json) "
                         "to break out avoidable damage taken per player")
+    p.add_argument("--interrupt-data",
+                   help="JSON file of addon-captured spell-interruptibility "
+                        "data (ground truth from the game client, not a "
+                        "curated list; see `extract-interrupts`)")
     p.add_argument("--format", default="text",
                    help="comma-separated: text,json,html (default: text)")
     p.add_argument("--out", help="directory to write reports into (default: stdout/cwd)")
@@ -496,8 +599,8 @@ def build_parser() -> argparse.ArgumentParser:
                         "at PATH (created if missing) — see `index --db`")
     p.add_argument("--upload", metavar="URL",
                    help="also upload this run's report to a public "
-                        "mythic-analyzer site at URL (e.g. "
-                        "https://mythic-analyzer.fly.dev) so it's browsable "
+                        "postmortem site at URL (e.g. "
+                        "https://postmortem.fly.dev) so it's browsable "
                         "there; needs internet access, and never fails the "
                         "analysis itself if the upload doesn't go through")
     p.add_argument("--upload-token", metavar="TOKEN",
