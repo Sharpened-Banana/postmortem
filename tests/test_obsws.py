@@ -35,13 +35,13 @@ import time
 import pytest
 from conftest import build_run_log
 
-from mythic_analyzer.obsws import (
+from postmortem.obsws import (
     OBSClient,
     OBSError,
     WebSocketClient,
     compute_auth_string,
 )
-from mythic_analyzer.recorder import Recorder
+from postmortem.recorder import Recorder
 
 _GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 

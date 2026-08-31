@@ -464,7 +464,7 @@ def cmd_index(args: argparse.Namespace) -> int:
 def _write_recorded_reports(run, route, store, pull_gap_seconds: float = 5.0) -> None:
     """Analyze one recorded run's log slice and write its JSON/HTML/text
     reports, plus the chapters sidecars (``<run>.chapters.json`` /
-    ``<run>.vtt`` -- see :mod:`mythic_analyzer.chapters`, WP-D2) next to
+    ``<run>.vtt`` -- see :mod:`postmortem.chapters`, WP-D2) next to
     the recorded ``.txt`` slice. ``run.started_at`` (the wall-clock moment
     the recorder started this run, essentially simultaneous with a shell
     hook or native OBS actually starting to record -- see

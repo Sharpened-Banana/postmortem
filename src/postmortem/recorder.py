@@ -18,7 +18,7 @@ As of WP-D1, OBS can also be driven natively (no third-party ``obs-cmd``
 needed) via ``--obs [ws://host:port]`` (default ``ws://127.0.0.1:4455``
 when passed with no value), ``--obs-password`` and
 ``--obs-replay-on-death`` (saves the replay buffer on every detected
-player death) -- see :mod:`mythic_analyzer.obsws`. If a shell hook is
+player death) -- see :mod:`postmortem.obsws`. If a shell hook is
 *also* configured for a given event (start/end), the shell hook takes
 precedence for that event and the native client is not additionally
 invoked, to avoid double-triggering OBS; ``--obs-replay-on-death`` always

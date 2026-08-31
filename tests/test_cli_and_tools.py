@@ -354,7 +354,7 @@ class TestRecorder:
         )
         (run,) = rec.watch(stop_after_runs=1)
 
-        from mythic_analyzer.cli import _write_recorded_reports
+        from postmortem.cli import _write_recorded_reports
         _write_recorded_reports(run, route=None, store=None)
 
         base = run.path.with_suffix("")

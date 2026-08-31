@@ -1,6 +1,6 @@
 """Per-pull/death video clip cutter (WP-D3).
 
-Turns a chapters list (see :mod:`mythic_analyzer.chapters`) into one
+Turns a chapters list (see :mod:`postmortem.chapters`) into one
 lossless ``ffmpeg`` clip per ``pull``/``boss_pull`` chapter (the real
 pull duration, padded on both ends) and one per ``death`` chapter (a
 padded window around that point event). ``run_start``/``lust`` chapters
@@ -10,7 +10,7 @@ Where the chapter/offset data comes from
 -----------------------------------------
 ``clips`` is invoked as ``clips VIDEO REPORT_JSON`` -- no explicit
 chapters file -- but cutting needs the *video-relative* offsets that
-:mod:`mythic_analyzer.chapters` already knows how to compute (a video's
+:mod:`postmortem.chapters` already knows how to compute (a video's
 first frame doesn't necessarily line up with
 ``report["run"]["start_ts"]``; see that module's docstring for why).
 :func:`load_chapters` resolves this the same way a real user's workflow
@@ -18,7 +18,7 @@ naturally does:
 
 1. Prefer an existing ``<report_basename>.chapters.json`` sidecar next
    to the report (the naming convention
-   :func:`mythic_analyzer.chapters.write_chapter_files` already
+   :func:`postmortem.chapters.write_chapter_files` already
    produces) -- the common case, since it already carries the real
    recorder wall-clock reference from when the video was recorded.
 2. Otherwise, fall back to recomputing chapters assuming the video's
@@ -104,7 +104,7 @@ def _slugify(label: str, limit: int = _SLUG_MAX_LEN) -> str:
 def sidecar_path_for(report_json_path: Path) -> Path:
     """The ``<report_basename>.chapters.json`` sidecar path for a given
     report JSON path -- matches the naming
-    :func:`mythic_analyzer.chapters.write_chapter_files` already uses
+    :func:`postmortem.chapters.write_chapter_files` already uses
     (``<base>.json`` alongside ``<base>.chapters.json``)."""
     base = report_json_path.with_suffix("")
     return Path(f"{base}.chapters.json")
