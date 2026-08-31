@@ -327,6 +327,174 @@ class TestUploadReport:
         assert result == {"error": "already submitted by another uploader"}
 
 
+# -- live watch mode ---------------------------------------------------------
+
+
+class TestWatchMode:
+    """start_watch()/stop_watch(): watches a growing combat log on a
+    background thread and auto-analyzes + auto-uploads each completed
+    run. _emit_watch_event is monkeypatched to capture events instead of
+    calling the real webview.windows[0].evaluate_js(...) -- there's no
+    live pywebview window under test, matching the caveat already noted
+    on the pick_* dialog methods.
+    """
+
+    @pytest.fixture(autouse=True)
+    def isolated_config_dir(self, tmp_path, monkeypatch):
+        fake_dir = tmp_path / "config"
+        monkeypatch.setattr(config_module, "config_dir", lambda: fake_dir)
+
+    @pytest.fixture()
+    def events(self, api, monkeypatch):
+        captured = []
+        monkeypatch.setattr(api, "_emit_watch_event", captured.append)
+        return captured
+
+    def _wait_for(self, events, event_type, timeout=5.0):
+        import time as _time
+
+        deadline = _time.time() + timeout
+        while _time.time() < deadline:
+            for e in events:
+                if e["type"] == event_type:
+                    return e
+            _time.sleep(0.05)
+        raise AssertionError(f"no {event_type!r} event within {timeout}s; got {events}")
+
+    def test_missing_log_path_is_an_error(self, api, events):
+        result = api.start_watch({"site_url": "https://example.test"})
+        assert result == {"ok": False, "error": "log_path is required"}
+
+    def test_missing_site_url_is_an_error(self, api, events, tmp_path):
+        log = tmp_path / "WoWCombatLog.txt"
+        log.write_text("", encoding="utf-8")
+        result = api.start_watch({"log_path": str(log)})
+        assert result == {
+            "ok": False,
+            "error": "no site URL configured -- set one in Settings first",
+        }
+
+    def test_stop_watch_with_nothing_running_is_a_noop_ok(self, api, events):
+        assert api.stop_watch() == {"ok": True}
+
+    def test_full_cycle_analyzes_and_uploads_each_completed_run(
+        self, api, events, tmp_path, monkeypatch,
+    ):
+        from conftest import build_run_log
+
+        uploaded = []
+
+        def fake_upload_report(report, url, **kwargs):
+            uploaded.append((report["run"]["zone"], url))
+            return {"ok": True, "run_id": 1, "url": "/runs/1"}
+
+        monkeypatch.setattr("postmortem.upload.upload_report", fake_upload_report)
+
+        log = tmp_path / "WoWCombatLog.txt"
+        log.write_text("", encoding="utf-8")
+
+        result = api.start_watch({
+            "log_path": str(log),
+            "site_url": "https://example.test",
+            "out_dir": str(tmp_path / "watch-runs"),
+        })
+        assert result == {"ok": True}
+        assert api._watch_thread is not None and api._watch_thread.is_alive()
+
+        # Simulate WoW appending to the log after watching has already
+        # started (the realistic case -- start_watch()'s Recorder
+        # defaults to from_start=False, so only lines written from here
+        # on are seen). The small sleep is just letting the background
+        # thread actually reach its open()+seek-to-end before we append
+        # -- start_watch() returns as soon as the thread is *scheduled*,
+        # not once it's running, so writing immediately races the
+        # thread's own startup (a real key can't start within
+        # microseconds of clicking "start watching", so this has no
+        # real-world equivalent -- purely a test-timing concern).
+        import time as _time
+        _time.sleep(0.2)
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write(build_run_log().text())
+
+        uploaded_event = self._wait_for(events, "uploaded")
+        assert uploaded_event["url"] == "https://example.test/runs/1"
+        assert uploaded == [("Murder Row", "https://example.test")]
+
+        event_types = [e["type"] for e in events]
+        assert event_types == ["watching", "run_complete", "analyzed", "uploaded"]
+        assert events[1]["zone"] == "Murder Row"
+        assert events[2]["timed"] is True
+
+        # The recorded slice's own JSON/HTML/chapters actually landed on
+        # disk (same as record --analyze) -- _write_recorded_reports is
+        # reused, not reimplemented. (.chapters.json is a separate sidecar
+        # -- see chapters.py -- so it's excluded from this count.)
+        written = [
+            p for p in (tmp_path / "watch-runs").glob("*.json")
+            if not p.name.endswith(".chapters.json")
+        ]
+        assert len(written) == 1
+
+        stop_result = api.stop_watch()
+        assert stop_result == {"ok": True}
+        assert api._watch_thread is None
+        assert self._wait_for(events, "stopped")
+
+    def test_second_start_watch_while_active_is_rejected(
+        self, api, events, tmp_path,
+    ):
+        log = tmp_path / "WoWCombatLog.txt"
+        log.write_text("", encoding="utf-8")
+        first = api.start_watch({
+            "log_path": str(log), "site_url": "https://example.test",
+            "out_dir": str(tmp_path / "watch-runs"),
+        })
+        assert first == {"ok": True}
+        try:
+            second = api.start_watch({
+                "log_path": str(log), "site_url": "https://example.test",
+            })
+            assert second == {"ok": False, "error": "already watching"}
+        finally:
+            api.stop_watch()
+
+    def test_upload_failure_is_reported_as_an_event_not_a_crash(
+        self, api, events, tmp_path, monkeypatch,
+    ):
+        from conftest import build_run_log
+
+        monkeypatch.setattr(
+            "postmortem.upload.upload_report",
+            lambda report, url, **kwargs: {"ok": False, "error": "offline"},
+        )
+
+        log = tmp_path / "WoWCombatLog.txt"
+        log.write_text("", encoding="utf-8")
+        api.start_watch({
+            "log_path": str(log), "site_url": "https://example.test",
+            "out_dir": str(tmp_path / "watch-runs"),
+        })
+        import time as _time
+        _time.sleep(0.2)  # see test_full_cycle_...'s comment on this
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write(build_run_log().text())
+
+        failed_event = self._wait_for(events, "upload_failed")
+        assert failed_event["error"] == "offline"
+        api.stop_watch()
+
+    def test_bad_route_string_is_reported_not_raised(self, api, events, tmp_path):
+        log = tmp_path / "WoWCombatLog.txt"
+        log.write_text("", encoding="utf-8")
+        result = api.start_watch({
+            "log_path": str(log),
+            "site_url": "https://example.test",
+            "route": "not a valid mdt export string",
+        })
+        assert result["ok"] is False
+        assert "error" in result
+
+
 # -- settings ---------------------------------------------------------------
 
 

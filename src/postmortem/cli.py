@@ -461,7 +461,9 @@ def cmd_index(args: argparse.Namespace) -> int:
     return 0
 
 
-def _write_recorded_reports(run, route, store, pull_gap_seconds: float = 5.0) -> None:
+def _write_recorded_reports(
+    run, route, store, pull_gap_seconds: float = 5.0,
+) -> Optional[dict]:
     """Analyze one recorded run's log slice and write its JSON/HTML/text
     reports, plus the chapters sidecars (``<run>.chapters.json`` /
     ``<run>.vtt`` -- see :mod:`postmortem.chapters`, WP-D2) next to
@@ -483,13 +485,21 @@ def _write_recorded_reports(run, route, store, pull_gap_seconds: float = 5.0) ->
     ``cmd_record``) so it can be exercised directly in tests without
     driving the recorder's blocking ``watch()`` loop through a full CLI
     invocation -- see ``TestRecorder`` in ``tests/test_cli_and_tools.py``.
+
+    Returns the analyzed report dict (so callers -- ``cmd_record``'s
+    ``--upload`` handling, the desktop app's watch mode -- can act on it
+    further without re-parsing the slice), or ``None`` if it contained no
+    complete Mythic+ run segment (shouldn't normally happen, since
+    ``Recorder`` only calls ``on_run_complete`` after a real
+    ``CHALLENGE_MODE_END``, but every other "parse a log" path in this
+    codebase makes the same defensive check).
     """
     # list(...) is fine here: run.path is a per-run recorded slice
     # (Recorder opens a fresh file per CHALLENGE_MODE_START), so this
     # never holds more than one run's events regardless.
     segments = list(segment_runs(parse_file(run.path)))
     if not segments:
-        return
+        return None
     report = analyze_run(segments[-1], route=route, store=store,
                          pull_gap_seconds=pull_gap_seconds)
     base = run.path.with_suffix("")
@@ -500,6 +510,7 @@ def _write_recorded_reports(run, route, store, pull_gap_seconds: float = 5.0) ->
     print(render_text(report))
     print(f"wrote {base}.json / {base}.html / {base}.chapters.json / {base}.vtt",
           file=sys.stderr)
+    return report
 
 
 def cmd_record(args: argparse.Namespace) -> int:
@@ -511,9 +522,24 @@ def cmd_record(args: argparse.Namespace) -> int:
         if not args.analyze:
             return
         try:
-            _write_recorded_reports(run, route, store, pull_gap_seconds=args.pull_gap)
+            report = _write_recorded_reports(
+                run, route, store, pull_gap_seconds=args.pull_gap,
+            )
         except Exception as exc:  # keep recording even if analysis hiccups
             print(f"warning: auto-analysis failed: {exc}", file=sys.stderr)
+            return
+
+        if report is not None and args.upload:
+            # Same best-effort philosophy as cmd_analyze's own --upload
+            # handling: a failed upload is printed as a warning and never
+            # interrupts the recording session.
+            from .upload import upload_report
+
+            result = upload_report(report, args.upload, token=args.upload_token)
+            if result.get("ok"):
+                print(f"uploaded: {args.upload.rstrip('/')}{result['url']}")
+            else:
+                print(f"upload failed: {result.get('error')}", file=sys.stderr)
 
     recorder = Recorder(
         log_path=Path(args.log),
@@ -736,6 +762,16 @@ def build_parser() -> argparse.ArgumentParser:
                         "shell-hook precedence -- always uses the native OBS "
                         "client when --obs is set (there's no equivalent "
                         "shell hook for this event to conflict with)")
+    p.add_argument("--upload", metavar="URL",
+                   help="with --analyze, also upload each completed run's "
+                        "report to a public postmortem site at URL as soon "
+                        "as it's analyzed -- automatic, no separate command "
+                        "per run; same best-effort semantics as `analyze "
+                        "--upload` (never fails the recording session if a "
+                        "given upload doesn't go through)")
+    p.add_argument("--upload-token", metavar="TOKEN",
+                   help="upload token to use with --upload, overriding the "
+                        "one auto-generated and stored locally on first use")
     p.set_defaults(func=cmd_record)
 
     p = sub.add_parser(
