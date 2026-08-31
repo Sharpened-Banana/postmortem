@@ -779,24 +779,6 @@ def _handle_log_upload(
         if limited is not None:
             return 429, limited
 
-        try:
-            # parse_file(...) is a generator, fed straight into
-            # segment_runs() without ever materializing the whole file's
-            # events as a list -- segment_runs() itself only accumulates
-            # events for whichever one run is currently open, so peak
-            # memory here is bounded by one run's worth of the log, not
-            # the entire (possibly hours-long) session's worth.
-            segments = [s for s in segment_runs(parse_file(log_path)) if s.completed]
-        except Exception:
-            return 400, {"error": "could not read this as a WoWCombatLog.txt file"}
-
-        if not segments:
-            return 200, {
-                "ok": True,
-                "runs": [],
-                "message": "no completed Mythic+ runs found in this log",
-            }
-
         route: Optional[Route] = None
         route_warning: Optional[str] = None
         if route_str:
@@ -807,8 +789,33 @@ def _handle_log_upload(
 
         store = _get_dungeon_store()
 
+        # segment_iter is consumed one segment at a time below via a
+        # manual next() loop -- NOT `for segment in segment_iter`, and
+        # NOT `[s for s in segment_iter if s.completed]` (a real bug,
+        # fixed here: that first "fix" for this exact memory problem
+        # only stopped materializing the raw *events* list, but a list
+        # comprehension over segment_runs() still fully drains the
+        # generator into one list holding every run's own events
+        # simultaneously before analysis ever starts. Confirmed by
+        # actually reproducing it: a 372MB/15,000-run synthetic log hit
+        # 2.5GB peak RSS on just the first couple of runs. The manual
+        # next() loop is what actually keeps peak memory bounded to one
+        # run at a time, verified the same way after this fix).
+        segment_iter = segment_runs(parse_file(log_path))
         results = []
-        for segment in segments:
+        seen_any_completed = False
+        while True:
+            try:
+                segment = next(segment_iter)
+            except StopIteration:
+                break
+            except Exception:
+                return 400, {"error": "could not read this as a WoWCombatLog.txt file"}
+
+            if not segment.completed:
+                continue
+            seen_any_completed = True
+
             try:
                 report = analyze_run(segment, route=route, store=store)
             except Exception:
@@ -818,13 +825,43 @@ def _handle_log_upload(
                     "zone": segment.zone_name,
                 })
                 continue
+            finally:
+                # Drop this run's events explicitly rather than waiting
+                # on the next loop iteration to reassign `segment` --
+                # same discipline as desktop/api.py's list_runs().
+                segment.events = []
+
             _, body = _ingest_report(conn, report, token_hash, remote_addr)
             body["zone"] = report["run"].get("zone")
             body["level"] = report["run"].get("keystone_level")
             body["timed"] = report["run"].get("timed")
             results.append(body)
 
-        conn.commit()
+            # Commit after every run, not once at the end of the whole
+            # batch: a real, separate bug (found empirically alongside
+            # the memory one, on the same large-file test) -- Python's
+            # sqlite3 module opens an implicit write transaction on the
+            # first INSERT and doesn't release it until commit(), so a
+            # single commit-at-the-end left `conn`'s write lock (taken by
+            # record_upload()'s INSERT OR REPLACE) held for the entire
+            # batch. In WAL mode only one connection may hold the write
+            # lock at a time, and the *next* run's `Store(...)` (its own,
+            # separate connection -- see db.connect()'s docstring on why
+            # connections aren't shared) needs that lock for its own
+            # insert -- so every run after the first in any multi-run
+            # batch failed with "database is locked". Committing here
+            # also means a batch that fails partway through (a later
+            # run's analysis raises) keeps whatever already succeeded,
+            # rather than losing the whole batch to one bad run.
+            conn.commit()
+
+        if not seen_any_completed:
+            return 200, {
+                "ok": True,
+                "runs": [],
+                "message": "no completed Mythic+ runs found in this log",
+            }
+
         result: dict[str, Any] = {"ok": True, "runs": results}
         if route_warning:
             result["route_warning"] = route_warning

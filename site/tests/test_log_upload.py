@@ -30,6 +30,28 @@ class TestLogUpload:
         assert resp.status_code == 200
         assert "runs/" in resp.text
 
+    def test_multi_run_log_does_not_hit_a_database_lock(self, client, raw_log_text):
+        """Regression test for a real bug (2026-08-31): _handle_log_upload
+        committed `conn` once at the end of the whole batch instead of once
+        per run. Python's sqlite3 module opens an implicit write
+        transaction on the first INSERT and holds it open until commit(),
+        so that one connection's still-open transaction (from
+        record_upload()'s write on the first run) blocked every
+        subsequent run's own Store(...) connection (a separate connection
+        -- see db.connect()'s docstring) from writing at all, failing
+        every run after the first in any multi-run batch with "database
+        is locked". No earlier test caught this because none uploaded a
+        log with more than one completed run in it. Concatenating two
+        copies of the same synthetic run is enough to reproduce it (they
+        dedupe to one feed row via the same X-Upload-Token, which is
+        fine -- this test is about the write succeeding at all, not
+        about ending up with two distinct rows)."""
+        two_runs = raw_log_text + raw_log_text
+        resp = client.post("/upload", files=_upload_file(two_runs))
+        assert resp.status_code == 200
+        assert "upload failed" not in resp.text.lower()
+        assert "database is locked" not in resp.text.lower()
+
         feed = client.get("/api/runs").json()
         assert len(feed) == 1
 
