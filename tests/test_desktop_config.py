@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from mythic_analyzer.desktop import config
@@ -12,45 +10,16 @@ from mythic_analyzer.desktop import config
 @pytest.fixture()
 def isolated_config_dir(tmp_path, monkeypatch):
     """A config dir under tmp_path, with config.config_dir() patched to
-    return it -- never touches the real user's home directory. Used
-    (autouse, class-scoped) by every class below except
-    TestConfigDirResolution, which exercises the real per-OS resolution
-    logic and must NOT have it patched out."""
+    return it -- never touches the real user's home directory."""
     fake_dir = tmp_path / "mythic-analyzer-config"
     monkeypatch.setattr(config, "config_dir", lambda: fake_dir)
     return fake_dir
 
 
-class TestConfigDirResolution:
-    """Directly exercise the per-OS resolution logic (unpatched -- this
-    class deliberately does not use the isolated_config_dir fixture)."""
-
-    def test_windows_uses_appdata(self, monkeypatch):
-        monkeypatch.setattr(config.sys, "platform", "win32")
-        monkeypatch.setenv("APPDATA", r"C:\Users\someone\AppData\Roaming")
-        assert config.config_dir() == Path(
-            r"C:\Users\someone\AppData\Roaming"
-        ) / "mythic-analyzer"
-
-    def test_windows_without_appdata_falls_back(self, monkeypatch):
-        monkeypatch.setattr(config.sys, "platform", "win32")
-        monkeypatch.delenv("APPDATA", raising=False)
-        assert config.config_dir() == Path.home() / ".config" / "mythic-analyzer"
-
-    def test_macos_uses_application_support(self, monkeypatch):
-        monkeypatch.setattr(config.sys, "platform", "darwin")
-        expected = Path.home() / "Library" / "Application Support" / "mythic-analyzer"
-        assert config.config_dir() == expected
-
-    def test_linux_uses_xdg_config_home(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(config.sys, "platform", "linux")
-        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
-        assert config.config_dir() == tmp_path / "xdg" / "mythic-analyzer"
-
-    def test_linux_without_xdg_falls_back_to_dot_config(self, monkeypatch):
-        monkeypatch.setattr(config.sys, "platform", "linux")
-        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
-        assert config.config_dir() == Path.home() / ".config" / "mythic-analyzer"
+# Per-OS config_dir() resolution is now covered by tests/test_appdirs.py --
+# config_dir()/APP_DIR_NAME moved to mythic_analyzer.appdirs (this module
+# just re-exports them), so testing the resolution logic itself belongs
+# there, not here.
 
 
 class TestLoadSaveRoundTrip:
@@ -68,6 +37,7 @@ class TestLoadSaveRoundTrip:
             "avoidable_data_path": None,
             "default_output_dir": "/reports",
             "history_db_path": "/reports/runs.db",
+            "site_url": "https://mythic-analyzer.fly.dev",
         }
         config.save_settings(settings)
         assert config.load_settings() == settings

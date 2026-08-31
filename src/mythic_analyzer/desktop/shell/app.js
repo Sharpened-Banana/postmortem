@@ -118,6 +118,7 @@ function wireNav() {
 
 const state = {
   settings: null,
+  lastReport: null, // the report dict behind the currently-shown report screen, if any -- stashed so "Upload to site" has something to send
 };
 
 function defaultSettings() {
@@ -127,6 +128,7 @@ function defaultSettings() {
     avoidable_data_path: null,
     default_output_dir: null,
     history_db_path: null,
+    site_url: null,
   };
 }
 
@@ -311,6 +313,8 @@ async function onAnalyze() {
       document.getElementById("report-context-label").textContent = label;
       const frame = document.getElementById("report-frame");
       frame.srcdoc = result.html;
+      state.lastReport = result.report;
+      resetUploadStatus();
       showScreen("report");
     } else {
       showBanner(na.errorBanner, (result && result.error) || "Analysis failed for an unknown reason.");
@@ -325,6 +329,41 @@ async function onAnalyze() {
 
 function initReportScreen() {
   document.getElementById("report-back-btn").addEventListener("click", () => showScreen("new"));
+  document.getElementById("report-upload-btn").addEventListener("click", onUploadToSite);
+}
+
+function resetUploadStatus() {
+  const status = document.getElementById("report-upload-status");
+  status.hidden = true;
+  status.classList.remove("ok", "err");
+  status.textContent = "";
+}
+
+async function onUploadToSite() {
+  if (!state.lastReport) return;
+  const btn = document.getElementById("report-upload-btn");
+  const status = document.getElementById("report-upload-status");
+
+  btn.disabled = true;
+  status.hidden = false;
+  status.classList.remove("ok", "err");
+  status.textContent = "Uploading…";
+
+  try {
+    const result = await api().upload_report(state.lastReport);
+    if (result && result.ok) {
+      status.classList.add("ok");
+      status.textContent = `Uploaded — ${result.url || "see the site"}`;
+    } else {
+      status.classList.add("err");
+      status.textContent = (result && result.error) || "Upload failed for an unknown reason.";
+    }
+  } catch (e) {
+    status.classList.add("err");
+    status.textContent = "Unexpected error while uploading: " + describeError(e);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // ===========================================================================
@@ -411,6 +450,7 @@ function initSettings() {
   set.defaultOutputDir = document.getElementById("set-default-output-dir");
   set.defaultOutputDirPickBtn = document.getElementById("set-default-output-dir-pick-btn");
   set.historyDbPath = document.getElementById("set-history-db-path");
+  set.siteUrl = document.getElementById("set-site-url");
   set.saveBtn = document.getElementById("set-save-btn");
   set.errorBanner = document.getElementById("set-error-banner");
   set.successBanner = document.getElementById("set-success-banner");
@@ -442,6 +482,7 @@ function applySettingsToForm() {
   set.avoidableDataPath.value = s.avoidable_data_path || "";
   set.defaultOutputDir.value = s.default_output_dir || "";
   set.historyDbPath.value = s.history_db_path || "";
+  set.siteUrl.value = s.site_url || "";
   updateExtractButtonState();
 }
 
@@ -493,6 +534,7 @@ async function onSaveSettings() {
     avoidable_data_path: set.avoidableDataPath.value.trim() || null,
     default_output_dir: set.defaultOutputDir.value.trim() || null,
     history_db_path: set.historyDbPath.value.trim() || null,
+    site_url: set.siteUrl.value.trim() || null,
   };
 
   try {

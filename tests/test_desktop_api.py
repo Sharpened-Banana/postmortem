@@ -275,6 +275,58 @@ class TestListHistory:
         assert "ok" in result
 
 
+# -- upload_report ------------------------------------------------------
+
+
+class TestUploadReport:
+    @pytest.fixture(autouse=True)
+    def isolated_config_dir(self, tmp_path, monkeypatch):
+        fake_dir = tmp_path / "config"
+        monkeypatch.setattr(config_module, "config_dir", lambda: fake_dir)
+
+    def test_no_url_and_no_saved_setting_returns_error(self, api):
+        result = api.upload_report({"run": {}})
+        assert result == {"ok": False, "error": "no site URL configured"}
+
+    def test_explicit_url_is_used_over_saved_setting(self, api, monkeypatch):
+        seen = {}
+
+        def fake_upload_report(report, url, **kwargs):
+            seen["report"] = report
+            seen["url"] = url
+            return {"ok": True, "run_id": 1, "url": "/runs/1"}
+
+        monkeypatch.setattr("mythic_analyzer.upload.upload_report", fake_upload_report)
+        api.save_settings({"site_url": "https://saved.example"})
+
+        result = api.upload_report({"run": {"zone": "x"}}, "https://explicit.example")
+        assert result == {"ok": True, "run_id": 1, "url": "/runs/1"}
+        assert seen["url"] == "https://explicit.example"
+        assert seen["report"] == {"run": {"zone": "x"}}
+
+    def test_falls_back_to_saved_site_url_setting(self, api, monkeypatch):
+        seen = {}
+
+        def fake_upload_report(report, url, **kwargs):
+            seen["url"] = url
+            return {"ok": True, "run_id": 2, "url": "/runs/2"}
+
+        monkeypatch.setattr("mythic_analyzer.upload.upload_report", fake_upload_report)
+        api.save_settings({"site_url": "https://saved.example"})
+
+        result = api.upload_report({"run": {}})
+        assert result["ok"] is True
+        assert seen["url"] == "https://saved.example"
+
+    def test_upstream_failure_is_returned_as_is(self, api, monkeypatch):
+        monkeypatch.setattr(
+            "mythic_analyzer.upload.upload_report",
+            lambda report, url, **kwargs: {"error": "already submitted by another uploader"},
+        )
+        result = api.upload_report({"run": {}}, "https://example.com")
+        assert result == {"error": "already submitted by another uploader"}
+
+
 # -- settings ---------------------------------------------------------------
 
 

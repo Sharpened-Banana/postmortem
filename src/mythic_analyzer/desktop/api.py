@@ -229,6 +229,29 @@ class DesktopAPI:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    # -- public tracker upload -----------------------------------------------
+
+    def upload_report(self, report: dict, url: Optional[str] = None) -> dict:
+        """Upload an already-analyzed ``report`` (as returned by
+        ``analyze()``'s own ``"report"`` field) to a public
+        mythic-analyzer tracker site (see ``site/mythic_site/`` and
+        ``mythic_analyzer.upload``).
+
+        ``url`` defaults to the saved ``site_url`` setting when not
+        given explicitly. Returns ``{"ok": False, "error": "no site URL
+        configured"}`` if neither is set. Otherwise delegates entirely
+        to ``upload.upload_report()``, which never raises -- every
+        failure (network error, validation rejection, rate limit,
+        ownership conflict) already comes back as a plain
+        ``{"ok": False, "error": "..."}`` dict from that function, so
+        this method just returns whatever it returns.
+        """
+        target = url or _config.load_settings().get("site_url")
+        if not target:
+            return {"ok": False, "error": "no site URL configured"}
+        from .. import upload as _upload
+        return _upload.upload_report(report, target)
+
     # -- settings -----------------------------------------------------------
 
     def get_settings(self) -> dict:
