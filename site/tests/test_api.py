@@ -176,10 +176,13 @@ class TestMisc:
         resp = client.get("/runs/999999")
         assert resp.status_code == 404
 
-    def test_root_redirects_to_runs(self, client):
+    def test_root_is_a_real_landing_page(self, client):
         resp = client.get("/", follow_redirects=False)
-        assert resp.status_code in (301, 302, 307, 308)
-        assert resp.headers["location"] == "/runs"
+        assert resp.status_code == 200
+        assert "<html" in resp.text
+        assert 'class="site-header"' in resp.text  # shared nav present
+        assert 'href="/upload"' in resp.text
+        assert 'href="/runs"' in resp.text
 
     def test_healthz(self, client):
         resp = client.get("/healthz")
@@ -223,3 +226,84 @@ class TestSecurityHeaders:
         assert resp.status_code == 200
         assert "Content-Security-Policy" in resp.headers
         assert resp.headers["X-Content-Type-Options"] == "nosniff"
+
+    def test_csp_allows_google_fonts(self, client):
+        """The landing/about/upload pages load Chakra Petch/IBM Plex Sans
+        from Google Fonts -- the site's CSP is default-src 'none' by
+        design, so without an explicit allowance those requests would be
+        silently blocked by the browser and every page would silently
+        fall back to system fonts with no visible error anywhere."""
+        csp = client.get("/").headers["Content-Security-Policy"]
+        assert "fonts.googleapis.com" in csp
+        assert "fonts.gstatic.com" in csp
+
+
+class TestSiteChrome:
+    """The shared nav/footer (app.py's _site_nav/_site_footer/_page/
+    _inject_chrome) appears consistently across every page -- including
+    /runs and /runs/{id}, whose actual content comes from report/index.py
+    and report/html.py (reused verbatim by the CLI and desktop app, so
+    those two modules themselves are never modified -- see app.py's
+    module note above _CHROME_STYLE)."""
+
+    PAGES_AND_ACTIVE = [
+        ("/", "home"),
+        ("/runs", "runs"),
+        ("/about", "about"),
+        ("/upload", "upload"),
+    ]
+
+    def test_nav_and_footer_present_on_every_static_page(self, client):
+        for path, active in self.PAGES_AND_ACTIVE:
+            resp = client.get(path)
+            assert resp.status_code == 200, path
+            assert 'class="site-header"' in resp.text, path
+            assert 'class="site-footer"' in resp.text, path
+            # "active" appears either as class="active" (Home/Browse
+            # Runs/About) or class="cta active" (the Upload CTA) --
+            # either way, some nav link is marked current.
+            assert "active" in resp.text, path
+
+    def test_active_nav_link_matches_current_page(self, client):
+        resp = client.get("/")
+        assert '<a href="/" class="active">' in resp.text
+
+        resp = client.get("/runs")
+        assert '<a href="/runs" class="active">' in resp.text
+
+        resp = client.get("/about")
+        assert '<a href="/about" class="active">' in resp.text
+
+        resp = client.get("/upload")
+        assert 'class="cta active"' in resp.text
+
+    def test_run_detail_page_has_chrome_and_keeps_its_own_report(self, client, report):
+        resp = _upload(client, report)
+        run_id = resp.json()["run_id"]
+
+        detail = client.get(f"/runs/{run_id}")
+        assert detail.status_code == 200
+        assert 'class="site-header"' in detail.text
+        assert 'class="site-footer"' in detail.text
+        # the underlying report/html.py content is still there, unmodified
+        assert report["run"]["zone"] in detail.text
+        assert '"report-data"' in detail.text  # report/html.py's embedded JSON
+
+    def test_every_page_loads_the_shared_fonts(self, client):
+        for path, _ in self.PAGES_AND_ACTIVE:
+            resp = client.get(path)
+            assert "fonts.googleapis.com" in resp.text, path
+
+    def test_landing_page_shows_empty_state_with_no_runs(self, client):
+        resp = client.get("/")
+        assert "be the first" in resp.text.lower()
+
+    def test_landing_page_shows_recent_run_and_stats(self, client, report):
+        resp = _upload(client, report)
+        run_id = resp.json()["run_id"]
+
+        landing = client.get("/")
+        assert report["run"]["zone"] in landing.text
+        assert f'href="/runs/{run_id}"' in landing.text
+        # stat-strip total ("1" run tracked) actually reflects real data
+        assert "<b>1</b>" in landing.text

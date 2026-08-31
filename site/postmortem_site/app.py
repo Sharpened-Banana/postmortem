@@ -67,7 +67,9 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 _SECURITY_HEADERS = {
     "Content-Security-Policy": (
         "default-src 'none'; script-src 'unsafe-inline'; "
-        "style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'"
+        "style-src 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src https://fonts.gstatic.com; "
+        "img-src data:; frame-ancestors 'none'"
     ),
     "X-Content-Type-Options": "nosniff",
 }
@@ -80,6 +82,147 @@ async def _add_security_headers(request: Request, call_next):
         for key, value in _SECURITY_HEADERS.items():
             response.headers[key] = value
     return response
+
+
+# -- shared site chrome (nav, footer, fonts) --------------------------------
+#
+# report/html.py's render_html() and report/index.py's render_index()
+# are reused *verbatim* -- unmodified -- by the CLI (a standalone saved
+# .html file has no live site behind it) and the desktop app (rendered
+# in-process via analyze()/list_history() and shown in a sandboxed
+# iframe -- it never makes an HTTP request to this site's routes at
+# all). So this site's own nav/footer/landing-page chrome is never added
+# to those shared modules -- only spliced onto *this site's* HTTP
+# responses below (see _inject_chrome()), and only additively: it adds
+# a few :root tokens neither module already defines (--radius,
+# --accent-ink, --accent-dim) and scopes every rule to .site-* classes
+# that don't exist in their own markup, so it can never override
+# anything in their already-working, desktop-app-shared visual design.
+
+_FONTS_LINK = (
+    '<link rel="preconnect" href="https://fonts.googleapis.com">'
+    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+    '<link href="https://fonts.googleapis.com/css2?'
+    "family=Chakra+Petch:wght@500;600;700"
+    "&family=IBM+Plex+Sans:wght@400;500;600"
+    '&display=swap" rel="stylesheet">'
+)
+
+# Chrome-only: safe to inject into report/html.py's or report/index.py's
+# own complete documents (see the module note above) -- every selector
+# is scoped to .site-*, and the one :root block only adds tokens neither
+# module already declares, never redeclaring --bg/--panel/etc. with a
+# value that could conflict with theirs.
+_CHROME_STYLE = """
+:root { --radius:10px; --radius-sm:6px; --accent-ink:#1c1608;
+  --accent-dim:rgba(215,169,76,.14); }
+.site-header { display:flex; align-items:center; justify-content:space-between;
+  gap:16px; padding:0 28px; height:60px; background:var(--panel);
+  border-bottom:1px solid var(--line); }
+.site-brand { display:flex; align-items:center; gap:9px;
+  font-family:"Chakra Petch",system-ui,sans-serif; font-size:18px;
+  font-weight:700; color:var(--text); letter-spacing:.01em;
+  text-decoration:none; }
+.site-brand:hover { text-decoration:none; }
+.site-brand .mark { color:var(--accent); font-size:20px; }
+.site-nav { display:flex; align-items:center; gap:4px; }
+.site-nav a { color:var(--dim); font-size:13.5px; font-weight:600;
+  padding:8px 14px; border-radius:var(--radius-sm); text-decoration:none;
+  transition:background .12s ease,color .12s ease; }
+.site-nav a:hover { background:var(--panel2,var(--panel)); color:var(--text);
+  text-decoration:none; }
+.site-nav a.active { background:var(--accent-dim); color:var(--accent); }
+.site-nav a.cta { background:var(--accent); color:var(--accent-ink); margin-left:6px; }
+.site-nav a.cta:hover { background:#e2b75c; }
+.site-footer { border-top:1px solid var(--line); padding:26px 28px;
+  margin-top:56px; color:var(--dim); font-size:12.5px; text-align:center; }
+.site-footer a { color:var(--dim); }
+.site-footer a:hover { color:var(--text); }
+"""
+
+# Full page style, for pages this module builds outright (landing,
+# about, upload) -- not injected into the shared renderers, so free to
+# set real typography/layout without the "additive only" constraint
+# _CHROME_STYLE has.
+_PAGE_STYLE = _CHROME_STYLE + """
+:root { --bg:#14161b; --panel:#1d2027; --panel2:#232733; --line:#313746;
+  --text:#d8dbe2; --dim:#8a90a0; --accent:#d7a94c; --good:#5cb85c;
+  --bad:#d9534f; --warn:#e0a13c; --blue:#5c9ad0;
+  --good-dim:rgba(88,196,124,.14); --bad-dim:rgba(224,96,96,.14); }
+* { box-sizing:border-box; }
+html, body { margin:0; }
+body { background:var(--bg); color:var(--text);
+  font:15px/1.6 "IBM Plex Sans",system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased; }
+h1, h2, h3 { font-family:"Chakra Petch",system-ui,sans-serif; margin:0; }
+a { color:var(--blue); text-decoration:none; }
+a:hover { text-decoration:underline; }
+code, pre { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+.wrap { max-width:1080px; margin:0 auto; padding:0 28px; }
+"""
+
+
+def _site_nav(active: str) -> str:
+    links = [
+        ("home", "/", "Home"),
+        ("runs", "/runs", "Browse Runs"),
+        ("about", "/about", "About"),
+    ]
+    items = "".join(
+        f'<a href="{href}" class="{"active" if key == active else ""}">{label}</a>'
+        for key, href, label in links
+    )
+    upload_active = " active" if active == "upload" else ""
+    return f"""<header class="site-header">
+  <a href="/" class="site-brand"><span class="mark">⚔</span> Postmortem</a>
+  <nav class="site-nav">
+    {items}
+    <a href="/upload" class="cta{upload_active}">Upload a run</a>
+  </nav>
+</header>"""
+
+
+def _site_footer() -> str:
+    return """<footer class="site-footer">
+  Postmortem — a free, public Mythic+ post-mortem tool ·
+  <a href="https://github.com/Sharpened-Banana/postmortem">Source on GitHub</a> ·
+  <a href="/about">About</a>
+</footer>"""
+
+
+def _page(title: str, active: str, body: str) -> str:
+    """Full page shell for pages this module authors directly (landing,
+    about, upload): fonts, shared style, nav, body, footer."""
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{html.escape(title)}</title>
+{_FONTS_LINK}
+<style>{_PAGE_STYLE}</style>
+</head>
+<body>
+{_site_nav(active)}
+{body}
+{_site_footer()}
+</body>
+</html>
+"""
+
+
+def _inject_chrome(rendered_html: str, active: str) -> str:
+    """Splice the shared nav/footer onto report/html.py's or
+    report/index.py's own already-complete HTML document -- see the
+    module note above on why those two modules are never modified
+    directly. Their own <style>/:root and body content render exactly
+    as they always have; this only adds chrome around them.
+    """
+    with_style = rendered_html.replace(
+        "</head>", f"{_FONTS_LINK}<style>{_CHROME_STYLE}</style></head>", 1,
+    )
+    with_nav = with_style.replace("<body>", f"<body>{_site_nav(active)}", 1)
+    return with_nav.replace("</body>", f"{_site_footer()}</body>", 1)
 
 
 def _ensure_runs_schema() -> None:
@@ -95,12 +238,167 @@ def _ensure_runs_schema() -> None:
     Store(config.DB_PATH).close()
 
 
-# -- simple pages ------------------------------------------------------
+# -- landing page ------------------------------------------------------
+
+_LANDING_CSS = """
+.hero { padding:72px 0 56px; text-align:center; }
+.hero h1 { font-size:44px; line-height:1.15; margin-bottom:16px; }
+.hero h1 .accent { color:var(--accent); }
+.hero .tagline { color:var(--dim); font-size:17px; max-width:620px;
+  margin:0 auto 32px; }
+.hero-ctas { display:flex; gap:12px; justify-content:center; flex-wrap:wrap; }
+.btn { display:inline-flex; align-items:center; gap:8px; font:inherit;
+  font-weight:600; font-size:14.5px; padding:12px 22px; border-radius:var(--radius-sm);
+  border:1px solid var(--line); cursor:pointer; }
+.btn:hover { text-decoration:none; }
+.btn-primary { background:var(--accent); color:var(--accent-ink);
+  border-color:var(--accent); }
+.btn-primary:hover { background:#e2b75c; }
+.btn-secondary { background:var(--panel); color:var(--text); }
+.btn-secondary:hover { background:var(--panel2); }
+
+.stat-strip { display:flex; justify-content:center; gap:48px; flex-wrap:wrap;
+  padding:28px 0; border-top:1px solid var(--line);
+  border-bottom:1px solid var(--line); margin-bottom:64px; }
+.stat-strip .stat { text-align:center; }
+.stat-strip .stat b { display:block; font-family:"Chakra Petch",system-ui,sans-serif;
+  font-size:28px; color:var(--accent); }
+.stat-strip .stat span { color:var(--dim); font-size:12.5px;
+  text-transform:uppercase; letter-spacing:.06em; }
+
+.section { margin-bottom:72px; }
+.section h2 { font-size:13px; text-transform:uppercase; letter-spacing:.08em;
+  color:var(--dim); text-align:center; margin-bottom:36px; }
+
+.steps { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+  gap:20px; }
+.step { background:var(--panel); border:1px solid var(--line);
+  border-radius:var(--radius); padding:24px; }
+.step .n { font-family:"Chakra Petch",system-ui,sans-serif; font-size:13px;
+  font-weight:700; color:var(--accent); letter-spacing:.06em; margin-bottom:10px; }
+.step h3 { font-size:16px; margin-bottom:8px; }
+.step p { color:var(--dim); font-size:13.5px; margin:0; }
+
+.feature-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+  gap:16px; }
+.feature { padding:18px 20px; background:var(--panel); border:1px solid var(--line);
+  border-radius:var(--radius); }
+.feature h3 { font-size:14px; margin-bottom:6px; }
+.feature p { color:var(--dim); font-size:13px; margin:0; }
+
+.recent-list { display:flex; flex-direction:column; gap:8px; }
+.recent-row { display:flex; align-items:center; gap:14px; padding:13px 18px;
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--radius-sm); }
+.recent-row:hover { border-color:var(--dim); text-decoration:none; }
+.recent-row .zone { font-weight:600; color:var(--text); flex:1; }
+.recent-row .lvl { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  color:var(--dim); }
+.recent-empty { text-align:center; color:var(--dim); padding:32px;
+  background:var(--panel); border:1px dashed var(--line); border-radius:var(--radius); }
+
+/* matches report/html.py's/report/index.py's own .badge convention,
+   redeclared here since the landing page uses _PAGE_STYLE, not theirs */
+.badge { display:inline-block; padding:2px 10px; border-radius:12px;
+  font-weight:600; font-size:11.5px; }
+.badge.timed { background:#1d3a28; color:var(--good); }
+.badge.over { background:#3a2d1d; color:var(--warn); }
+.badge.neutral { background:var(--panel2); color:var(--dim); }
+"""
+
+
+def _landing_stat(value: Any, label: str) -> str:
+    return f'<div class="stat"><b>{html.escape(str(value))}</b><span>{html.escape(label)}</span></div>'
+
+
+def _render_landing(rows: list[dict[str, Any]]) -> str:
+    total = len(rows)
+    timed = sum(1 for r in rows if r.get("timed"))
+    zones = len({r.get("zone") for r in rows if r.get("zone")})
+
+    if rows:
+        recent_items = "".join(
+            f'<a class="recent-row" href="{html.escape(str(r.get("html") or "/runs"))}">'
+            f'<span class="zone">{html.escape(str(r.get("zone") or "Unknown"))}</span>'
+            f'<span class="lvl">+{html.escape(str(r.get("level") or "?"))}</span>'
+            f'<span class="badge {"timed" if r.get("timed") else ("over" if r.get("timed") is False else "neutral")}">'
+            f'{"timed" if r.get("timed") else ("over timer" if r.get("timed") is False else "incomplete")}</span>'
+            f"</a>"
+            for r in rows[:6]
+        )
+        recent = f'<div class="recent-list">{recent_items}</div>'
+    else:
+        recent = ('<div class="recent-empty">No runs uploaded yet — '
+                   '<a href="/upload">be the first</a>.</div>')
+
+    body = f"""
+<style>{_LANDING_CSS}</style>
+<div class="wrap">
+  <section class="hero">
+    <h1>See exactly what happened<br>on your <span class="accent">Mythic+ key</span>.</h1>
+    <p class="tagline">Upload a combat log and get a full breakdown: route
+    deviations, deaths with killing-blow recaps, kick efficiency, forces
+    progress, and timer pace — shareable with your group in one link.</p>
+    <div class="hero-ctas">
+      <a class="btn btn-primary" href="/upload">Upload a run</a>
+      <a class="btn btn-secondary" href="/runs">Browse runs</a>
+    </div>
+  </section>
+
+  <div class="stat-strip">
+    {_landing_stat(total, "runs tracked")}
+    {_landing_stat(timed, "timed")}
+    {_landing_stat(zones, "dungeons seen")}
+  </div>
+
+  <section class="section">
+    <h2>How it works</h2>
+    <div class="steps">
+      <div class="step"><div class="n">01</div>
+        <h3>Install the addon</h3>
+        <p>A companion WoW addon auto-manages combat logging — turns on the
+        moment your key starts, off when it ends. Nothing to remember.</p></div>
+      <div class="step"><div class="n">02</div>
+        <h3>Upload your log</h3>
+        <p>Drop <code>WoWCombatLog.txt</code> here directly, no install needed
+        — or use the desktop app's "Watch Live" mode to upload every key
+        automatically as you play.</p></div>
+      <div class="step"><div class="n">03</div>
+        <h3>Share the report</h3>
+        <p>Get a link with the full breakdown — pulls vs. plan, deaths,
+        damage, kicks, forces, timer pace. Public, no account needed.</p></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>What you get</h2>
+    <div class="feature-grid">
+      <div class="feature"><h3>Route vs. actual</h3>
+        <p>Every pull matched against your planned MDT route — early,
+        off-route, or missed packs, plus adherence %.</p></div>
+      <div class="feature"><h3>Deaths, with recaps</h3>
+        <p>Exact killing blow and damage taken in the 5s before every death.</p></div>
+      <div class="feature"><h3>Kick efficiency</h3>
+        <p>Which casts got through, prevented damage/healing, and confirmed
+        uninterruptible casts filtered out automatically.</p></div>
+      <div class="feature"><h3>Forces &amp; timer</h3>
+        <p>Enemy-forces progress and timer pace, using real season dungeon
+        data — no setup required.</p></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>Recent runs</h2>
+    {recent}
+  </section>
+</div>
+"""
+    return _page("Postmortem — Mythic+ post-mortems", "home", body)
 
 
 @app.get("/")
-async def root() -> RedirectResponse:
-    return RedirectResponse(url="/runs")
+async def root() -> HTMLResponse:
+    rows = await run_in_threadpool(_load_feed, None)
+    return HTMLResponse(_render_landing(rows))
 
 
 @app.get("/healthz")
@@ -110,63 +408,45 @@ async def healthz() -> dict:
     return {"ok": True}
 
 
-_ABOUT_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>About — Postmortem</title>
-<style>
-:root { --bg:#14161b; --panel:#1d2027; --line:#313746; --text:#d8dbe2;
-  --dim:#8a90a0; --accent:#d7a94c; }
-* { box-sizing:border-box; }
-body { margin:0; background:var(--bg); color:var(--text);
-  font:14px/1.6 "Segoe UI",system-ui,sans-serif; padding:32px;
-  max-width:720px; }
-h1 { color:var(--accent); font-size:22px; margin-bottom:4px; }
-h2 { font-size:15px; margin:28px 0 8px; text-transform:uppercase;
-  letter-spacing:.06em; color:var(--dim); }
-code, pre { background:var(--panel); border:1px solid var(--line);
-  border-radius:6px; }
-code { padding:2px 6px; }
-pre { padding:12px; overflow-x:auto; }
-a { color:#5c9ad0; }
-</style>
-</head>
-<body>
-<h1>Postmortem — Public Runs</h1>
-<p>A free, public post-mortem viewer for World of Warcraft Mythic+ runs.
-Anyone can browse every uploaded run at <a href="/runs">/runs</a> — no
-account needed, and reads are fully public.</p>
-<h2>Uploading a run</h2>
+_ABOUT_BODY = """
+<div class="wrap" style="max-width:720px;padding-top:48px;padding-bottom:24px;">
+<h1 style="font-size:26px;color:var(--accent);margin-bottom:6px;">About</h1>
+<p style="color:var(--dim);">A free, public post-mortem viewer for World of
+Warcraft Mythic+ runs. Anyone can browse every uploaded run at
+<a href="/runs">/runs</a> — no account needed, and reads are fully public.</p>
+
+<h2 style="font-size:14px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);margin:32px 0 10px;">Uploading a run</h2>
 <p>Easiest: <a href="/upload">upload your WoWCombatLog.txt directly</a> —
 no install, nothing to run. Every completed Mythic+ key in it gets
-analyzed and posted automatically.</p>
+analyzed and posted automatically, with forces progress populated
+automatically from real season dungeon data.</p>
 <p>Or analyze a combat log locally with
-<a href="https://github.com/Sharpened-Banana/Postmortem">postmortem</a>,
+<a href="https://github.com/Sharpened-Banana/postmortem">postmortem</a>,
 then upload the resulting report:</p>
-<pre>postmortem analyze &lt;log&gt; --upload https://this-site.example/api/runs</pre>
-<p>Uploads are keyed by an <code>X-Upload-Token</code> header you choose
-yourself — any non-empty string works. Keep it: re-uploading the same
-run later (e.g. after a corrected re-analysis) requires presenting the
-same token again, and a different token can't overwrite your run.
-There's no signup and no password recovery — lose the token and you
-lose the ability to update that run, but it stays visible either way.</p>
-<h2>Notes</h2>
+<pre style="background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px;overflow-x:auto;">postmortem analyze &lt;log&gt; --upload https://this-site.example/api/runs</pre>
+<p>Uploads are keyed by an upload token you never have to think about — the
+website upload page and the CLI both generate one automatically on first
+use (an <code>X-Upload-Token</code> header, if you're calling
+<code>POST /api/runs</code> directly). Keep whatever created it:
+re-uploading the same run later (e.g. after a corrected re-analysis)
+requires the same token, and a different one can't overwrite your run.
+There's no signup and no password recovery — lose the token and you lose
+the ability to update that run, but it stays visible either way.</p>
+
+<h2 style="font-size:14px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);margin:32px 0 10px;">Notes</h2>
 <p>Uploads are rate-limited per token and per IP. Analyzed reports
 (<code>/api/runs</code>) are capped at 5MB; raw combat logs
-(<code>/upload</code>) at 60MB. A raw log is only used to compute the
+(<code>/upload</code>) at 250MB. A raw log is only used to compute the
 report — it's discarded immediately after, never stored.
 Reports are shown exactly as uploaded — this site does no additional
 verification of the underlying combat log.</p>
-</body>
-</html>
+</div>
 """
 
 
 @app.get("/about")
 async def about() -> HTMLResponse:
-    return HTMLResponse(_ABOUT_HTML)
+    return HTMLResponse(_page("About — Postmortem", "about", _ABOUT_BODY))
 
 
 # -- feed ----------------------------------------------------------------
@@ -184,7 +464,7 @@ def _load_feed(zone: Optional[str]) -> list[dict[str, Any]]:
 @app.get("/runs")
 async def runs_page(zone: Optional[str] = None) -> HTMLResponse:
     rows = await run_in_threadpool(_load_feed, zone)
-    return HTMLResponse(render_index(rows))
+    return HTMLResponse(_inject_chrome(render_index(rows), "runs"))
 
 
 @app.get("/api/runs")
@@ -209,7 +489,7 @@ async def run_detail(run_id: int):
     report = await run_in_threadpool(_load_report, run_id)
     if report is None:
         return JSONResponse({"error": "not found"}, status_code=404)
-    return HTMLResponse(render_html(report))
+    return HTMLResponse(_inject_chrome(render_html(report), "runs"))
 
 
 @app.get("/api/runs/{run_id}")
@@ -553,18 +833,11 @@ def _handle_log_upload(
         conn.close()
 
 
-_UPLOAD_STYLE = """
-:root { --bg:#14161b; --panel:#1d2027; --line:#313746; --text:#d8dbe2;
-  --dim:#8a90a0; --accent:#d7a94c; --good:#5cb85c; --bad:#d9534f;
-  --warn:#e0a13c; }
-* { box-sizing:border-box; }
-body { margin:0; background:var(--bg); color:var(--text);
-  font:14px/1.6 "Segoe UI",system-ui,sans-serif; padding:32px;
-  max-width:640px; }
-h1 { color:var(--accent); font-size:22px; margin-bottom:4px; }
-p.lead { color:var(--dim); }
-a { color:#5c9ad0; }
-.dropzone { border:2px dashed var(--line); border-radius:10px;
+_UPLOAD_CSS = """
+.upload-wrap { max-width:640px; padding-top:48px; padding-bottom:24px; }
+.upload-wrap h1 { font-size:26px; color:var(--accent); margin-bottom:6px; }
+.upload-wrap p.lead { color:var(--dim); }
+.dropzone { border:2px dashed var(--line); border-radius:var(--radius);
   padding:32px; text-align:center; margin:20px 0; background:var(--panel); }
 .dropzone.drag { border-color:var(--accent); }
 input[type=file] { color:var(--text); }
@@ -575,29 +848,21 @@ input[type=file] { color:var(--text); }
   color:var(--text); border:1px solid var(--line); border-radius:8px;
   padding:10px 12px; font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   min-height:64px; resize:vertical; }
-button { background:var(--accent); color:#14161b; border:none;
-  border-radius:6px; padding:10px 18px; font-size:14px; font-weight:600;
-  cursor:pointer; margin-top:12px; }
-button:disabled { opacity:.5; cursor:default; }
+.upload-wrap button { background:var(--accent); color:var(--accent-ink); border:none;
+  border-radius:var(--radius-sm); padding:11px 20px; font-size:14px; font-weight:600;
+  cursor:pointer; margin-top:8px; }
+.upload-wrap button:disabled { opacity:.5; cursor:default; }
 ul.runs { list-style:none; padding:0; margin:16px 0; }
 ul.runs li { background:var(--panel); border:1px solid var(--line);
   border-radius:8px; padding:12px 16px; margin-bottom:8px; }
 .ok { color:var(--good); }
 .bad { color:var(--bad); }
 .warn { color:var(--warn); }
-code { background:var(--panel); border:1px solid var(--line);
-  border-radius:6px; padding:2px 6px; }
 """
 
-_UPLOAD_FORM_HTML = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Upload a run — Postmortem</title>
-<style>{_UPLOAD_STYLE}</style>
-</head>
-<body>
+_UPLOAD_FORM_BODY = f"""
+<style>{_UPLOAD_CSS}</style>
+<div class="wrap upload-wrap">
 <h1>Upload a run</h1>
 <p class="lead">Pick your <code>WoWCombatLog.txt</code> directly — every completed
 Mythic+ key in it gets analyzed and posted automatically. No install, no app.</p>
@@ -620,8 +885,7 @@ every run is checked against the current season's dungeon data. Pasting
 a route additionally compares your actual pulls against the plan (one
 route applies to every run found in the log, so this is most useful for
 a single-key upload).</p>
-</body>
-</html>
+</div>
 """
 
 
@@ -662,26 +926,20 @@ def _render_upload_result(status_code: int, body: dict[str, Any]) -> str:
             f"{html.escape(route_warning)}</p>"
         )
 
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Upload results — Postmortem</title>
-<style>{_UPLOAD_STYLE}</style>
-</head>
-<body>
+    body_html = f"""
+<style>{_UPLOAD_CSS}</style>
+<div class="wrap upload-wrap">
 <h1>Upload results</h1>
 {message}
 <p><a href="/upload">Upload another log</a> · <a href="/runs">Browse all runs</a></p>
-</body>
-</html>
+</div>
 """
+    return _page("Upload results — Postmortem", "upload", body_html)
 
 
 @app.get("/upload")
 async def upload_form() -> HTMLResponse:
-    return HTMLResponse(_UPLOAD_FORM_HTML)
+    return HTMLResponse(_page("Upload a run — Postmortem", "upload", _UPLOAD_FORM_BODY))
 
 
 # Chunk size for streaming an upload straight to disk (see upload_log
