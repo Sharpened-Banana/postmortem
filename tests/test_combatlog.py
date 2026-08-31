@@ -129,3 +129,41 @@ class TestSegmenter:
         runs = list(segment_runs(iter_events(b.lines)))
         assert len(runs) == 1
         assert runs[0].completed
+
+    def test_max_run_events_truncates_an_oversized_run(self):
+        """A single continuous run that grows past max_run_events is cut
+        off and yielded early instead of accumulating unboundedly -- the
+        real fix for postmortem_site's per-run memory ceiling (a first
+        attempt at this wrongly capped the whole *upload's* byte size
+        instead, which punished perfectly safe multi-key logs)."""
+        b = LogBuilder()
+        b.start(0)
+        for i in range(20):
+            b.player_damage(i + 1, DPS1, b.npc_guid(1, "1"), "X", 1, "S", 10)
+        b.end(100)
+        runs = list(segment_runs(iter_events(b.lines), max_run_events=5))
+        assert len(runs) == 1
+        run = runs[0]
+        assert run.truncated
+        assert not run.completed
+        assert len(run.events) == 5
+
+    def test_max_run_events_does_not_affect_a_run_under_the_cap(self):
+        events = list(iter_events(build_run_log().lines))
+        runs = list(segment_runs(events, max_run_events=1_000_000))
+        assert len(runs) == 1
+        assert runs[0].completed
+        assert not runs[0].truncated
+
+    def test_run_after_a_truncated_one_is_still_segmented_normally(self):
+        b = LogBuilder()
+        b.start(0)
+        for i in range(20):
+            b.player_damage(i + 1, DPS1, b.npc_guid(1, "1"), "X", 1, "S", 10)
+        b.end(100)  # dropped -- current is None by the time this arrives
+        b.start(200, zone="Other Zone", cm=250, lvl=12)
+        b.end(250, instance=2830)
+        runs = list(segment_runs(iter_events(b.lines), max_run_events=5))
+        assert len(runs) == 2
+        assert runs[0].truncated and not runs[0].completed
+        assert runs[1].completed and not runs[1].truncated

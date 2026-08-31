@@ -36,29 +36,44 @@ DUNGEON_DATA_PATH = os.environ.get(
 # app.py's POST /api/runs handler checks this itself.
 MAX_BODY_BYTES = int(os.environ.get("MYTHIC_SITE_MAX_BODY_BYTES", 5 * 1024 * 1024))
 
-# Raw-combat-log upload cap, in bytes, for POST /upload. History: 60MB
-# (v1) -> 250MB -> 1GB, each raise justified by "peak memory is bounded
-# by one run's worth of events at a time, not the whole file" -- true,
-# but incomplete: that reasoning caps memory *per run*, not the memory
-# one run itself can need. A real production OOM crash on a real user's
-# upload (with the 1GB cap live) traced this back with tracemalloc: a
-# single CONTINUOUS run's raw text costs roughly 6-9x its own byte size
-# in Python memory just to hold as parsed Event objects (measured, not
-# estimated -- a 74MB single run took 458MB to parse, 655MB peak RSS
-# end to end). So the real constraint was never the *file's* total size,
-# it's the size of whichever single run in it is largest -- which the
-# server can't know in advance without parsing the whole thing.
-#
-# fly.toml's VM memory was raised 512MB -> 2GB for exactly this (see its
-# own comment for the full reasoning). This cap is set to what that 2GB
-# budget can safely absorb even in the worst case -- the *entire*
-# upload turning out to be one continuous run -- with real headroom for
-# baseline process overhead (Python/uvicorn/FastAPI/SQLite) and the
-# json.dumps()/DB-write steps that follow parsing. A file with several
-# separate keys is safe well beyond this (each run's memory is
-# independently bounded -- see _handle_log_upload's per-run streaming
-# loop), so this number is a worst-case floor, not a typical-case one.
-MAX_LOG_BYTES = int(os.environ.get("MYTHIC_SITE_MAX_LOG_BYTES", 200 * 1024 * 1024))
+# Raw-combat-log upload cap, in bytes, for POST /upload -- a blunt
+# sanity/DoS ceiling on the whole request (temp-file disk space, not
+# holding an unbounded request open forever), nothing more. History:
+# 60MB (v1) -> 250MB -> 1GB -> 200MB, that last drop a real production
+# incident: this constant used to be doing double duty as BOTH the raw
+# upload gate AND the only thing standing between a single giant
+# continuous run and an OOM crash, and 200MB was sized for the memory
+# concern, not the disk/DoS one -- which meant a perfectly reasonable
+# multi-hour, multi-key session log (several separate keys, each one
+# individually cheap) got rejected outright just for having a big total
+# byte count, even though _handle_log_upload's per-run streaming loop
+# was already built to handle exactly that case safely. The two
+# concerns are now split: this cap only bounds total request size, and
+# MAX_RUN_EVENTS (below) is the real memory-safety limit, enforced per
+# run during parsing instead of on the file as a whole. Set generously
+# for a real full-evening farming session; a raw temp file this large
+# is fine on disk, it was never actually the constraint.
+MAX_LOG_BYTES = int(os.environ.get("MYTHIC_SITE_MAX_LOG_BYTES", 500 * 1024 * 1024))
+
+# Per-run memory-safety cap, in Event count, for POST /upload -- passed
+# as segment_runs()'s max_run_events so a single CONTINUOUS run gets cut
+# off (yielded early, marked truncated) once it reaches this many
+# events, instead of accumulating unboundedly in memory. This is the
+# real fix for the incident above: a single run's raw text costs
+# roughly 6-9x its own byte size in Python memory once parsed into
+# Event objects (measured with tracemalloc against a real synthetic
+# log, not estimated -- a 74MB single run took 458MB to parse, 655MB
+# peak RSS end to end). fly.toml's VM memory was raised 512MB -> 2GB for
+# exactly this (see its own comment). Budgeting from that 2GB, minus
+# headroom for baseline process overhead (Python/uvicorn/FastAPI/
+# SQLite) and the json.dumps()/DB-write steps after parsing, leaves
+# roughly 200MB of raw single-run text as safe -- and the fixture log
+# used for the tracemalloc measurement averaged ~260 bytes/event, so
+# 200MB / 260B is roughly 800,000 events. A truncated run isn't lost
+# silently: _handle_log_upload reports it as a failed run with a message
+# pointing at the desktop app/CLI (no size limit at all, runs locally)
+# for that specific oversized key.
+MAX_RUN_EVENTS = int(os.environ.get("MYTHIC_SITE_MAX_RUN_EVENTS", 800_000))
 
 # Rate-limit window (seconds) between two uploads from the same
 # X-Upload-Token -- the primary anti-spam guard.
