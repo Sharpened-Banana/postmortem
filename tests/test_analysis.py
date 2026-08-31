@@ -699,6 +699,30 @@ class TestAnalyzeRun:
         # the JS guard (`if (!m ...) return "";`) renders nothing for it
         assert '"map":' not in html
 
+    def test_renderer_guards_forces_tile_behind_required_data(self, run_segment, route):
+        """Regression test for a real bug (2026-08-31): the forces stat
+        tile used to render unconditionally, showing a misleading "0
+        forces killed" whenever no dungeon data was available -- which is
+        *always* true for the public site's raw-log /upload path (it has
+        no way to supply dungeon data), so every website-uploaded run
+        showed a permanent, wrong-looking zero. Every other
+        data-dependent stat in the same grid (route/adherence/kick value)
+        was already correctly omitted via a ternary; forces wasn't.
+
+        Unlike the report JSON itself, the rendered HTML page's JS only
+        executes in a real browser -- this test suite has no headless
+        browser to run it (see test_renderer_omits_map_without_dungeon_data's
+        own note on this same limitation) -- so this pins the guard's
+        presence in the generated JS source rather than the rendered
+        visual output.
+        """
+        from postmortem.report.html import render_html
+
+        report = analyze_run(run_segment, route=route, store=None)
+        assert report["forces"]["required"] is None  # the no-data case this guards
+        html = render_html(report)
+        assert "forces.required ? stat(" in html
+
     def test_html_renders_calibrated_path_and_death_markers(
         self, run_segment, route, dungeon_data_file
     ):

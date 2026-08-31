@@ -110,7 +110,7 @@ function render() {
   html += timerInfo();
 
   html += `<div class="grid">
-    ${stat(num(forces.killed), "forces killed" + (forces.required ? ` / ${num(forces.required)} (${forces.pct}%)` : ""))}
+    ${forces.required ? stat(num(forces.killed), `forces killed / ${num(forces.required)} (${forces.pct}%)`) : ""}
     ${stat((R.deaths||[]).length, "player deaths")}
     ${stat(mmss(dt.combat_s), "combat time")}
     ${stat(mmss(dt.total_s), "downtime")}
