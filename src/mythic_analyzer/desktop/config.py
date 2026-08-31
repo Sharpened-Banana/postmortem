@@ -25,12 +25,15 @@ just returns defaults rather than raising.
 from __future__ import annotations
 
 import json
-import os
-import sys
 from pathlib import Path
 from typing import Any
 
-APP_DIR_NAME = "mythic-analyzer"
+# APP_DIR_NAME/config_dir moved to mythic_analyzer.appdirs so the plain
+# CLI (no `desktop` extra installed) can resolve the same per-user config
+# directory too -- e.g. for the upload token in upload.py. Re-exported
+# here so nothing that already imports them from this module breaks.
+from ..appdirs import APP_DIR_NAME, config_dir
+
 SETTINGS_FILENAME = "desktop_settings.json"
 
 #: Every field a fresh install (or a corrupt/missing settings file)
@@ -42,29 +45,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "avoidable_data_path": None,
     "default_output_dir": None,
     "history_db_path": None,
+    "site_url": None,
 }
-
-
-def config_dir() -> Path:
-    """The OS-appropriate per-user config directory for this app.
-
-    A function (not a module-level constant) so tests can monkeypatch it
-    directly rather than touching the real user's home directory.
-    """
-    if sys.platform == "win32":
-        base = os.getenv("APPDATA")
-        if base:
-            return Path(base) / APP_DIR_NAME
-        # No APPDATA (unusual, e.g. some CI/Wine setups) -- fall back
-        # rather than crash; still namespaced under our own subfolder.
-        return Path.home() / ".config" / APP_DIR_NAME
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / APP_DIR_NAME
-    # Linux and everything else: XDG convention.
-    xdg = os.getenv("XDG_CONFIG_HOME")
-    if xdg:
-        return Path(xdg) / APP_DIR_NAME
-    return Path.home() / ".config" / APP_DIR_NAME
 
 
 def settings_path() -> Path:

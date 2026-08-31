@@ -263,6 +263,12 @@
           <div class="help">A SQLite database file for run history tracking. No picker for this one — type or paste a path.</div>
         </div>
 
+        <div class="field">
+          <label>Public tracker site URL</label>
+          <input type="text" id="set-site-url" placeholder="e.g. https://mythic-analyzer.fly.dev">
+          <div class="help">Where "Upload to site" on a report screen sends runs. Anyone can browse an uploaded run — see the site's own /about page for what "uploading" means.</div>
+        </div>
+
         <button type="button" class="btn btn-primary" id="set-save-btn">Save settings</button>
 
         <hr class="sep">
@@ -303,6 +309,8 @@
       <div class="report-chrome">
         <button type="button" class="btn btn-secondary btn-sm" id="report-back-btn">← Back to New Analysis</button>
         <span class="dim" id="report-context-label"></span>
+        <button type="button" class="btn btn-sm report-chrome-upload" id="report-upload-btn">Upload to site</button>
+        <span class="upload-status" id="report-upload-status" hidden></span>
       </div>
       <iframe id="report-frame" class="report-frame" title="Post-mortem report" sandbox="allow-scripts"></iframe>
     </section>
