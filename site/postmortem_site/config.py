@@ -23,6 +23,12 @@ DB_PATH = os.environ.get("MYTHIC_SITE_DB", "/data/runs.db")
 # app.py's POST /api/runs handler checks this itself.
 MAX_BODY_BYTES = int(os.environ.get("MYTHIC_SITE_MAX_BODY_BYTES", 5 * 1024 * 1024))
 
+# Raw-combat-log upload cap, in bytes, for POST /upload (a whole
+# WoWCombatLog.txt, not an analyzed report -- much bigger than
+# MAX_BODY_BYTES since a real advanced-logging session can run tens of
+# MB). 60MB comfortably covers a multi-key farming session.
+MAX_LOG_BYTES = int(os.environ.get("MYTHIC_SITE_MAX_LOG_BYTES", 60 * 1024 * 1024))
+
 # Rate-limit window (seconds) between two uploads from the same
 # X-Upload-Token -- the primary anti-spam guard.
 UPLOAD_MIN_INTERVAL_S = int(os.environ.get("MYTHIC_SITE_UPLOAD_MIN_INTERVAL_S", 30))
