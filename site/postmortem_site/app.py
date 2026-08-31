@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, File, Request, UploadFile
+from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.concurrency import run_in_threadpool
@@ -33,6 +33,9 @@ from postmortem.analysis.run_analyzer import analyze_run
 from postmortem.combatlog.parser import parse_file
 from postmortem.combatlog.segmenter import segment_runs
 from postmortem.history.store import Store
+from postmortem.mdt.decode import MDTDecodeError, decode_mdt_string
+from postmortem.mdt.dungeon_data import DungeonDataStore
+from postmortem.mdt.route import Route
 from postmortem.report.html import render_html
 from postmortem.report.index import render_index
 
@@ -412,17 +415,82 @@ def _upload_token(request: Request) -> tuple[str, Optional[str]]:
     return minted, minted
 
 
+_dungeon_store: Optional[DungeonDataStore] = None
+_dungeon_store_loaded = False
+
+
+def _get_dungeon_store() -> Optional[DungeonDataStore]:
+    """The bundled MDT dungeon/enemy data (see config.DUNGEON_DATA_PATH),
+    loaded once and cached -- it's static data, re-parsing a ~400KB JSON
+    file on every upload would be pure waste. Tolerant of a missing/
+    corrupt bundle (same "don't crash on our own local state" bar as
+    every other loader in this codebase): forces/route-adherence just
+    won't populate rather than the upload failing outright.
+
+    A plain module-level cache, not per-request -- correct because this
+    file never changes at runtime (only a redeploy with a re-extracted
+    bundle changes it, which restarts the process anyway).
+    """
+    global _dungeon_store, _dungeon_store_loaded
+    if not _dungeon_store_loaded:
+        try:
+            _dungeon_store = DungeonDataStore.load(config.DUNGEON_DATA_PATH)
+        except (OSError, ValueError, KeyError):
+            _dungeon_store = None
+        _dungeon_store_loaded = True
+    return _dungeon_store
+
+
+def _decode_route_string(text: str) -> Route:
+    """Decode a pasted MDT export string for /upload.
+
+    Deliberately NOT cli.py's _load_route(): that helper also treats its
+    argument as a possible *filesystem path* and reads whatever file
+    exists there -- fine for a local CLI flag, but this text comes
+    straight from an anonymous web upload, and silently reading an
+    arbitrary local file that happens to match the pasted string would
+    be a real (if narrow) local-file-disclosure primitive on a public
+    server. Website uploaders can only ever paste a route string
+    directly, never point at a path -- so this calls decode_mdt_string()
+    directly instead, reusing the real MDT decoder without the file-path
+    branch.
+
+    Raises ValueError (not SystemExit -- there's no process to exit)
+    with a message safe to show the uploader.
+    """
+    try:
+        preset = decode_mdt_string(text)
+    except MDTDecodeError as exc:
+        raise ValueError(f"could not decode MDT route string: {exc}")
+    return Route.from_preset(preset)
+
+
 def _handle_log_upload(
-    log_path: Path, token_hash: str, remote_addr: Optional[str]
+    log_path: Path,
+    token_hash: str,
+    remote_addr: Optional[str],
+    route_str: Optional[str] = None,
 ) -> tuple[int, dict[str, Any]]:
     """The synchronous half of POST /upload: parse the raw log, analyze
     every completed Mythic+ run it contains, and ingest each one.
+
+    Every run gets the bundled dungeon data (see _get_dungeon_store()),
+    so forces progress and (if `route_str` decodes) route-adherence
+    comparison populate the same way a CLI/desktop-app analysis with
+    --dungeon-data would -- a raw-log upload otherwise has no way to
+    supply either. A bad/unparseable `route_str` is a soft failure: the
+    batch still analyzes and uploads without route comparison, surfaced
+    back as a "route_warning" rather than rejecting real data over one
+    bad paste.
 
     Rate-limited once per upload *event* (see _check_rate_limit's
     docstring), not once per run -- a single log routinely contains
     several keys from one farming session. An ownership conflict on one
     run (e.g. a groupmate already uploaded the same key) only skips that
-    run, not the whole batch.
+    run, not the whole batch. The one pasted route (if any) applies to
+    every run in the batch -- fine for the common case (one key, or a
+    farming session all in the same dungeon), not meaningful if the log
+    spans multiple different dungeons.
     """
     _ensure_runs_schema()
     conn = db.connect(config.DB_PATH)
@@ -432,8 +500,13 @@ def _handle_log_upload(
             return 429, limited
 
         try:
-            events = list(parse_file(log_path))
-            segments = [s for s in segment_runs(events) if s.completed]
+            # parse_file(...) is a generator, fed straight into
+            # segment_runs() without ever materializing the whole file's
+            # events as a list -- segment_runs() itself only accumulates
+            # events for whichever one run is currently open, so peak
+            # memory here is bounded by one run's worth of the log, not
+            # the entire (possibly hours-long) session's worth.
+            segments = [s for s in segment_runs(parse_file(log_path)) if s.completed]
         except Exception:
             return 400, {"error": "could not read this as a WoWCombatLog.txt file"}
 
@@ -444,10 +517,20 @@ def _handle_log_upload(
                 "message": "no completed Mythic+ runs found in this log",
             }
 
+        route: Optional[Route] = None
+        route_warning: Optional[str] = None
+        if route_str:
+            try:
+                route = _decode_route_string(route_str)
+            except ValueError as exc:
+                route_warning = str(exc)
+
+        store = _get_dungeon_store()
+
         results = []
         for segment in segments:
             try:
-                report = analyze_run(segment)
+                report = analyze_run(segment, route=route, store=store)
             except Exception:
                 results.append({
                     "ok": False,
@@ -462,14 +545,18 @@ def _handle_log_upload(
             results.append(body)
 
         conn.commit()
-        return 200, {"ok": True, "runs": results}
+        result: dict[str, Any] = {"ok": True, "runs": results}
+        if route_warning:
+            result["route_warning"] = route_warning
+        return 200, result
     finally:
         conn.close()
 
 
 _UPLOAD_STYLE = """
 :root { --bg:#14161b; --panel:#1d2027; --line:#313746; --text:#d8dbe2;
-  --dim:#8a90a0; --accent:#d7a94c; --good:#5cb85c; --bad:#d9534f; }
+  --dim:#8a90a0; --accent:#d7a94c; --good:#5cb85c; --bad:#d9534f;
+  --warn:#e0a13c; }
 * { box-sizing:border-box; }
 body { margin:0; background:var(--bg); color:var(--text);
   font:14px/1.6 "Segoe UI",system-ui,sans-serif; padding:32px;
@@ -481,6 +568,13 @@ a { color:#5c9ad0; }
   padding:32px; text-align:center; margin:20px 0; background:var(--panel); }
 .dropzone.drag { border-color:var(--accent); }
 input[type=file] { color:var(--text); }
+.field { margin:20px 0; }
+.field label { display:block; font-size:13px; font-weight:600;
+  margin-bottom:6px; }
+.field textarea { width:100%; box-sizing:border-box; background:var(--panel);
+  color:var(--text); border:1px solid var(--line); border-radius:8px;
+  padding:10px 12px; font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  min-height:64px; resize:vertical; }
 button { background:var(--accent); color:#14161b; border:none;
   border-radius:6px; padding:10px 18px; font-size:14px; font-weight:600;
   cursor:pointer; margin-top:12px; }
@@ -490,6 +584,7 @@ ul.runs li { background:var(--panel); border:1px solid var(--line);
   border-radius:8px; padding:12px 16px; margin-bottom:8px; }
 .ok { color:var(--good); }
 .bad { color:var(--bad); }
+.warn { color:var(--warn); }
 code { background:var(--panel); border:1px solid var(--line);
   border-radius:6px; padding:2px 6px; }
 """
@@ -510,12 +605,21 @@ Mythic+ key in it gets analyzed and posted automatically. No install, no app.</p
   <div class="dropzone">
     <input type="file" name="logfile" accept=".txt" required>
   </div>
+  <div class="field">
+    <label>MDT route (optional)</label>
+    <textarea name="route" placeholder="Paste an MDT export string here to also get route-adherence comparison for this log."></textarea>
+  </div>
   <button type="submit">Analyze &amp; upload</button>
 </form>
 <p class="lead">Usually at
 <code>World of Warcraft/_retail_/Logs/WoWCombatLog.txt</code>
 (Mac: inside the WoW app's install folder; Windows: same relative path
 under wherever WoW is installed).</p>
+<p class="lead">Forces progress works automatically, no route needed —
+every run is checked against the current season's dungeon data. Pasting
+a route additionally compares your actual pulls against the plan (one
+route applies to every run found in the log, so this is most useful for
+a single-key upload).</p>
 </body>
 </html>
 """
@@ -551,6 +655,13 @@ def _render_upload_result(status_code: int, body: dict[str, Any]) -> str:
         items = "".join(_run_result_li(r) for r in body["runs"])
         message = f"<ul class=\"runs\">{items}</ul>"
 
+    route_warning = body.get("route_warning")
+    if route_warning:
+        message += (
+            f'<p class="warn">⚠ Uploaded without route comparison — '
+            f"{html.escape(route_warning)}</p>"
+        )
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -573,33 +684,54 @@ async def upload_form() -> HTMLResponse:
     return HTMLResponse(_UPLOAD_FORM_HTML)
 
 
+# Chunk size for streaming an upload straight to disk (see upload_log
+# below). Arbitrary but reasonable: big enough that chunk-loop overhead
+# is negligible, small enough that peak memory for this step never
+# exceeds ~1MB regardless of how large MAX_LOG_BYTES is configured --
+# unlike a single logfile.read(MAX_LOG_BYTES + 1) call, which held the
+# *entire* upload in memory at once and made raising the cap for a real
+# multi-hour session's log a genuine OOM risk on this service's 512MB VM.
+_UPLOAD_CHUNK_BYTES = 1024 * 1024
+
+
 @app.post("/upload")
-async def upload_log(request: Request, logfile: UploadFile = File(...)) -> HTMLResponse:
-    # Bounded read (cap + 1 byte) instead of a plain .read() -- avoids
-    # pulling an arbitrarily large body fully into memory before the
-    # size check ever gets a chance to reject it.
-    data = await logfile.read(config.MAX_LOG_BYTES + 1)
-    if len(data) > config.MAX_LOG_BYTES:
-        return HTMLResponse(
-            _render_upload_result(413, {"error": "that file is too large"}),
-            status_code=413,
-        )
-    if not data:
-        return HTMLResponse(
-            _render_upload_result(400, {"error": "no file received"}),
-            status_code=400,
-        )
-
-    token, new_cookie = _upload_token(request)
-    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-    remote_addr = _remote_addr(request)
-
+async def upload_log(
+    request: Request,
+    logfile: UploadFile = File(...),
+    route: str = Form(""),
+) -> HTMLResponse:
     fd, tmp_name = tempfile.mkstemp(suffix=".txt")
+    total = 0
+    too_large = False
     try:
         with os.fdopen(fd, "wb") as fh:
-            fh.write(data)
+            while True:
+                chunk = await logfile.read(_UPLOAD_CHUNK_BYTES)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > config.MAX_LOG_BYTES:
+                    too_large = True
+                    break
+                fh.write(chunk)
+
+        if too_large:
+            return HTMLResponse(
+                _render_upload_result(413, {"error": "that file is too large"}),
+                status_code=413,
+            )
+        if total == 0:
+            return HTMLResponse(
+                _render_upload_result(400, {"error": "no file received"}),
+                status_code=400,
+            )
+
+        token, new_cookie = _upload_token(request)
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        remote_addr = _remote_addr(request)
+
         status_code, body = await run_in_threadpool(
-            _handle_log_upload, Path(tmp_name), token_hash, remote_addr
+            _handle_log_upload, Path(tmp_name), token_hash, remote_addr, route.strip() or None,
         )
     finally:
         os.unlink(tmp_name)

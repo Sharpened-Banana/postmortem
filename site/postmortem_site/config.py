@@ -12,10 +12,23 @@ such a monkeypatch actually takes effect.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 # Where the site's SQLite database lives. Overridable via env var so
 # tests can point this at a tmp path instead of the real prod location.
 DB_PATH = os.environ.get("MYTHIC_SITE_DB", "/data/runs.db")
+
+# Bundled MDT dungeon/enemy data (extracted via `postmortem extract-data`
+# against a real, currently-installed MythicDungeonTools -- see
+# app.py's _get_dungeon_store()), used for every /upload run so forces
+# progress and route-adherence comparison work even though a raw-log
+# upload has no way to run `extract-data` itself. A season rotation
+# eventually makes this stale -- re-extract and redeploy when that
+# happens; there's no auto-refresh. Overridable via env var for tests.
+DUNGEON_DATA_PATH = os.environ.get(
+    "MYTHIC_SITE_DUNGEON_DATA",
+    str(Path(__file__).resolve().parent / "dungeon_data.json"),
+)
 
 # Upload body-size cap, in bytes. 5MB is comfortably above the real
 # ~1.2MB max report size measured against a real +10 dungeon log this
@@ -25,9 +38,15 @@ MAX_BODY_BYTES = int(os.environ.get("MYTHIC_SITE_MAX_BODY_BYTES", 5 * 1024 * 102
 
 # Raw-combat-log upload cap, in bytes, for POST /upload (a whole
 # WoWCombatLog.txt, not an analyzed report -- much bigger than
-# MAX_BODY_BYTES since a real advanced-logging session can run tens of
-# MB). 60MB comfortably covers a multi-key farming session.
-MAX_LOG_BYTES = int(os.environ.get("MYTHIC_SITE_MAX_LOG_BYTES", 60 * 1024 * 1024))
+# MAX_BODY_BYTES since a real advanced-logging session can run tens to
+# hundreds of MB). 60MB (the original v1 value) turned out too small for
+# a real multi-hour play session's log almost immediately in practice;
+# raised to 250MB once upload_log()'s chunked streaming write and
+# _handle_log_upload()'s non-materializing parse_file->segment_runs
+# pipeline made a larger cap actually memory-safe on this service's
+# 512MB VM (peak memory is now bounded by one run's worth of events, not
+# the whole file).
+MAX_LOG_BYTES = int(os.environ.get("MYTHIC_SITE_MAX_LOG_BYTES", 250 * 1024 * 1024))
 
 # Rate-limit window (seconds) between two uploads from the same
 # X-Upload-Token -- the primary anti-spam guard.
