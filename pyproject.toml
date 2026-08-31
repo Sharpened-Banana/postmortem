@@ -18,9 +18,10 @@ classifiers = [
 
 [project.scripts]
 mythic-analyzer = "mythic_analyzer.cli:main"
+mythic-analyzer-desktop = "mythic_analyzer.desktop.app:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "pyinstaller>=6.0"]
 site = ["fastapi>=0.110", "uvicorn[standard]>=0.30"]
 desktop = ["pywebview>=6.0"]
 
