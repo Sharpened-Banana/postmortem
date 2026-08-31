@@ -1,7 +1,7 @@
 "use strict";
 
 /*
- * Mythic Analyzer desktop shell.
+ * Postmortem desktop shell.
  *
  * Talks to the Python backend exclusively through window.pywebview.api,
  * which does not exist until the 'pywebviewready' event fires (see the

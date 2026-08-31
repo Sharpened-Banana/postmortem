@@ -1,5 +1,5 @@
-"""Enables ``python -m mythic_analyzer.desktop`` as a way to launch the
-desktop app, alongside the ``mythic-analyzer-desktop`` console script
+"""Enables ``python -m postmortem.desktop`` as a way to launch the
+desktop app, alongside the ``postmortem-desktop`` console script
 (see app.py and pyproject.toml's ``[project.scripts]``)."""
 
 from __future__ import annotations
