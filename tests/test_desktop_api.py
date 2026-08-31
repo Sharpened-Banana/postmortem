@@ -1,4 +1,4 @@
-"""Tests for the desktop API bridge (mythic_analyzer.desktop.api.DesktopAPI).
+"""Tests for the desktop API bridge (postmortem.desktop.api.DesktopAPI).
 
 Covers every method except the three native-dialog pickers
 (pick_log_file/pick_route_file/pick_folder/pick_dungeon_data_file/
@@ -13,9 +13,9 @@ import textwrap
 
 import pytest
 
-from mythic_analyzer.desktop import config as config_module
-from mythic_analyzer.desktop.api import DesktopAPI
-from mythic_analyzer.history.store import ingest as history_ingest
+from postmortem.desktop import config as config_module
+from postmortem.desktop.api import DesktopAPI
+from postmortem.history.store import ingest as history_ingest
 
 
 @pytest.fixture()
@@ -65,8 +65,8 @@ class TestListRuns:
         TestPickRunStreaming in test_cli_and_tools.py) to inspect every
         segment after the fact.
         """
-        import mythic_analyzer.desktop.api as api_module
-        from mythic_analyzer.combatlog.segmenter import segment_runs as real_segment_runs
+        import postmortem.desktop.api as api_module
+        from postmortem.combatlog.segmenter import segment_runs as real_segment_runs
 
         captured = []
 
@@ -296,7 +296,7 @@ class TestUploadReport:
             seen["url"] = url
             return {"ok": True, "run_id": 1, "url": "/runs/1"}
 
-        monkeypatch.setattr("mythic_analyzer.upload.upload_report", fake_upload_report)
+        monkeypatch.setattr("postmortem.upload.upload_report", fake_upload_report)
         api.save_settings({"site_url": "https://saved.example"})
 
         result = api.upload_report({"run": {"zone": "x"}}, "https://explicit.example")
@@ -311,7 +311,7 @@ class TestUploadReport:
             seen["url"] = url
             return {"ok": True, "run_id": 2, "url": "/runs/2"}
 
-        monkeypatch.setattr("mythic_analyzer.upload.upload_report", fake_upload_report)
+        monkeypatch.setattr("postmortem.upload.upload_report", fake_upload_report)
         api.save_settings({"site_url": "https://saved.example"})
 
         result = api.upload_report({"run": {}})
@@ -320,7 +320,7 @@ class TestUploadReport:
 
     def test_upstream_failure_is_returned_as_is(self, api, monkeypatch):
         monkeypatch.setattr(
-            "mythic_analyzer.upload.upload_report",
+            "postmortem.upload.upload_report",
             lambda report, url, **kwargs: {"error": "already submitted by another uploader"},
         )
         result = api.upload_report({"run": {}}, "https://example.com")

@@ -11,10 +11,10 @@ assuming ``~/.config`` works everywhere (it doesn't on Windows, and isn't
 idiomatic on macOS) -- this matters once the app is packaged for both
 macOS and Windows:
 
-- Windows: ``%APPDATA%\\mythic-analyzer``
-- macOS:   ``~/Library/Application Support/mythic-analyzer``
-- Linux/other: ``$XDG_CONFIG_HOME/mythic-analyzer``, falling back to
-  ``~/.config/mythic-analyzer``
+- Windows: ``%APPDATA%\\postmortem``
+- macOS:   ``~/Library/Application Support/postmortem``
+- Linux/other: ``$XDG_CONFIG_HOME/postmortem``, falling back to
+  ``~/.config/postmortem``
 
 Tolerant of a missing or corrupt settings file, matching this project's
 established "don't crash on our own possibly-missing/corrupt local
@@ -28,7 +28,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-# APP_DIR_NAME/config_dir moved to mythic_analyzer.appdirs so the plain
+# APP_DIR_NAME/config_dir moved to postmortem.appdirs so the plain
 # CLI (no `desktop` extra installed) can resolve the same per-user config
 # directory too -- e.g. for the upload token in upload.py. Re-exported
 # here so nothing that already imports them from this module breaks.
