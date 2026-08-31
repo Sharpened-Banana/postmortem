@@ -6,6 +6,7 @@
 ## SavedVariables: MythicAnalyzerDB
 ## LoadSavedVariablesFirst: 1
 
+libs\embeds.xml
 Bootstrap.lua
 Info.lua
 CombatLogging.lua
@@ -13,3 +14,4 @@ Tracker.lua
 Overlay.lua
 Interrupts.lua
 RouteImport.lua
+MinimapButton.lua
