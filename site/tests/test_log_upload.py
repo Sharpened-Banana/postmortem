@@ -67,3 +67,73 @@ class TestLogUpload:
         client.post("/upload", files=_upload_file(raw_log_text))
         after = set(glob.glob(f"{tempfile.gettempdir()}/*.txt"))
         assert after - before == set()
+
+    def test_large_upload_streams_correctly_across_many_chunks(self, client, raw_log_text, monkeypatch):
+        """upload_log() now reads in fixed-size chunks instead of one
+        logfile.read(cap) call (a real fix, not a hypothetical -- the old
+        approach held the whole upload in memory, which is what made
+        raising MAX_LOG_BYTES for a real multi-hour session's log unsafe
+        on this service's 512MB VM). Shrinks the chunk size drastically
+        so even this small fixture log spans dozens of chunks, to
+        actually exercise the loop boundary instead of trivially
+        finishing in one iteration."""
+        from postmortem_site import app as app_module
+
+        monkeypatch.setattr(app_module, "_UPLOAD_CHUNK_BYTES", 64)
+        resp = client.post("/upload", files=_upload_file(raw_log_text))
+        assert resp.status_code == 200
+        assert "runs/" in resp.text
+        assert client.get("/api/runs").json() != []
+
+
+class TestMdtIntegration:
+    """The bundled dungeon-data store (config.DUNGEON_DATA_PATH) makes
+    forces progress populate automatically for every /upload run, with
+    no route needed; pasting a route additionally gets route-adherence
+    comparison. isolated_dungeon_store (conftest.py, autouse) keeps this
+    class's "no data" tests from accidentally picking up real bundled
+    data; dungeon_store_with_data opts specific tests back into a store
+    that actually matches raw_log_text's synthetic run.
+    """
+
+    def test_forces_do_not_populate_without_bundled_dungeon_data(self, client, raw_log_text):
+        client.post("/upload", files=_upload_file(raw_log_text))
+        report = client.get("/api/runs/1").json()
+        assert report["forces"]["required"] is None
+
+    def test_forces_populate_automatically_with_no_route_pasted(
+        self, client, raw_log_text, dungeon_store_with_data,
+    ):
+        resp = client.post("/upload", files=_upload_file(raw_log_text))
+        assert resp.status_code == 200
+        report = client.get("/api/runs/1").json()
+        assert report["forces"]["required"] is not None
+        assert report["forces"]["required"] > 0
+        # no route pasted -> no adherence comparison, forces alone still work
+        assert "comparison" not in report or report["comparison"].get("error")
+
+    def test_pasted_route_adds_adherence_comparison(
+        self, client, raw_log_text, route_string, dungeon_store_with_data,
+    ):
+        resp = client.post(
+            "/upload", files=_upload_file(raw_log_text), data={"route": route_string},
+        )
+        assert resp.status_code == 200
+        report = client.get("/api/runs/1").json()
+        assert report["forces"]["required"] is not None
+        assert "adherence_pct" in report["comparison"]
+
+    def test_bad_route_string_is_a_soft_failure_not_a_rejected_upload(
+        self, client, raw_log_text, dungeon_store_with_data,
+    ):
+        resp = client.post(
+            "/upload", files=_upload_file(raw_log_text),
+            data={"route": "not a valid mdt export string"},
+        )
+        assert resp.status_code == 200
+        assert "route comparison" in resp.text.lower()
+        # the run still got uploaded despite the bad route
+        assert client.get("/api/runs").json() != []
+        report = client.get("/api/runs/1").json()
+        assert report["forces"]["required"] is not None  # bundled data still applied
+        assert "comparison" not in report or report["comparison"].get("error")

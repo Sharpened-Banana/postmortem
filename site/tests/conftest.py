@@ -104,5 +104,57 @@ def raw_log_text() -> str:
 
 
 @pytest.fixture()
+def route_string() -> str:
+    """A real MDT export string decoding to _shared.ROUTE_PRESET -- for
+    exercising POST /upload's optional pasted-route field."""
+    return _shared.encode_mdt_string(_shared.ROUTE_PRESET, "mdt2")
+
+
+def _point_dungeon_store_at(monkeypatch, tmp_path, payload: dict, name: str = "dungeon_data.json"):
+    """Shared helper: point postmortem_site.config.DUNGEON_DATA_PATH at a
+    fresh file holding `payload`, and reset app.py's module-level
+    dungeon-store cache so the swap actually takes effect this test (see
+    app.py's _get_dungeon_store() docstring on why it's cached at all --
+    without resetting the cache, whichever store another test already
+    triggered a load of would stick around)."""
+    import json as _json
+
+    from postmortem_site import app as app_module
+    from postmortem_site import config as site_config
+
+    path = tmp_path / name
+    path.write_text(_json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(site_config, "DUNGEON_DATA_PATH", str(path))
+    monkeypatch.setattr(app_module, "_dungeon_store", None)
+    monkeypatch.setattr(app_module, "_dungeon_store_loaded", False)
+    return path
+
+
+@pytest.fixture(autouse=True)
+def isolated_dungeon_store(monkeypatch, tmp_path):
+    """Autouse for the whole test session: points the dungeon-data
+    bundle at an empty (zero-dungeon) file by default, so no test
+    accidentally exercises the real production bundle -- raw_log_text's
+    synthetic run's challenge_map_id (587) is deliberately realistic
+    (matches real Murder Row), so without this every test would silently
+    pick up real forces/dungeon data from whatever's actually bundled,
+    coupling unrelated tests' behavior to the current WoW season and
+    making the "no dungeon data" case impossible to test at all. Tests
+    that specifically want dungeon data present use
+    dungeon_store_with_data below, which overrides this.
+    """
+    _point_dungeon_store_at(monkeypatch, tmp_path, {"dungeons": {}})
+
+
+@pytest.fixture()
+def dungeon_store_with_data(monkeypatch, tmp_path):
+    """Opt-in override of isolated_dungeon_store: points the dungeon-data
+    bundle at _shared.DUNGEON_DATA, which does match raw_log_text's
+    synthetic run (challenge_map_id 587) -- for tests exercising the
+    "forces/route comparison actually populate" path specifically."""
+    return _point_dungeon_store_at(monkeypatch, tmp_path, _shared.DUNGEON_DATA)
+
+
+@pytest.fixture()
 def client(site_db) -> TestClient:
     return TestClient(app)
