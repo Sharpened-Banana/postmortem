@@ -47,6 +47,15 @@ local defaults = {
   },
 }
 
+-- Default values for MythicAnalyzerSpellDB.global -- a separate
+-- SavedVariables table from MythicAnalyzerDB (above) because this holds a
+-- growing, self-built spell interrupt-flag database (InterruptDatabase.lua),
+-- not user settings. An empty table is the only meaningful default: there's
+-- nothing to pre-fill, just a well-formed table to grow into.
+local spellDbDefaults = {
+  global = {},
+}
+
 -- Ensures MythicAnalyzerDB (declared via ## SavedVariables in the .toc) is a
 -- well-formed table before anything reads or writes it, then points MA.db
 -- at the live table so the rest of the addon never touches the global
@@ -57,6 +66,13 @@ local function InitializeSavedVariables()
   if type(MythicAnalyzerDB.global) ~= "table" then MythicAnalyzerDB.global = {} end
   applyDefaults(MythicAnalyzerDB.global, defaults.global)
   MA.db = MythicAnalyzerDB.global
+
+  -- Same guard pattern, second SavedVariables table -- see spellDbDefaults
+  -- above for why this is kept separate from MythicAnalyzerDB.
+  if type(MythicAnalyzerSpellDB) ~= "table" then MythicAnalyzerSpellDB = {} end
+  if type(MythicAnalyzerSpellDB.global) ~= "table" then MythicAnalyzerSpellDB.global = {} end
+  applyDefaults(MythicAnalyzerSpellDB.global, spellDbDefaults.global)
+  MA.spellDb = MythicAnalyzerSpellDB.global
 end
 
 -- Accessor other files should use instead of touching MythicAnalyzerDB
@@ -64,6 +80,13 @@ end
 -- verified against MythicDungeonTools/Core/Bootstrap.lua (MDT:GetDB)
 function MA:GetDB()
   return self.db
+end
+
+-- Sibling accessor for the spell interrupt-flag database (see
+-- spellDbDefaults above). InterruptDatabase.lua reads/writes through this
+-- rather than touching MythicAnalyzerSpellDB directly.
+function MA:GetSpellDB()
+  return self.spellDb
 end
 
 -- Empty init stub for later work packages to extend. Called once, after

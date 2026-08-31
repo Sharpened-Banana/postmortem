@@ -9,6 +9,7 @@ from ..mdt.dungeon_data import DungeonData, DungeonDataStore
 from ..mdt.route import Route
 from .avoidable import AvoidableData
 from .compare import compare_route
+from .interruptibility import InterruptibilityData
 from .mapping import build_map_report
 from .pulls import detect_pulls
 from .stats import compute_stats
@@ -70,21 +71,52 @@ def _kick_value_summary(stats) -> dict[str, Any]:
     }
 
 
-def _enemy_cast_summary(stats) -> dict[str, Any]:
-    """Kick efficiency: for every enemy hard-cast, did it get through?"""
+def _enemy_cast_summary(
+    stats, interrupt_data: Optional[InterruptibilityData] = None
+) -> dict[str, Any]:
+    """Kick efficiency: for every enemy hard-cast, did it get through?
+
+    When ``interrupt_data`` (addon-captured, ground-truth ``UnitCastingInfo``/
+    ``UnitChannelInfo`` observations -- see interruptibility.py) has an
+    answer for a spell id, it's trusted over the old heuristic:
+
+    - confirmed uninterruptible (``known is False``): excluded entirely --
+      it can never be kicked, so it isn't a missed kick opportunity and
+      shouldn't appear in the report as one.
+    - confirmed interruptible (``known is True``): included, and counted
+      toward efficiency regardless of whether it was actually kicked this
+      run -- zero kicks against N times it got through now correctly drags
+      efficiency down, instead of being invisible the way the old
+      kicked-at-least-once heuristic left it.
+    - no data (``known is None``): falls back to the original heuristic
+      unchanged -- included, and only counted toward efficiency if it was
+      kicked at least once this run. This is the byte-for-byte-identical
+      path when ``interrupt_data`` is None or has nothing for a spell id.
+    """
     spells = []
     kicked_total = 0
     landed_kickable = 0
     for spell_id, entry in stats.enemy_cast_outcomes.items():
+        known = interrupt_data.get(spell_id) if interrupt_data else None
+        if known is False:
+            # confirmed genuinely uninterruptible -- never a missed kick
+            continue
         spells.append({
             "spell_id": spell_id,
             "name": entry["name"],
             "kicked": entry["kicked"],
             "got_through": entry["landed"],
             "expired": entry["expired"],
+            "interruptible": known,
         })
-        if entry["kicked"]:
-            # only spells someone kicked at least once are provably kickable
+        if known is True:
+            # confirmed kickable: count it whether or not it was actually
+            # kicked this run
+            kicked_total += entry["kicked"]
+            landed_kickable += entry["landed"]
+        elif entry["kicked"]:
+            # no ground truth -- only spells someone kicked at least once
+            # are provably kickable (today's unchanged heuristic)
             kicked_total += entry["kicked"]
             landed_kickable += entry["landed"]
     spells.sort(key=lambda s: -(s["got_through"] + s["kicked"]))
@@ -92,8 +124,13 @@ def _enemy_cast_summary(stats) -> dict[str, Any]:
     if kicked_total + landed_kickable:
         efficiency = round(100.0 * kicked_total / (kicked_total + landed_kickable), 1)
     return {
-        "note": "counts every enemy hard-cast (SPELL_CAST_START); efficiency "
-                "covers spells that were kicked at least once this run",
+        "note": "counts every enemy hard-cast (SPELL_CAST_START); spells "
+                "confirmed uninterruptible by the addon-captured "
+                "interruptibility database (--interrupt-data) are excluded "
+                "entirely; efficiency covers spells confirmed interruptible "
+                "by that database (whether or not they were kicked this "
+                "run) plus, for spells with no addon data, ones kicked at "
+                "least once this run",
         "kick_efficiency_pct": efficiency,
         "spells": spells,
     }
@@ -173,6 +210,7 @@ def analyze_run(
     route: Optional[Route] = None,
     store: Optional[DungeonDataStore] = None,
     avoidable: Optional[AvoidableData] = None,
+    interrupt_data: Optional[InterruptibilityData] = None,
     pull_gap_seconds: float = 5.0,
     full_cast_timeline: bool = True,
     death_penalty_s: float = 15.0,
@@ -227,7 +265,7 @@ def analyze_run(
             "total_s": round(len(stats.deaths) * death_penalty_s, 1),
         },
         "encounters": [dict(e) for e in stats.encounters],
-        "enemy_casts": _enemy_cast_summary(stats),
+        "enemy_casts": _enemy_cast_summary(stats, interrupt_data),
         "consumables": stats.consumable_events,
         "interrupts": stats.interrupt_events,
         "dispels": stats.dispel_events,
