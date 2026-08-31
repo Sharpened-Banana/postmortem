@@ -6,10 +6,12 @@ from pathlib import Path
 import pytest
 from conftest import (
     BOSS,
+    DPS1,
     DUNGEON_DATA,
     DUSKBLADE,
     FELWYRM,
     HEALER,
+    HOSTILE,
     LogBuilder,
     ROUTE_PRESET,
     SHADELING,
@@ -22,7 +24,12 @@ from postmortem.analysis.avoidable import AvoidableData
 from postmortem.analysis.compare import compare_route
 from postmortem.analysis.interruptibility import InterruptibilityData
 from postmortem.analysis.pulls import ActualPull, UnitEngagement, detect_pulls
-from postmortem.analysis.run_analyzer import _enemy_cast_summary, analyze_run
+from postmortem.analysis.run_analyzer import (
+    _cc_summary,
+    _enemy_cast_summary,
+    _unplanned_pulls_summary,
+    analyze_run,
+)
 from postmortem.analysis.stats import RunStats, compute_stats
 from postmortem.combatlog.parser import iter_events
 from postmortem.combatlog.segmenter import segment_runs
@@ -1108,3 +1115,255 @@ class TestDeathDefensives:
         # JSON round-trippable end to end, new fields included
         payload = json.loads(json.dumps(report))
         assert payload["deaths"][0]["died_without_defensive"] is True
+
+
+class TestCCUptime:
+    """Hard-CC uptime landed on hostile targets (gamedata.CC_SPELLS,
+    stats.cc_events / RunStats.cc_events) -- distinct from interrupts, which
+    already have their own coverage (TestEnemyCastSummary)."""
+
+    POLYMORPH = 118  # CC_SPELLS: ("Polymorph", "incapacitate")
+    HOJ = 853  # CC_SPELLS: ("Hammer of Justice", "stun")
+
+    def test_cc_application_tracked_with_duration_and_caster(self):
+        b = LogBuilder()
+        npc = b.npc_guid(FELWYRM, "0001")
+        target = (npc, "Felwyrm", HOSTILE, None)
+        b.start(0)
+        b.combatant(0.5, TANK)
+        b.aura(5, TANK, target, self.POLYMORPH, "Polymorph", kind="DEBUFF")
+        b.aura_removed(15, TANK, target, self.POLYMORPH, "Polymorph", kind="DEBUFF")
+        b.end(40)
+
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        stats = compute_stats(run.events, detect_pulls(run.events))
+
+        assert len(stats.cc_events) == 1
+        ev = stats.cc_events[0]
+        assert ev["spell_id"] == self.POLYMORPH
+        assert ev["spell"] == "Polymorph"
+        assert ev["cc_type"] == "incapacitate"
+        assert ev["target"] == "Felwyrm"
+        assert ev["caster"] == TANK[1]
+        assert ev["duration_s"] == pytest.approx(10.0, abs=0.1)
+
+    def test_cc_still_active_at_run_end_counts_until_last_event(self):
+        b = LogBuilder()
+        npc = b.npc_guid(FELWYRM, "0001")
+        target = (npc, "Felwyrm", HOSTILE, None)
+        b.start(0)
+        b.combatant(0.5, TANK)
+        b.aura(5, TANK, target, self.POLYMORPH, "Polymorph", kind="DEBUFF")
+        b.end(20)  # never removed
+
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        stats = compute_stats(run.events, detect_pulls(run.events))
+
+        assert len(stats.cc_events) == 1
+        assert stats.cc_events[0]["duration_s"] == pytest.approx(15.0, abs=0.1)
+
+    def test_cc_ends_at_target_death_not_lost(self):
+        # a dead unit's auras never get an explicit SPELL_AURA_REMOVED --
+        # an open CC window must close at the target's UNIT_DIED instead of
+        # leaking or being silently dropped.
+        b = LogBuilder()
+        npc = b.npc_guid(FELWYRM, "0001")
+        target = (npc, "Felwyrm", HOSTILE, None)
+        b.start(0)
+        b.combatant(0.5, TANK)
+        b.aura(5, TANK, target, self.POLYMORPH, "Polymorph", kind="DEBUFF")
+        b.unit_died(12, npc, "Felwyrm", HOSTILE)
+        b.end(20)
+
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        stats = compute_stats(run.events, detect_pulls(run.events))
+
+        assert len(stats.cc_events) == 1
+        assert stats.cc_events[0]["duration_s"] == pytest.approx(7.0, abs=0.1)
+
+    def test_summary_aggregates_by_player_and_type(self):
+        b = LogBuilder()
+        t1 = (b.npc_guid(FELWYRM, "0001"), "Felwyrm", HOSTILE, None)
+        t2 = (b.npc_guid(FELWYRM, "0002"), "Felwyrm", HOSTILE, None)
+        b.start(0)
+        b.combatant(0.5, TANK)
+        b.combatant(0.5, DPS1)
+        b.aura(5, TANK, t1, self.POLYMORPH, "Polymorph", kind="DEBUFF")
+        b.aura_removed(10, TANK, t1, self.POLYMORPH, "Polymorph", kind="DEBUFF")
+        b.aura(6, DPS1, t2, self.HOJ, "Hammer of Justice", kind="DEBUFF")
+        b.aura_removed(9, DPS1, t2, self.HOJ, "Hammer of Justice", kind="DEBUFF")
+        b.end(20)
+
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        stats = compute_stats(run.events, detect_pulls(run.events))
+        summary = _cc_summary(stats)
+
+        assert summary["total_duration_s"] == pytest.approx(8.0, abs=0.1)  # 5 + 3
+        players = {e["name"]: e for e in summary["by_player"]}
+        assert players[TANK[1]] == {"name": TANK[1], "casts": 1, "total_duration_s": 5.0}
+        assert players[DPS1[1]] == {"name": DPS1[1], "casts": 1, "total_duration_s": 3.0}
+        types = {e["cc_type"] for e in summary["by_type"]}
+        assert types == {"incapacitate", "stun"}
+        assert len(summary["events"]) == 2
+
+    def test_no_cc_gives_empty_summary(self):
+        stats = RunStats()
+        summary = _cc_summary(stats)
+        assert summary == {
+            "total_duration_s": 0, "by_player": [], "by_type": [], "events": [],
+        }
+
+    def test_renders_in_text_and_html(self):
+        from postmortem.report.html import render_html
+        from postmortem.report.text import render_text
+
+        b = LogBuilder()
+        target = (b.npc_guid(FELWYRM, "0001"), "Felwyrm", HOSTILE, None)
+        b.start(0)
+        b.combatant(0.5, TANK)
+        b.aura(5, TANK, target, self.POLYMORPH, "Polymorph", kind="DEBUFF")
+        b.aura_removed(15, TANK, target, self.POLYMORPH, "Polymorph", kind="DEBUFF")
+        b.end(40)
+
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        report = analyze_run(run)
+
+        text = render_text(report)
+        assert "CROWD CONTROL" in text
+        assert "Polymorph" in text and "Felwyrm" in text
+
+        html = render_html(report)
+        assert "Polymorph" in html
+        assert '"cc_type": "incapacitate"' in html
+
+
+class TestCloseCalls:
+    """Damage that drops a player below CLOSE_CALL_HP_PCT without killing
+    them (RunStats.close_calls / _tag_close_calls)."""
+
+    BIG_HIT = 900001
+
+    def test_drop_below_threshold_recorded_as_close_call(self):
+        b = LogBuilder()
+        npc = b.npc_guid(FELWYRM, "0001")
+        b.start(0)
+        b.combatant(0.5, TANK)
+        b.npc_damage(5, npc, "Felwyrm", TANK, self.BIG_HIT, "Big Hit", 50000, hp=150000)  # 15%
+        b.end(20)
+
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        stats = compute_stats(run.events, detect_pulls(run.events))
+
+        assert len(stats.close_calls) == 1
+        cc = stats.close_calls[0]
+        assert cc["player"] == TANK[1]
+        assert cc["hp_pct"] == pytest.approx(15.0, abs=0.1)
+        assert cc["spell"] == "Big Hit"
+        assert cc["source"] == "Felwyrm"
+
+    def test_healthy_hit_is_not_a_close_call(self):
+        b = LogBuilder()
+        npc = b.npc_guid(FELWYRM, "0001")
+        b.start(0)
+        b.combatant(0.5, TANK)
+        b.npc_damage(5, npc, "Felwyrm", TANK, self.BIG_HIT, "Chip", 50000, hp=800000)  # 80%
+        b.end(20)
+
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        stats = compute_stats(run.events, detect_pulls(run.events))
+        assert stats.close_calls == []
+
+    def test_only_the_transition_into_danger_is_recorded(self):
+        b = LogBuilder()
+        npc = b.npc_guid(FELWYRM, "0001")
+        b.start(0)
+        b.combatant(0.5, TANK)
+        b.npc_damage(5, npc, "Felwyrm", TANK, self.BIG_HIT, "Hit 1", 50000, hp=150000)  # 15%: new
+        b.npc_damage(6, npc, "Felwyrm", TANK, self.BIG_HIT, "Hit 2", 10000, hp=140000)  # still low
+        b.end(20)
+
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        stats = compute_stats(run.events, detect_pulls(run.events))
+        assert len(stats.close_calls) == 1
+
+    def test_a_hit_that_actually_kills_is_not_reported_as_a_close_call(self):
+        b = LogBuilder()
+        npc = b.npc_guid(FELWYRM, "0001")
+        b.start(0)
+        b.combatant(0.5, TANK)
+        b.npc_damage(5, npc, "Felwyrm", TANK, self.BIG_HIT, "Killing Hit", 50000, hp=10000)
+        b.unit_died(5.05, TANK[0], TANK[1], TANK[2])
+        b.end(20)
+
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        stats = compute_stats(run.events, detect_pulls(run.events))
+        assert stats.close_calls == []
+        assert len(stats.deaths) == 1
+
+    def test_renders_in_text_and_html(self):
+        from postmortem.report.html import render_html
+        from postmortem.report.text import render_text
+
+        b = LogBuilder()
+        npc = b.npc_guid(FELWYRM, "0001")
+        b.start(0)
+        b.combatant(0.5, TANK)
+        b.npc_damage(5, npc, "Felwyrm", TANK, self.BIG_HIT, "Big Hit", 50000, hp=150000)
+        b.end(20)
+
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        report = analyze_run(run)
+
+        text = render_text(report)
+        assert "CLOSE CALLS" in text
+        assert "Big Hit" in text and "15.0%" in text
+
+        html = render_html(report)
+        assert "Big Hit" in html
+        assert '"hp_pct": 15.0' in html
+
+
+class TestUnplannedPulls:
+    """Actual pulls that included enemies not part of the pasted route,
+    surfaced directly from compare_route()'s existing off_route/untracked
+    data (see TestRouteComparison for the underlying comparison coverage)."""
+
+    def test_summary_surfaces_off_route_and_untracked_pulls(self, run_segment, route, dungeon):
+        pulls = detect_pulls(run_segment.events)
+        comparison = compare_route(route, pulls, dungeon).summary(dungeon)
+        summary = _unplanned_pulls_summary(comparison)
+
+        assert summary is not None
+        (entry,) = summary["pulls"]  # only pull 2 has off-route/untracked content
+        assert entry["actual_pull"] == 2
+        assert {e["npc_id"] for e in entry["off_route"]} == {SHADELING}
+        assert {e["npc_id"] for e in entry["untracked"]} == {SUMMONED}
+        assert summary["total_off_route_mobs"] == 1
+        assert summary["total_untracked_mobs"] == 1
+
+    def test_no_comparison_returns_none(self):
+        assert _unplanned_pulls_summary(None) is None
+        assert _unplanned_pulls_summary({"error": "no dungeon data"}) is None
+
+    def test_untracked_adds_shown_in_text_render(self, run_segment, route, dungeon_data_file):
+        # Regression: text.py's per-pull deviation flags used to show
+        # OFF-ROUTE but silently dropped untracked adds entirely (html.py
+        # already had both) -- pull 2 in this fixture has one of each.
+        from postmortem.report.text import render_text
+
+        store = DungeonDataStore.load(dungeon_data_file)
+        report = analyze_run(run_segment, route=route, store=store)
+        text = render_text(report)
+        assert "OFF-ROUTE" in text
+        assert "ADDS" in text
+
+    def test_wired_into_full_report(self, run_segment, route, dungeon_data_file):
+        store = DungeonDataStore.load(dungeon_data_file)
+        report = analyze_run(run_segment, route=route, store=store)
+
+        assert "unplanned_pulls" in report
+        assert report["unplanned_pulls"]["total_off_route_mobs"] == 1
+        assert report["unplanned_pulls"]["total_untracked_mobs"] == 1
+
+        payload = json.loads(json.dumps(report))
+        assert payload["unplanned_pulls"]["pulls"][0]["actual_pull"] == 2
