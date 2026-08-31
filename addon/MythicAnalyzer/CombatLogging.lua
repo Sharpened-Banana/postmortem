@@ -45,6 +45,14 @@ function MA:CombatLogging_OnChallengeModeStart()
 end
 
 function MA:CombatLogging_OnChallengeModeEnd()
+  -- Record the REAL logging state before touching anything -- this is what
+  -- Overlay.lua's post-key recap panel reports as "log saved" or not.
+  -- Captured unconditionally (even if combatLoggingEnabled is off), since
+  -- the user may have started logging manually via /combatlog, or another
+  -- addon may control it; either way this is the true answer to "was this
+  -- key actually being recorded", not just "did *we* turn it on".
+  MA.state.combatLogWasOn = self:CombatLogging_GetCurrentState()
+
   if not self:GetDB().combatLoggingEnabled then return end
   self:CombatLogging_SetState(false, false)
 end

@@ -56,10 +56,9 @@ local function CreateOverlayFrame()
   -- non-AceGUI frame elsewhere in MDT), confirming BackdropTemplate is used
   -- outside AceGUI's own internals too.
   local f = CreateFrame("Frame", "MythicAnalyzerOverlay", UIParent, "BackdropTemplate")
-  -- Grown from the original 92 to fit the two new rows added below
-  -- (interrupts, always shown; pull progress, shown only when a route is
-  -- loaded -- see MA:Overlay_Refresh()).
-  f:SetSize(220, 136)
+  -- Grown again to fit the post-key recap status row (see statusFS below),
+  -- shown only during the recap window after a key ends.
+  f:SetSize(220, 156)
   f:SetFrameStrata("MEDIUM")
   f:SetClampedToScreen(true)
 
@@ -124,11 +123,22 @@ local function CreateOverlayFrame()
   pullFS:SetFontObject(GameFontHighlightSmall)
   pullFS:SetPoint("TOP", interruptsFS, "BOTTOM", 0, -10)
 
+  -- Post-key recap status: shown only during the RECAP_DURATION_S window
+  -- Tracker.lua opens after CHALLENGE_MODE_COMPLETED/RESET (see
+  -- MA:Overlay_Refresh() below). SetTextColor (not just a font object) is
+  -- used here specifically so "log saved" vs "not recorded" are visually
+  -- distinct at a glance -- standard, long-unchanged FontString API, not
+  -- something requiring addon-specific verification.
+  local statusFS = f:CreateFontString(nil, "OVERLAY")
+  statusFS:SetFontObject(GameFontHighlightSmall)
+  statusFS:SetPoint("TOP", pullFS, "BOTTOM", 0, -10)
+
   f.forcesFS = forcesFS
   f.timerFS = timerFS
   f.deathsFS = deathsFS
   f.interruptsFS = interruptsFS
   f.pullFS = pullFS
+  f.statusFS = statusFS
 
   -- Restore the saved position (defaulted in Bootstrap.lua's
   -- defaults.global.overlayPosition) rather than whatever anchor
@@ -141,21 +151,24 @@ local function CreateOverlayFrame()
 end
 
 -- Reads MA.state (kept up to date by Tracker.lua) and refreshes the
--- overlay's text and visibility. Show/hide is driven by IsKeyActive()
--- directly (not MA.state.active) so the overlay still displays final
--- numbers for the few seconds between CHALLENGE_MODE_COMPLETED and the
--- player actually leaving the dungeon.
+-- overlay's text and visibility. Shown while a key is active OR during the
+-- post-key recap window Tracker.lua opens on CHALLENGE_MODE_COMPLETED/
+-- RESET (state.recapUntil, a GetTime() deadline) -- so the overlay keeps
+-- showing final numbers for a while after the key ends instead of
+-- vanishing the instant IsKeyActive() flips false.
 function MA:Overlay_Refresh()
   if not frame then
     frame = CreateOverlayFrame()
   end
 
-  if not IsKeyActive() then
+  local state = MA.state or {}
+  local active = IsKeyActive()
+  local inRecap = not active and state.recapUntil and GetTime() < state.recapUntil
+
+  if not active and not inRecap then
     frame:Hide()
     return
   end
-
-  local state = MA.state or {}
   local forces = state.forces or {}
   frame.forcesFS:SetText(string.format(
     "%d / %d (%.1f%%)",
@@ -186,6 +199,27 @@ function MA:Overlay_Refresh()
     frame.pullFS:Show()
   else
     frame.pullFS:Hide()
+  end
+
+  -- Post-key recap status: only meaningful once the key has actually
+  -- ended. combatLogWasOn is the REAL LoggingCombat() state captured by
+  -- CombatLogging.lua right before it (maybe) turns logging off -- see its
+  -- comment for why this reports the true recording outcome rather than
+  -- just "did our addon try to enable it". Deliberately says "ready to
+  -- analyze", not "analyzed": this addon has no way to know whether
+  -- mythic-analyzer's own record/analyze step actually ran on this log --
+  -- that happens in a separate process this addon can't observe.
+  if inRecap then
+    if state.combatLogWasOn then
+      frame.statusFS:SetTextColor(0.4, 0.9, 0.5)
+      frame.statusFS:SetText("Log saved -- ready to analyze")
+    else
+      frame.statusFS:SetTextColor(1.0, 0.65, 0.2)
+      frame.statusFS:SetText("Not recorded -- combat log was off")
+    end
+    frame.statusFS:Show()
+  else
+    frame.statusFS:Hide()
   end
 
   frame:Show()

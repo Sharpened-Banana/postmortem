@@ -28,6 +28,10 @@ local function IsKeyActive()
   return instanceType == "party" and difficultyID == 8
 end
 
+-- How long the overlay keeps showing final numbers after a key ends before
+-- hiding itself, instead of vanishing the instant IsKeyActive() flips false.
+local RECAP_DURATION_S = 15
+
 -- Fresh/empty state shape. Used both on a real CHALLENGE_MODE_START and on
 -- the soft-start path from PLAYER_ENTERING_WORLD below, so stale numbers
 -- from a previous key never leak into a new one.
@@ -38,6 +42,14 @@ local function NewState()
     elapsed = 0,
     deaths = 0,
     deathTimeLost = 0,
+    -- Set on CHALLENGE_MODE_COMPLETED/RESET by EndRun() below: a GetTime()
+    -- deadline the overlay stays visible until, and whether combat logging
+    -- was actually on for this key (set by CombatLogging.lua's own
+    -- CHALLENGE_MODE_COMPLETED/RESET handler -- see its comment for why
+    -- this is the *real* logging state, not just "did our addon turn it
+    -- on"). Both nil outside the post-key recap window.
+    recapUntil = nil,
+    combatLogWasOn = nil,
   }
 end
 
@@ -187,7 +199,22 @@ local function EndRun(event)
 
   MA.state.active = false
   UnregisterRunEvents()
+
+  -- Keep the overlay up for RECAP_DURATION_S showing final numbers, instead
+  -- of it vanishing the instant IsKeyActive() flips false (see
+  -- Overlay.lua's show/hide logic, which checks this deadline). Nothing
+  -- else drives a tick once the key ends (Tracker_OnTick() early-returns
+  -- once state.active is false), so schedule one more refresh for exactly
+  -- when the window closes -- otherwise the overlay would stay frozen on
+  -- screen forever with nothing left to tell it to hide.
+  -- GetTime()/C_Timer.After are standard, long-unchanged Blizzard APIs
+  -- (already used elsewhere in this addon -- see RouteImport.lua's own
+  -- GetTime() usage and PLAYER_ENTERING_WORLD's C_Timer.After retry above).
+  MA.state.recapUntil = GetTime() + RECAP_DURATION_S
   if MA.Overlay_Refresh then MA.Overlay_Refresh(MA) end
+  C_Timer.After(RECAP_DURATION_S, function()
+    if MA.Overlay_Refresh then MA.Overlay_Refresh(MA) end
+  end)
 end
 
 -- Soft-start recovery for a /reload mid-key: if we're actually in an active
