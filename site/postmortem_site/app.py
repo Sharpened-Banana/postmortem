@@ -436,7 +436,7 @@ the ability to update that run, but it stays visible either way.</p>
 <h2 style="font-size:14px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);margin:32px 0 10px;">Notes</h2>
 <p>Uploads are rate-limited per token and per IP. Analyzed reports
 (<code>/api/runs</code>) are capped at 5MB; raw combat logs
-(<code>/upload</code>) at 250MB. A raw log is only used to compute the
+(<code>/upload</code>) at 1GB. A raw log is only used to compute the
 report — it's discarded immediately after, never stored.
 Reports are shown exactly as uploaded — this site does no additional
 verification of the underlying combat log.</p>
@@ -974,8 +974,16 @@ async def upload_log(
                 fh.write(chunk)
 
         if too_large:
+            cap_mb = config.MAX_LOG_BYTES // (1024 * 1024)
             return HTMLResponse(
-                _render_upload_result(413, {"error": "that file is too large"}),
+                _render_upload_result(413, {
+                    "error": f"that file is over the {cap_mb}MB limit. WoW appends to "
+                             "one combat log for as long as the game client stays "
+                             "open, so this usually means the log covers more than "
+                             "just your recent keys -- restarting WoW starts a fresh "
+                             "log file, or you can trim the file to a smaller time "
+                             "range yourself before uploading.",
+                }),
                 status_code=413,
             )
         if total == 0:
