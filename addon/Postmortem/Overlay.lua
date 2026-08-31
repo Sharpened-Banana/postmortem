@@ -55,7 +55,7 @@ local function CreateOverlayFrame()
   -- and MythicDungeonTools/Modules/ExternalLinks.lua:155 (a plain,
   -- non-AceGUI frame elsewhere in MDT), confirming BackdropTemplate is used
   -- outside AceGUI's own internals too.
-  local f = CreateFrame("Frame", "MythicAnalyzerOverlay", UIParent, "BackdropTemplate")
+  local f = CreateFrame("Frame", "PostmortemOverlay", UIParent, "BackdropTemplate")
   -- Grown again to fit the post-key recap status row (see statusFS below)
   -- and, below that, a permanent companion-app reminder row (companionFS)
   -- shown only alongside that same recap window -- both shown only during
@@ -221,7 +221,7 @@ function MA:Overlay_Refresh()
   -- comment for why this reports the true recording outcome rather than
   -- just "did our addon try to enable it". Deliberately says "ready to
   -- analyze", not "analyzed": this addon has no way to know whether
-  -- mythic-analyzer's own record/analyze step actually ran on this log --
+  -- postmortem's own record/analyze step actually ran on this log --
   -- that happens in a separate process this addon can't observe.
   if inRecap then
     if state.combatLogWasOn then

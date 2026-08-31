@@ -6,7 +6,7 @@
 -- casts as missed kicks. The client itself knows this live, via
 -- UnitCastingInfo()/UnitChannelInfo()'s notInterruptible return value, so
 -- this file watches every enemy cast during a key and records that flag per
--- spellID into MythicAnalyzerSpellDB (via MA:GetSpellDB(), see
+-- spellID into PostmortemSpellDB (via MA:GetSpellDB(), see
 -- Bootstrap.lua) -- a real, always-accurate database built purely from play.
 --
 -- Cast-watching pattern (one shared frame with plain RegisterEvent on

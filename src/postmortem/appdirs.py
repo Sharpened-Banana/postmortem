@@ -5,10 +5,10 @@ Directory resolution follows each OS's own convention rather than
 assuming ``~/.config`` works everywhere (it doesn't on Windows, and isn't
 idiomatic on macOS):
 
-- Windows: ``%APPDATA%\\mythic-analyzer``
-- macOS:   ``~/Library/Application Support/mythic-analyzer``
-- Linux/other: ``$XDG_CONFIG_HOME/mythic-analyzer``, falling back to
-  ``~/.config/mythic-analyzer``
+- Windows: ``%APPDATA%\\postmortem``
+- macOS:   ``~/Library/Application Support/postmortem``
+- Linux/other: ``$XDG_CONFIG_HOME/postmortem``, falling back to
+  ``~/.config/postmortem``
 
 Stdlib-only (``os``, ``sys``, ``pathlib``) and dependency-free so the
 plain CLI install (no ``desktop`` extra) can use it too -- e.g. for
@@ -23,7 +23,7 @@ import os
 import sys
 from pathlib import Path
 
-APP_DIR_NAME = "mythic-analyzer"
+APP_DIR_NAME = "postmortem"
 
 
 def config_dir() -> Path:

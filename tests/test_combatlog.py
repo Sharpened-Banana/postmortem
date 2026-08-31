@@ -2,7 +2,7 @@
 
 from conftest import DPS1, HOSTILE, TANK, LogBuilder, build_run_log
 
-from mythic_analyzer.combatlog.events import (
+from postmortem.combatlog.events import (
     advanced_info,
     is_group_player,
     is_hostile_npc,
@@ -10,9 +10,9 @@ from mythic_analyzer.combatlog.events import (
     parse_heal,
     spell_info,
 )
-from mythic_analyzer.combatlog.guid import parse_guid
-from mythic_analyzer.combatlog.parser import iter_events, parse_line, split_params
-from mythic_analyzer.combatlog.segmenter import segment_runs
+from postmortem.combatlog.guid import parse_guid
+from postmortem.combatlog.parser import iter_events, parse_line, split_params
+from postmortem.combatlog.segmenter import segment_runs
 
 
 class TestSplitParams:

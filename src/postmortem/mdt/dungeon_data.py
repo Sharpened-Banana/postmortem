@@ -2,7 +2,7 @@
 
 MDT ships this data as Lua tables inside the addon
 (``MDT.dungeonEnemies[dungeonIndex]`` etc.). Use
-``mythic-analyzer extract-data <path-to-MDT-addon>`` to convert the addon's
+``postmortem extract-data <path-to-MDT-addon>`` to convert the addon's
 dungeon files into the JSON this module loads. Without dungeon data the
 analyzer still works — it just can't resolve planned pulls to NPC ids, so
 route-vs-actual comparison is limited to what the combat log alone shows.

@@ -1,4 +1,4 @@
-"""mythic-analyzer command line interface."""
+"""postmortem command line interface."""
 
 from __future__ import annotations
 
@@ -187,7 +187,7 @@ def cmd_import_route(args: argparse.Namespace) -> int:
             print(f"  pull {pull['pull']:>3}: {mobs}")
     if not store:
         print("\n(hint: pass --dungeon-data mdt_data.json to resolve enemy names "
-              "— create it with `mythic-analyzer extract-data`)")
+              "— create it with `postmortem extract-data`)")
     return 0
 
 
@@ -201,17 +201,17 @@ def cmd_extract_data(args: argparse.Namespace) -> int:
 
 
 def cmd_extract_interrupts(args: argparse.Namespace) -> int:
-    """Extract the addon's MythicAnalyzerSpellDB SavedVariables table into
+    """Extract the addon's PostmortemSpellDB SavedVariables table into
     the JSON shape InterruptibilityData.load() reads.
 
     Unlike extract-data (which walks a whole MDT addon folder of
     per-dungeon files), this reads one specific SavedVariables file --
     the addon declares two SavedVariables tables in one .toc
-    (MythicAnalyzerDB, MythicAnalyzerSpellDB), so WoW writes both as
+    (PostmortemDB, PostmortemSpellDB), so WoW writes both as
     separate top-level assignments into the same
-    .../SavedVariables/MythicAnalyzer.lua file. We locate the
-    MythicAnalyzerSpellDB assignment specifically and ignore
-    MythicAnalyzerDB.
+    .../SavedVariables/Postmortem.lua file. We locate the
+    PostmortemSpellDB assignment specifically and ignore
+    PostmortemDB.
     """
     path = Path(args.savedvariables_path)
     try:
@@ -219,10 +219,10 @@ def cmd_extract_interrupts(args: argparse.Namespace) -> int:
     except OSError as exc:
         raise SystemExit(f"error: could not read {path}: {exc}")
 
-    pos = _find_assignment(text, r"MythicAnalyzerSpellDB\s*=\s*")
+    pos = _find_assignment(text, r"PostmortemSpellDB\s*=\s*")
     if pos is None:
         raise SystemExit(
-            f"error: no MythicAnalyzerSpellDB assignment found in {path} "
+            f"error: no PostmortemSpellDB assignment found in {path} "
             "(wrong SavedVariables file? or the addon hasn't recorded "
             "any casts yet)"
         )
@@ -233,7 +233,7 @@ def cmd_extract_interrupts(args: argparse.Namespace) -> int:
         raw = parser.parse_value_at(pos)
     except LuaParseError as exc:
         raise SystemExit(
-            f"error: could not parse MythicAnalyzerSpellDB in {path}: {exc}"
+            f"error: could not parse PostmortemSpellDB in {path}: {exc}"
         )
 
     global_table = raw.get("global") if isinstance(raw, dict) else None
@@ -513,7 +513,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="mythic-analyzer",
+        prog="postmortem",
         description="Mythic+ route post-mortem: MDT route vs. what actually happened.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -536,14 +536,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "extract-interrupts",
         help="extract addon-captured spell-interruptibility data from the "
-             "MythicAnalyzer addon's SavedVariables file",
+             "Postmortem addon's SavedVariables file",
     )
     p.add_argument("savedvariables_path",
-                   help="path to the MythicAnalyzer SavedVariables file "
+                   help="path to the Postmortem SavedVariables file "
                         "(e.g. WTF/Account/<ACCOUNT>/SavedVariables/"
-                        "MythicAnalyzer.lua) -- both MythicAnalyzerDB and "
-                        "MythicAnalyzerSpellDB live in this one file; "
-                        "only MythicAnalyzerSpellDB is read")
+                        "Postmortem.lua) -- both PostmortemDB and "
+                        "PostmortemSpellDB live in this one file; "
+                        "only PostmortemSpellDB is read")
     p.add_argument("-o", "--output", default="interrupt_data.json")
     p.set_defaults(func=cmd_extract_interrupts)
 
@@ -599,8 +599,8 @@ def build_parser() -> argparse.ArgumentParser:
                         "at PATH (created if missing) — see `index --db`")
     p.add_argument("--upload", metavar="URL",
                    help="also upload this run's report to a public "
-                        "mythic-analyzer site at URL (e.g. "
-                        "https://mythic-analyzer.fly.dev) so it's browsable "
+                        "postmortem site at URL (e.g. "
+                        "https://postmortem.fly.dev) so it's browsable "
                         "there; needs internet access, and never fails the "
                         "analysis itself if the upload doesn't go through")
     p.add_argument("--upload-token", metavar="TOKEN",

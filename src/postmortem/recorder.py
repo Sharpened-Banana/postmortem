@@ -8,7 +8,7 @@ Shell hooks fire on run start/end (``--on-run-start`` / ``--on-run-end``),
 with MA_ZONE, MA_LEVEL and MA_PATH in the environment — point them at
 anything, most usefully video capture, e.g. with obs-cmd (OBS WebSocket):
 
-    mythic-analyzer record ... \\
+    postmortem record ... \\
         --on-run-start "obs-cmd recording start" \\
         --on-run-end   "obs-cmd recording stop"
 

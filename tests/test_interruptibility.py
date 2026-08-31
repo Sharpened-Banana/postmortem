@@ -8,9 +8,9 @@ import textwrap
 
 import pytest
 
-from mythic_analyzer.analysis.interruptibility import InterruptibilityData
-from mythic_analyzer.cli import main
-from mythic_analyzer.mdt.extract import LuaLiteralParser, _find_assignment
+from postmortem.analysis.interruptibility import InterruptibilityData
+from postmortem.cli import main
+from postmortem.mdt.extract import LuaLiteralParser, _find_assignment
 
 
 class TestInterruptibilityDataLoad:
@@ -66,31 +66,31 @@ class TestInterruptibilityDataLoad:
 class TestSpellDBExtraction:
     """Confirms the real extract-interrupts pipeline (_find_assignment +
     LuaLiteralParser, same as mdt/extract.py's extract_dungeon_file)
-    correctly locates MythicAnalyzerSpellDB specifically -- not
-    MythicAnalyzerDB, which is also present in the same file -- and
+    correctly locates PostmortemSpellDB specifically -- not
+    PostmortemDB, which is also present in the same file -- and
     parses its nested [spellId] = {...} entries, including confirming
     integer-keyed table entries come back as Python int keys."""
 
     LUA = textwrap.dedent("""
-    MythicAnalyzerDB = {global = {}}
-    MythicAnalyzerSpellDB = {global = {
+    PostmortemDB = {global = {}}
+    PostmortemSpellDB = {global = {
         [12345] = {name = "Test Spell", interruptible = true, lastSeenTs = 123},
         [67890] = {name = "Other Spell", interruptible = false, lastSeenTs = 456},
     }}
     """)
 
     def test_locates_spell_db_not_regular_db(self):
-        pos = _find_assignment(self.LUA, r"MythicAnalyzerSpellDB\s*=\s*")
+        pos = _find_assignment(self.LUA, r"PostmortemSpellDB\s*=\s*")
         assert pos is not None
-        # the located position should be past the MythicAnalyzerDB line
-        assert self.LUA.index("MythicAnalyzerDB =") < pos
+        # the located position should be past the PostmortemDB line
+        assert self.LUA.index("PostmortemDB =") < pos
         # and the text right at pos should be the SpellDB table, not
-        # MythicAnalyzerDB's empty one
+        # PostmortemDB's empty one
         assert self.LUA[pos:].lstrip().startswith("{global = {")
         assert "[12345]" in self.LUA[pos:pos + 200]
 
     def test_parses_nested_table_with_int_keys(self):
-        pos = _find_assignment(self.LUA, r"MythicAnalyzerSpellDB\s*=\s*")
+        pos = _find_assignment(self.LUA, r"PostmortemSpellDB\s*=\s*")
         parser = LuaLiteralParser(self.LUA)
         raw = parser.parse_value_at(pos)
         assert isinstance(raw, dict)
@@ -106,14 +106,14 @@ class TestSpellDBExtraction:
 
 class TestExtractInterruptsCLI:
     def _write_savedvariables(self, tmp_path, lua_text):
-        path = tmp_path / "MythicAnalyzer.lua"
+        path = tmp_path / "Postmortem.lua"
         path.write_text(lua_text, encoding="utf-8")
         return path
 
     def test_extracts_json_shape(self, tmp_path, capsys):
         lua = textwrap.dedent("""
-        MythicAnalyzerDB = {global = {someOtherStuff = true}}
-        MythicAnalyzerSpellDB = {global = {
+        PostmortemDB = {global = {someOtherStuff = true}}
+        PostmortemSpellDB = {global = {
             [196607] = {name = "Eye Beam", interruptible = true, lastSeenTs = 111},
             [204331] = {name = "Runic Spike", interruptible = false, lastSeenTs = 222},
         }}
@@ -143,7 +143,7 @@ class TestExtractInterruptsCLI:
         assert data.get(999) is None
 
     def test_default_output_filename(self, tmp_path, capsys, monkeypatch):
-        lua = "MythicAnalyzerSpellDB = {global = {}}"
+        lua = "PostmortemSpellDB = {global = {}}"
         sv_path = self._write_savedvariables(tmp_path, lua)
         monkeypatch.chdir(tmp_path)
 
@@ -157,7 +157,7 @@ class TestExtractInterruptsCLI:
         assert "could not read" in str(exc.value)
 
     def test_missing_assignment_is_clear_systemexit(self, tmp_path):
-        sv_path = self._write_savedvariables(tmp_path, "MythicAnalyzerDB = {global = {}}")
+        sv_path = self._write_savedvariables(tmp_path, "PostmortemDB = {global = {}}")
         with pytest.raises(SystemExit) as exc:
             main(["extract-interrupts", str(sv_path)])
-        assert "MythicAnalyzerSpellDB" in str(exc.value)
+        assert "PostmortemSpellDB" in str(exc.value)
