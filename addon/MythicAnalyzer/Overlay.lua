@@ -56,9 +56,11 @@ local function CreateOverlayFrame()
   -- non-AceGUI frame elsewhere in MDT), confirming BackdropTemplate is used
   -- outside AceGUI's own internals too.
   local f = CreateFrame("Frame", "MythicAnalyzerOverlay", UIParent, "BackdropTemplate")
-  -- Grown again to fit the post-key recap status row (see statusFS below),
-  -- shown only during the recap window after a key ends.
-  f:SetSize(220, 156)
+  -- Grown again to fit the post-key recap status row (see statusFS below)
+  -- and, below that, a permanent companion-app reminder row (companionFS)
+  -- shown only alongside that same recap window -- both shown only during
+  -- the recap window after a key ends.
+  f:SetSize(220, 190)
   f:SetFrameStrata("MEDIUM")
   f:SetClampedToScreen(true)
 
@@ -133,12 +135,24 @@ local function CreateOverlayFrame()
   statusFS:SetFontObject(GameFontHighlightSmall)
   statusFS:SetPoint("TOP", pullFS, "BOTTOM", 0, -10)
 
+  -- Permanent companion-app reminder row: shown alongside statusFS during
+  -- the same post-key recap window (see MA:Overlay_Refresh() below), a
+  -- distinct blue tint so it doesn't compete with statusFS's green/orange
+  -- recorded/not-recorded coloring. Text comes from MA.INFO.recapLine
+  -- (Info.lua, WP-1) -- never typed here.
+  local companionFS = f:CreateFontString(nil, "OVERLAY")
+  companionFS:SetFontObject(GameFontHighlightSmall)
+  companionFS:SetPoint("TOP", statusFS, "BOTTOM", 0, -10)
+  companionFS:SetJustifyH("CENTER")
+  companionFS:SetTextColor(0.55, 0.72, 1.0)
+
   f.forcesFS = forcesFS
   f.timerFS = timerFS
   f.deathsFS = deathsFS
   f.interruptsFS = interruptsFS
   f.pullFS = pullFS
   f.statusFS = statusFS
+  f.companionFS = companionFS
 
   -- Restore the saved position (defaulted in Bootstrap.lua's
   -- defaults.global.overlayPosition) rather than whatever anchor
@@ -218,8 +232,19 @@ function MA:Overlay_Refresh()
       frame.statusFS:SetText("Not recorded -- combat log was off")
     end
     frame.statusFS:Show()
+
+    -- Permanent companion-app reminder, shown alongside statusFS. Guarded
+    -- on MA.INFO/recapLine so a missing/failed Info.lua load just hides
+    -- this row instead of erroring.
+    if MA.INFO and MA.INFO.recapLine then
+      frame.companionFS:SetText(MA.INFO.recapLine)
+      frame.companionFS:Show()
+    else
+      frame.companionFS:Hide()
+    end
   else
     frame.statusFS:Hide()
+    frame.companionFS:Hide()
   end
 
   frame:Show()

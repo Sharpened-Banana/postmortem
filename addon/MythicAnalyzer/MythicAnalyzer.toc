@@ -12,6 +12,7 @@ Info.lua
 CombatLogging.lua
 Tracker.lua
 Overlay.lua
+InfoWindow.lua
 Interrupts.lua
 RouteImport.lua
 MinimapButton.lua

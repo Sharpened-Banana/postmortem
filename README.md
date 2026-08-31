@@ -81,6 +81,9 @@ in-game:
   resolve *which* pack you pulled, only how many enemies and which pull
   number.
 
+Click the minimap icon (or run `/ma`) to open an in-game window laying out
+exactly what's live in the addon vs. what needs the companion app.
+
 No settings UI yet; toggle `combatLoggingEnabled` in
 `MythicAnalyzerDB.global` directly if you want to disable the recording
 helper. There's no automated test suite for this half of the project (WoW's
