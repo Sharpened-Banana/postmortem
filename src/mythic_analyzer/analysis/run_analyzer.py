@@ -9,6 +9,7 @@ from ..mdt.dungeon_data import DungeonData, DungeonDataStore
 from ..mdt.route import Route
 from .avoidable import AvoidableData
 from .compare import compare_route
+from .interruptibility import InterruptibilityData
 from .mapping import build_map_report
 from .pulls import detect_pulls
 from .stats import compute_stats
@@ -173,6 +174,7 @@ def analyze_run(
     route: Optional[Route] = None,
     store: Optional[DungeonDataStore] = None,
     avoidable: Optional[AvoidableData] = None,
+    interrupt_data: Optional[InterruptibilityData] = None,
     pull_gap_seconds: float = 5.0,
     full_cast_timeline: bool = True,
     death_penalty_s: float = 15.0,
