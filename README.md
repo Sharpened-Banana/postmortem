@@ -33,6 +33,12 @@ mythic-analyzer analyze "path/to/Logs/WoWCombatLog.txt" \
     --route route.txt --dungeon-data mdt_data.json \
     --format text,html,json --out reports/
 
+# optional: pull the addon's self-built interruptible/uninterruptible spell
+# database out of its SavedVariables, then pass it to `analyze` for exact
+# kick-efficiency accounting (see "Kick efficiency" below)
+mythic-analyzer extract-interrupts "WTF/Account/<ACCOUNT>/SavedVariables/MythicAnalyzer.lua" -o interrupt_data.json
+mythic-analyzer analyze ... --interrupt-data interrupt_data.json
+
 # ...or record live while you play (saves each run to its own file and
 # auto-analyzes the moment the key ends)
 mythic-analyzer record "path/to/Logs/WoWCombatLog.txt" \
@@ -119,7 +125,12 @@ in-game testing.
   per-cast timeline is included in the JSON report.
 - **Kick efficiency** — every enemy hard-cast is tracked from
   `SPELL_CAST_START` to its outcome: kicked, got through, or died
-  mid-cast; per-spell table plus an overall efficiency percentage.
+  mid-cast; per-spell table plus an overall efficiency percentage. With
+  `--interrupt-data` (the addon's self-built database, via
+  `extract-interrupts`), spells confirmed genuinely uninterruptible are
+  excluded outright instead of looking like missed kicks, and confirmed-
+  interruptible spells count toward efficiency even if never kicked this
+  run; without it, falls back to counting only spells kicked at least once.
 - **Boss attempts** — encounter table with kills, wipes and durations.
 - **Per-player extras** — killing blows, casts per minute, purges vs.
   dispels, boss-damage share, potions/healthstones used, approximate
