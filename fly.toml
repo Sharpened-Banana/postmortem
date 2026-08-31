@@ -4,12 +4,7 @@
 # this WP's scope). Review every value below before deploying; see
 # site/README.md for the full deploy runbook.
 
-# Fly app names are globally unique across ALL Fly.io accounts, not just
-# yours -- "postmortem" is very likely already taken. Change this to
-# whatever's actually available for your account before running
-# `fly launch` / `fly deploy` (flyctl will also complain loudly if it
-# isn't free).
-app = "postmortem"
+app = "postmortem-mplus"
 
 # Placeholder -- pick whatever region your account/other Fly apps already
 # use (`fly platform regions` lists all of them). "iad" (Ashburn,

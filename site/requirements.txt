@@ -7,3 +7,4 @@
 # pip-installable from this requirements.txt alone.
 fastapi>=0.110
 uvicorn[standard]>=0.30
+python-multipart>=0.0.9

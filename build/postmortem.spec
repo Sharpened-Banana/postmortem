@@ -1,17 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller build spec for the Mythic Analyzer desktop app.
+"""PyInstaller build spec for the Postmortem desktop app.
 Run from the repo root (or anywhere -- paths below are resolved off
 ``SPECPATH``, which PyInstaller injects into this file's exec globals as
 the directory containing this .spec file): ``pyinstaller
-build/mythic-analyzer.spec``.
+build/postmortem.spec``.
 
-Assumes ``mythic_analyzer`` (with the ``desktop`` extra) and
+Assumes ``postmortem`` (with the ``desktop`` extra) and
 ``pyinstaller`` are already ``pip install``-ed into the current
 environment -- see .github/workflows/release-desktop.yml, which does
 exactly that before invoking this spec. That real install is what lets
-build/entry.py just ``import mythic_analyzer.desktop.app`` normally,
+build/entry.py just ``import postmortem.desktop.app`` normally,
 sidestepping the repo's src/-layout entirely (same reason the
-``mythic-analyzer`` and ``mythic-analyzer-desktop`` console scripts
+``postmortem`` and ``postmortem-desktop`` console scripts
 don't need any sys.path handling either).
 
 This single spec file targets both macOS and Windows CI runners (see the
@@ -30,21 +30,25 @@ shell/ assets below.
 import os
 import sys
 
-SPEC_DIR = os.path.dirname(os.path.abspath(SPECPATH))
+# SPECPATH is PyInstaller's own injected global for *the directory*
+# containing this .spec file (not the file's own path) -- confirmed by
+# running this spec for real: os.path.dirname(SPECPATH) landed one level
+# too high (the repo root) and couldn't find entry.py at all.
+SPEC_DIR = os.path.abspath(SPECPATH)
 REPO_ROOT = os.path.dirname(SPEC_DIR)
 
 entry_script = os.path.join(SPEC_DIR, "entry.py")
 
-# Destination side ('mythic_analyzer/desktop/shell') matters more than the
+# Destination side ('postmortem/desktop/shell') matters more than the
 # source side: once frozen, app.py's own
 # `Path(__file__).resolve().parent / "shell"` lookup resolves against
 # PyInstaller's synthetic __file__ for bundled pure-Python modules, which
 # preserves the dotted-package-derived directory structure
-# (mythic_analyzer/desktop/app.py) under sys._MEIPASS -- so the shell/
-# data files need to land at that same 'mythic_analyzer/desktop/shell'
+# (postmortem/desktop/app.py) under sys._MEIPASS -- so the shell/
+# data files need to land at that same 'postmortem/desktop/shell'
 # relative path for app.py to find them at runtime.
-shell_src = os.path.join(REPO_ROOT, "src", "mythic_analyzer", "desktop", "shell")
-shell_dst = os.path.join("mythic_analyzer", "desktop", "shell")
+shell_src = os.path.join(REPO_ROOT, "src", "postmortem", "desktop", "shell")
+shell_dst = os.path.join("postmortem", "desktop", "shell")
 
 a = Analysis(
     [entry_script],
@@ -65,7 +69,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="MythicAnalyzer",
+    name="Postmortem",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -89,7 +93,7 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="MythicAnalyzer",
+    name="Postmortem",
 )
 
 # macOS only: wrap the onedir COLLECT() output in a real .app bundle.
@@ -104,7 +108,7 @@ coll = COLLECT(
 if sys.platform == "darwin":
     app = BUNDLE(
         coll,
-        name="MythicAnalyzer.app",
+        name="Postmortem.app",
         icon=None,
-        bundle_identifier="com.mythicanalyzer.desktop",
+        bundle_identifier="com.postmortem.desktop",
     )

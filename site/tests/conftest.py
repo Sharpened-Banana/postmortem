@@ -95,5 +95,14 @@ def report(tmp_path) -> dict:
 
 
 @pytest.fixture()
+def raw_log_text() -> str:
+    """The main suite's synthetic-but-fully-valid WoWCombatLog.txt text,
+    for exercising POST /upload's own parse_file/segment_runs/analyze_run
+    pipeline directly -- unlike the `report` fixture above, which already
+    runs that pipeline and hands back the resulting dict."""
+    return _shared.build_run_log().text()
+
+
+@pytest.fixture()
 def client(site_db) -> TestClient:
     return TestClient(app)

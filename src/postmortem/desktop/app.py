@@ -30,7 +30,7 @@ import webview
 
 from .api import DesktopAPI
 
-APP_TITLE = "Mythic Analyzer"
+APP_TITLE = "Postmortem"
 DEFAULT_WIDTH = 1280
 DEFAULT_HEIGHT = 860
 MIN_SIZE = (900, 600)
@@ -38,7 +38,7 @@ BACKGROUND_COLOR = "#14161b"  # shell/style.css's --bg token
 
 #: Absolute path to the shell's index.html. ``Path(__file__).resolve()``
 #: is PyInstaller-safe: once frozen, this module lives inside the bundle
-#: at the same relative location the build/mythic-analyzer.spec's
+#: at the same relative location the build/postmortem.spec's
 #: ``datas`` entry copies shell/ next to, so this resolves correctly
 #: both in normal (non-frozen) execution and inside a PyInstaller
 #: bundle. Do not swap this for sys._MEIPASS handling -- that's only
@@ -52,7 +52,7 @@ def main() -> None:
     """Create the desktop window and block until it's closed.
 
     Usable both as this file's ``if __name__ == "__main__":`` entry and
-    as the ``mythic-analyzer-desktop`` console-script target (see
+    as the ``postmortem-desktop`` console-script target (see
     pyproject.toml's ``[project.scripts]``).
 
     Passing a plain absolute filesystem path (not a ``file://`` URI) as

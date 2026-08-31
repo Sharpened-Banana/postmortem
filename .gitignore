@@ -2,7 +2,7 @@ __pycache__/
 *.pyc
 *.egg-info/
 build/*
-!build/mythic-analyzer.spec
+!build/postmortem.spec
 !build/entry.py
 dist/
 .pytest_cache/
