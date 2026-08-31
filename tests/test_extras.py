@@ -576,6 +576,58 @@ class TestRaiderIOCliCache:
         assert len(calls) == first * 2  # bypassed the cache both times
 
 
+class TestRecorderWaitsForLogFile:
+    """Real UX gap (2026-08-31): WoW only creates the combat log once
+    logging is actually enabled -- with this project's own addon, that's
+    automatically at the start of the session's first key (see
+    CombatLogging.lua). Starting Watch Live *before* that (a completely
+    normal thing to do -- open the app, click Start, then go play) used
+    to crash immediately with FileNotFoundError instead of just waiting."""
+
+    def test_watch_waits_for_a_not_yet_existing_file_then_picks_it_up(self, tmp_path):
+        import threading
+        import time
+
+        log = tmp_path / "WoWCombatLog.txt"
+        assert not log.exists()
+        waited = threading.Event()
+        rec = Recorder(
+            log_path=log, out_dir=tmp_path / "runs", from_start=True,
+            poll_interval=0.05, echo=lambda s: None, on_waiting_for_log=waited.set,
+        )
+
+        def create_log_after_a_moment():
+            waited.wait(timeout=5.0)
+            time.sleep(0.05)
+            log.write_text(build_run_log().text(), encoding="utf-8")
+
+        threading.Thread(target=create_log_after_a_moment, daemon=True).start()
+        runs = rec.watch(stop_after_runs=1)
+
+        assert waited.is_set()
+        assert len(runs) == 1
+        assert runs[0].zone == "Murder Row"
+
+    def test_stopping_while_waiting_for_the_file_returns_cleanly(self, tmp_path):
+        import threading
+        import time
+
+        log = tmp_path / "WoWCombatLog.txt"
+        rec = Recorder(
+            log_path=log, out_dir=tmp_path / "runs",
+            poll_interval=0.05, echo=lambda s: None,
+        )
+
+        def stop_after_a_moment():
+            time.sleep(0.1)
+            rec.request_stop()
+
+        threading.Thread(target=stop_after_a_moment, daemon=True).start()
+        runs = rec.watch()  # must return, not hang/raise, and never see the file
+        assert runs == []
+        assert not log.exists()
+
+
 class TestRecorderHooks:
     def test_hooks_fire_with_env(self, tmp_path):
         log = tmp_path / "WoWCombatLog.txt"
