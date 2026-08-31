@@ -1,4 +1,4 @@
-"""Black-box tests for the mythic_site FastAPI service, via TestClient
+"""Black-box tests for the postmortem_site FastAPI service, via TestClient
 (no live server involved).
 """
 
@@ -6,10 +6,10 @@ from __future__ import annotations
 
 import copy
 
-from mythic_analyzer.history.store import query_runs as store_query_runs
+from postmortem.history.store import query_runs as store_query_runs
 
-from mythic_site import config as site_config
-from mythic_site import db as site_db_module
+from postmortem_site import config as site_config
+from postmortem_site import db as site_db_module
 
 TOKEN_X = "token-x-0123456789abcdef"
 TOKEN_Y = "token-y-fedcba9876543210"

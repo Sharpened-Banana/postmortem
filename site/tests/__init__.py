@@ -12,7 +12,7 @@ sys.modules["conftest"] ends up pointing to "wins", silently breaking
 Giving this directory an __init__.py makes pytest import its conftest.py
 (and test_api.py) under the dotted name `tests.conftest` instead of the
 bare `conftest`, since it walks up to `site/` (which deliberately has no
-__init__.py of its own -- see mythic_site/__init__.py's docstring for
+__init__.py of its own -- see postmortem_site/__init__.py's docstring for
 why) and uses that as the insertion/base point. That dotted name doesn't
 collide with anything: the top-level `tests/` directory is never
 registered as a package itself (it also has no __init__.py), so nothing

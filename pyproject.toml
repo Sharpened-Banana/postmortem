@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mythic-analyzer"
+name = "postmortem"
 version = "0.1.0"
 description = "Mythic+ route post-mortem companion: import MDT routes, parse WoWCombatLog.txt, and compare plan vs. reality"
 readme = "README.md"
@@ -17,7 +17,7 @@ classifiers = [
 ]
 
 [project.scripts]
-mythic-analyzer = "mythic_analyzer.cli:main"
+postmortem = "postmortem.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
