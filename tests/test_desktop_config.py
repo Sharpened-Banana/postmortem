@@ -1,23 +1,23 @@
-"""Desktop app settings persistence (mythic_analyzer.desktop.config)."""
+"""Desktop app settings persistence (postmortem.desktop.config)."""
 
 from __future__ import annotations
 
 import pytest
 
-from mythic_analyzer.desktop import config
+from postmortem.desktop import config
 
 
 @pytest.fixture()
 def isolated_config_dir(tmp_path, monkeypatch):
     """A config dir under tmp_path, with config.config_dir() patched to
     return it -- never touches the real user's home directory."""
-    fake_dir = tmp_path / "mythic-analyzer-config"
+    fake_dir = tmp_path / "postmortem-config"
     monkeypatch.setattr(config, "config_dir", lambda: fake_dir)
     return fake_dir
 
 
 # Per-OS config_dir() resolution is now covered by tests/test_appdirs.py --
-# config_dir()/APP_DIR_NAME moved to mythic_analyzer.appdirs (this module
+# config_dir()/APP_DIR_NAME moved to postmortem.appdirs (this module
 # just re-exports them), so testing the resolution logic itself belongs
 # there, not here.
 
@@ -37,7 +37,7 @@ class TestLoadSaveRoundTrip:
             "avoidable_data_path": None,
             "default_output_dir": "/reports",
             "history_db_path": "/reports/runs.db",
-            "site_url": "https://mythic-analyzer.fly.dev",
+            "site_url": "https://postmortem.fly.dev",
         }
         config.save_settings(settings)
         assert config.load_settings() == settings
