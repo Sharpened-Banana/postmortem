@@ -20,8 +20,9 @@ classifiers = [
 postmortem = "postmortem.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "pyinstaller>=6.0"]
 site = ["fastapi>=0.110", "uvicorn[standard]>=0.30"]
+desktop = ["pywebview>=6.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
