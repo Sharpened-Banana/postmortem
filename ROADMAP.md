@@ -19,8 +19,14 @@ Next steps:
       reports folder, so the page live-updates during a play session
 - [ ] Optional SQLite store instead of scanning JSON files, enabling
       cross-run queries ("all wipes on boss X", "kick efficiency trend")
-- [ ] A hosted variant (upload reports, share links with the group);
-      needs auth and storage — static index stays the default
+- [x] A hosted variant (upload reports, share links with the group) —
+      `site/` is a FastAPI service with SQLite storage, deployable to
+      Fly.io (`site/README.md` has the runbook). Reads are fully public;
+      there's no account system, just a self-issued `X-Upload-Token`
+      that lets an uploader update their own run later without letting
+      anyone else overwrite it. Static index stays the default for local
+      use — `mythic-analyzer analyze --upload <url>` opts in to the
+      hosted variant per run.
 
 ## Raider.io integration
 
