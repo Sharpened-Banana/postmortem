@@ -1,0 +1,10 @@
+## Interface: 120100
+## Title: Mythic-Analyzer
+## Author: lonezebra
+## Version: 0.1.0
+## Notes: Live companion to the Mythic-Analyzer post-mortem tool -- recording helper, live stats, route tracking.
+## SavedVariables: MythicAnalyzerDB
+## LoadSavedVariablesFirst: 1
+
+Bootstrap.lua
+CombatLogging.lua
