@@ -30,7 +30,11 @@ shell/ assets below.
 import os
 import sys
 
-SPEC_DIR = os.path.dirname(os.path.abspath(SPECPATH))
+# SPECPATH is PyInstaller's own injected global for *the directory*
+# containing this .spec file (not the file's own path) -- confirmed by
+# running this spec for real: os.path.dirname(SPECPATH) landed one level
+# too high (the repo root) and couldn't find entry.py at all.
+SPEC_DIR = os.path.abspath(SPECPATH)
 REPO_ROOT = os.path.dirname(SPEC_DIR)
 
 entry_script = os.path.join(SPEC_DIR, "entry.py")
