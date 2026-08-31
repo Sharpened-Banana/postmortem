@@ -9,15 +9,15 @@ import pytest
 
 from conftest import build_run_log
 
-from mythic_analyzer.cli import main
-from mythic_analyzer.raiderio import (
+from postmortem.cli import main
+from postmortem.raiderio import (
     enrich_report,
     match_run,
     parse_recent_runs,
     realm_slug,
 )
-from mythic_analyzer.recorder import Recorder
-from mythic_analyzer.report.index import build_index, collect_reports, render_index
+from postmortem.recorder import Recorder
+from postmortem.report.index import build_index, collect_reports, render_index
 
 NODE = shutil.which("node")
 
@@ -532,10 +532,10 @@ class TestRunMatching:
 class TestRaiderIOCliCache:
     """WP-C1: the CLI wraps the real fetcher in an on-disk cache by
     default, and --raiderio-no-cache bypasses it. These monkeypatch
-    mythic_analyzer.raiderio._default_fetcher (cmd_analyze imports it
+    postmortem.raiderio._default_fetcher (cmd_analyze imports it
     fresh from the module each call) so no real network traffic happens,
     and point MYTHIC_ANALYZER_CACHE at a tmp_path so the real
-    ~/.cache/mythic-analyzer is never touched."""
+    ~/.cache/postmortem is never touched."""
 
     def _counting_fetcher(self, calls):
         def fake(url):
@@ -547,7 +547,7 @@ class TestRaiderIOCliCache:
                                                      monkeypatch):
         monkeypatch.setenv("MYTHIC_ANALYZER_CACHE", str(tmp_path / "cache-home"))
         calls = []
-        monkeypatch.setattr("mythic_analyzer.raiderio._default_fetcher",
+        monkeypatch.setattr("postmortem.raiderio._default_fetcher",
                              self._counting_fetcher(calls))
 
         assert main(["analyze", str(log_file), "--raiderio", "us",
@@ -563,7 +563,7 @@ class TestRaiderIOCliCache:
                                                   monkeypatch):
         monkeypatch.setenv("MYTHIC_ANALYZER_CACHE", str(tmp_path / "cache-home"))
         calls = []
-        monkeypatch.setattr("mythic_analyzer.raiderio._default_fetcher",
+        monkeypatch.setattr("postmortem.raiderio._default_fetcher",
                              self._counting_fetcher(calls))
 
         assert main(["analyze", str(log_file), "--raiderio", "us",

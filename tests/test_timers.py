@@ -15,19 +15,19 @@ import json
 import pytest
 from conftest import build_run_log
 
-from mythic_analyzer.analysis.run_analyzer import analyze_run
-from mythic_analyzer.cli import main
-from mythic_analyzer.combatlog.parser import iter_events
-from mythic_analyzer.combatlog.segmenter import segment_runs
-from mythic_analyzer.raiderio import (
+from postmortem.analysis.run_analyzer import analyze_run
+from postmortem.cli import main
+from postmortem.combatlog.parser import iter_events
+from postmortem.combatlog.segmenter import segment_runs
+from postmortem.raiderio import (
     fetch_static_data,
     load_fallback_timers,
     parse_static_timers,
     resolve_timer_map,
     static_data_url,
 )
-from mythic_analyzer.report.html import render_html
-from mythic_analyzer.report.text import render_text
+from postmortem.report.html import render_html
+from postmortem.report.text import render_text
 
 
 @pytest.fixture()
@@ -320,7 +320,7 @@ class TestTimerCLI:
     ):
         monkeypatch.setenv("MYTHIC_ANALYZER_CACHE", str(tmp_path / "cache-home"))
         # character-profile lookups fail; irrelevant to this test
-        monkeypatch.setattr("mythic_analyzer.raiderio._default_fetcher",
+        monkeypatch.setattr("postmortem.raiderio._default_fetcher",
                             lambda url: None)
         assert main(["analyze", str(log_file), "--raiderio", "us",
                      "--format", "json"]) == 0
@@ -339,7 +339,7 @@ class TestTimerCLI:
                 return {"dungeons": [{"id": 587, "par_time_ms": 42000}]}
             return None  # character profile lookups: irrelevant here
 
-        monkeypatch.setattr("mythic_analyzer.raiderio._default_fetcher", fake_fetcher)
+        monkeypatch.setattr("postmortem.raiderio._default_fetcher", fake_fetcher)
         assert main(["analyze", str(log_file), "--raiderio", "us",
                      "--expansion-id", "5", "--format", "json"]) == 0
         out = json.loads(capsys.readouterr().out)

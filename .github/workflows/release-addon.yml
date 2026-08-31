@@ -1,0 +1,41 @@
+name: Package and release WoW addon
+
+# Fires on any tag push (e.g. `git tag v0.1.0 && git push --tags`) -- the
+# packager uses the tag name as the addon's release version. Only the
+# addon/Postmortem/ subtree is ever packaged (see .pkgmeta at the repo
+# root); the Python tool living alongside it in this monorepo is untouched.
+on:
+  push:
+    tags:
+      - '**'
+
+# The auto-provided GITHUB_TOKEN needs write access to create a GitHub
+# Release for the packaged zip -- verified against the BigWigs packager's
+# own documented GitHub Actions example.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone project
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history: the packager reads git tags for changelog generation
+
+      - name: Package and release
+        uses: BigWigsMods/packager@v2
+        env:
+          # Set these as repository secrets (Settings -> Secrets and
+          # variables -> Actions) for whichever site(s) you want to publish
+          # to. Any left unset are simply skipped -- see README's "Which
+          # files do I need to submit" / this repo's own README for where
+          # to get each token. CF_API_TOKEN: CurseForge, Settings -> API
+          # Tokens. WOWI_API_TOKEN: WoWInterface, downloads/filecpl.php ->
+          # API Tokens. WAGO_API_TOKEN: Wago Addons, developer dashboard ->
+          # API keys.
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          WOWI_API_TOKEN: ${{ secrets.WOWI_API_TOKEN }}
+          WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
+          GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
