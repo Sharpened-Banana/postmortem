@@ -81,6 +81,31 @@ class TestLogUpload:
         resp = client.post("/upload", files=_upload_file(raw_log_text))
         assert resp.status_code == 413
 
+    def test_a_run_over_the_per_run_event_cap_is_reported_not_crashed(
+        self, client, raw_log_text, monkeypatch,
+    ):
+        """Regression test for a real bug (2026-08-31, same day as the
+        MAX_LOG_BYTES cap itself): the first version of the per-run
+        memory-safety fix enforced MAX_LOG_BYTES against the whole raw
+        upload's total byte count -- which rejected perfectly safe
+        multi-key session logs just for having a large total size, even
+        though each individual run was well within the real memory
+        ceiling. The real fix caps each run independently, during
+        parsing (segment_runs()'s max_run_events, config.MAX_RUN_EVENTS),
+        so a batch with one oversized run still succeeds overall --
+        that one run is reported as a failed/skipped run, not a crash or
+        an outright rejection of the whole upload."""
+        from postmortem_site import config as site_config
+
+        monkeypatch.setattr(site_config, "MAX_RUN_EVENTS", 3)
+        resp = client.post("/upload", files=_upload_file(raw_log_text))
+        assert resp.status_code == 200
+        assert "database is locked" not in resp.text.lower()
+        assert "too long" in resp.text.lower()
+
+        feed = client.get("/api/runs").json()
+        assert feed == []
+
     def test_raw_log_is_not_persisted_after_the_request(self, client, raw_log_text):
         import glob
         import tempfile

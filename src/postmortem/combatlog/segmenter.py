@@ -20,6 +20,7 @@ class RunSegment:
     success: Optional[bool] = None
     duration_ms: Optional[int] = None  # in-game timer from CHALLENGE_MODE_END
     completed: bool = False
+    truncated: bool = False
     events: list[Event] = field(default_factory=list)
 
     @property
@@ -55,14 +56,34 @@ def _parse_bracket_ints(value: str) -> list[int]:
     return out
 
 
-def segment_runs(events: Iterable[Event]) -> Iterator[RunSegment]:
+def segment_runs(
+    events: Iterable[Event], max_run_events: Optional[int] = None,
+) -> Iterator[RunSegment]:
     """Yield RunSegments for every M+ run found in the event stream.
 
     A run without a CHALLENGE_MODE_END (crash, log ended, key abandoned)
     is still yielded, marked ``completed=False``.
+
+    ``max_run_events``, when given, caps how many events a single run
+    accumulates before it's yielded early (marked ``truncated=True``,
+    ``completed=False``) and the rest of that run's events are dropped
+    until the next CHALLENGE_MODE_START -- exactly like an abandoned run
+    otherwise, just cut off by size instead of by a missing END. Default
+    None preserves the original unbounded behavior for every existing
+    caller (CLI, desktop app) -- this exists for postmortem_site's
+    upload path, which has a real per-run memory ceiling a local CLI/
+    desktop run never needs (see config.py's MAX_RUN_EVENTS comment).
     """
     current: Optional[RunSegment] = None
     for event in events:
+        if (
+            max_run_events is not None
+            and current is not None
+            and len(current.events) >= max_run_events
+        ):
+            current.truncated = True
+            yield current
+            current = None
         if event.name == "CHALLENGE_MODE_START":
             p = event.params
             new_run = RunSegment(

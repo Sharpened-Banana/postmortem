@@ -436,10 +436,14 @@ the ability to update that run, but it stays visible either way.</p>
 <h2 style="font-size:14px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);margin:32px 0 10px;">Notes</h2>
 <p>Uploads are rate-limited per token and per IP. Analyzed reports
 (<code>/api/runs</code>) are capped at 5MB; raw combat logs
-(<code>/upload</code>) at 200MB per upload — a log with several separate
-keys in it is fine well under that; one extremely long single
-continuous key can still hit it, since memory cost scales with the
-largest individual run, not the whole file. A raw log is only used to compute the
+(<code>/upload</code>) at 500MB per upload — a sanity limit on the whole
+request, not a memory one, so a log with several separate keys in it,
+even a full evening's worth, is fine well under that. The real per-run
+limit is separate: any single extremely long continuous key is
+analyzed up to a size that's safe to hold in memory, and reported as a
+failed run (with the rest of the log's keys still processed normally)
+if it goes over — the desktop app/CLI has no such limit for that
+specific key. A raw log is only used to compute the
 report — it's discarded immediately after, never stored.
 Reports are shown exactly as uploaded — this site does no additional
 verification of the underlying combat log.</p>
@@ -804,7 +808,13 @@ def _handle_log_upload(
         # 2.5GB peak RSS on just the first couple of runs. The manual
         # next() loop is what actually keeps peak memory bounded to one
         # run at a time, verified the same way after this fix).
-        segment_iter = segment_runs(parse_file(log_path))
+        #
+        # max_run_events=config.MAX_RUN_EVENTS is the real per-run
+        # memory-safety cap (see config.py's own comment) -- a single
+        # CONTINUOUS run gets cut off and yielded truncated=True instead
+        # of accumulating unboundedly, independent of config.MAX_LOG_BYTES
+        # (which only bounds the raw upload's total size).
+        segment_iter = segment_runs(parse_file(log_path), max_run_events=config.MAX_RUN_EVENTS)
         results = []
         seen_any_completed = False
         while True:
@@ -814,6 +824,23 @@ def _handle_log_upload(
                 break
             except Exception:
                 return 400, {"error": "could not read this as a WoWCombatLog.txt file"}
+
+            if segment.truncated:
+                # A single run that hit MAX_RUN_EVENTS -- see
+                # segment_runs()/config.py's comments. Reported like any
+                # other failed run rather than silently dropped, so the
+                # uploader knows this specific key needs the desktop
+                # app/CLI instead of just seeing it vanish from the list.
+                results.append({
+                    "ok": False,
+                    "error": "this run was too long to analyze on the "
+                             "website (a single very long continuous key) "
+                             "-- the desktop app or CLI can analyze this "
+                             "exact file locally with no size limit",
+                    "zone": segment.zone_name,
+                })
+                segment.events = []
+                continue
 
             if not segment.completed:
                 continue
@@ -858,7 +885,12 @@ def _handle_log_upload(
             # rather than losing the whole batch to one bad run.
             conn.commit()
 
-        if not seen_any_completed:
+        if not seen_any_completed and not results:
+            # `results` can be non-empty here even with seen_any_completed
+            # still False -- e.g. a log with exactly one run, and that run
+            # got truncated (too large) rather than genuinely completed.
+            # That's a real result worth showing (see the segment.truncated
+            # branch above), not the generic "nothing found" message.
             return 200, {
                 "ok": True,
                 "runs": [],
@@ -1019,14 +1051,15 @@ async def upload_log(
             cap_mb = config.MAX_LOG_BYTES // (1024 * 1024)
             return HTMLResponse(
                 _render_upload_result(413, {
-                    "error": f"that file is over the {cap_mb}MB limit. A log with "
-                             "several separate keys in it is fine well under this "
-                             "limit -- each one is handled independently. If it's "
-                             "still too big, either one single key ran unusually "
-                             "long, or WoW kept appending to one combat log across "
-                             "a long play session; restarting WoW starts a fresh log "
-                             "file, or the desktop app/CLI can analyze this exact "
-                             "file locally with no size limit at all.",
+                    "error": f"that file is over the {cap_mb}MB limit for a single "
+                             "upload. A log with several separate keys in it, even "
+                             "a full evening's worth, is fine well under this -- "
+                             "each key is handled and sized independently, so this "
+                             "limit is really just a sanity check on the whole "
+                             "request. If a single upload is genuinely over "
+                             f"{cap_mb}MB, restarting WoW starts a fresh log file, "
+                             "or the desktop app/CLI can analyze this exact file "
+                             "locally with no size limit at all.",
                 }),
                 status_code=413,
             )
