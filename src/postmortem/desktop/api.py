@@ -234,8 +234,8 @@ class DesktopAPI:
     def upload_report(self, report: dict, url: Optional[str] = None) -> dict:
         """Upload an already-analyzed ``report`` (as returned by
         ``analyze()``'s own ``"report"`` field) to a public
-        mythic-analyzer tracker site (see ``site/mythic_site/`` and
-        ``mythic_analyzer.upload``).
+        postmortem tracker site (see ``site/postmortem_site/`` and
+        ``postmortem.upload``).
 
         ``url`` defaults to the saved ``site_url`` setting when not
         given explicitly. Returns ``{"ok": False, "error": "no site URL
