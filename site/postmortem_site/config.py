@@ -36,22 +36,29 @@ DUNGEON_DATA_PATH = os.environ.get(
 # app.py's POST /api/runs handler checks this itself.
 MAX_BODY_BYTES = int(os.environ.get("MYTHIC_SITE_MAX_BODY_BYTES", 5 * 1024 * 1024))
 
-# Raw-combat-log upload cap, in bytes, for POST /upload (a whole
-# WoWCombatLog.txt, not an analyzed report -- much bigger than
-# MAX_BODY_BYTES since WoW appends to one ever-growing file across an
-# entire play session -- or longer, if the client never restarts -- not
-# just one key). 60MB (the original v1 value) turned out too small
-# almost immediately in real testing; raised to 250MB once
-# upload_log()'s chunked streaming write and _handle_log_upload()'s
-# non-materializing parse_file->segment_runs pipeline made a larger cap
-# actually memory-safe on this service's 512MB VM (peak memory is
-# bounded by one *run's* worth of events at a time, not the whole file,
-# regardless of how many runs/how much unrelated non-M+ logging the file
-# also contains) -- and that turned out to still be too small in real
-# testing too. Raised again to 1GB; the memory-safety reasoning is the
-# same at any file size, since it was never about the file's total size
-# to begin with.
-MAX_LOG_BYTES = int(os.environ.get("MYTHIC_SITE_MAX_LOG_BYTES", 1024 * 1024 * 1024))
+# Raw-combat-log upload cap, in bytes, for POST /upload. History: 60MB
+# (v1) -> 250MB -> 1GB, each raise justified by "peak memory is bounded
+# by one run's worth of events at a time, not the whole file" -- true,
+# but incomplete: that reasoning caps memory *per run*, not the memory
+# one run itself can need. A real production OOM crash on a real user's
+# upload (with the 1GB cap live) traced this back with tracemalloc: a
+# single CONTINUOUS run's raw text costs roughly 6-9x its own byte size
+# in Python memory just to hold as parsed Event objects (measured, not
+# estimated -- a 74MB single run took 458MB to parse, 655MB peak RSS
+# end to end). So the real constraint was never the *file's* total size,
+# it's the size of whichever single run in it is largest -- which the
+# server can't know in advance without parsing the whole thing.
+#
+# fly.toml's VM memory was raised 512MB -> 2GB for exactly this (see its
+# own comment for the full reasoning). This cap is set to what that 2GB
+# budget can safely absorb even in the worst case -- the *entire*
+# upload turning out to be one continuous run -- with real headroom for
+# baseline process overhead (Python/uvicorn/FastAPI/SQLite) and the
+# json.dumps()/DB-write steps that follow parsing. A file with several
+# separate keys is safe well beyond this (each run's memory is
+# independently bounded -- see _handle_log_upload's per-run streaming
+# loop), so this number is a worst-case floor, not a typical-case one.
+MAX_LOG_BYTES = int(os.environ.get("MYTHIC_SITE_MAX_LOG_BYTES", 200 * 1024 * 1024))
 
 # Rate-limit window (seconds) between two uploads from the same
 # X-Upload-Token -- the primary anti-spam guard.

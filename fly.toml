@@ -47,8 +47,24 @@ primary_region = "iad"
 # without moving off SQLite first. See site/README.md's deploy runbook
 # step on `fly scale count 1` for why this needs enforcing explicitly
 # even with min_machines_running = 0 above.
+#
+# memory = "2gb" (raised from the original "512mb" 2026-08-31, a real
+# production incident): parsing a raw combat log into Event objects
+# costs roughly 6-9x the raw file's byte size in Python memory (measured
+# directly with tracemalloc against a real synthetic log, not estimated
+# -- a 74MB single continuous run took 458MB just to hold as parsed
+# events, 655MB peak RSS end to end). 512MB could only ever safely
+# handle a single run of roughly 50-60MB; 2GB moves that ceiling to
+# roughly 150-200MB per single run (see config.py's MAX_LOG_BYTES
+# comment for the exact reasoning) -- comfortably enough for the much
+# more common case of several separate keys in one upload (each run's
+# memory is independently bounded, see app.py's _handle_log_upload), but
+# NOT enough to guarantee an arbitrarily large *single* continuous run.
+# There is no VM size that makes "arbitrarily large single run, still
+# safe" true without changing how combat logs are parsed and held in
+# memory -- this is a real, current ceiling, not a placeholder.
 [[vm]]
-  memory = "512mb"
+  memory = "2gb"
   cpu_kind = "shared"
   cpus = 1
 
