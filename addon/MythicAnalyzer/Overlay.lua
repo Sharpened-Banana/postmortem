@@ -56,7 +56,10 @@ local function CreateOverlayFrame()
   -- non-AceGUI frame elsewhere in MDT), confirming BackdropTemplate is used
   -- outside AceGUI's own internals too.
   local f = CreateFrame("Frame", "MythicAnalyzerOverlay", UIParent, "BackdropTemplate")
-  f:SetSize(220, 92)
+  -- Grown from the original 92 to fit the two new rows added below
+  -- (interrupts, always shown; pull progress, shown only when a route is
+  -- loaded -- see MA:Overlay_Refresh()).
+  f:SetSize(220, 136)
   f:SetFrameStrata("MEDIUM")
   f:SetClampedToScreen(true)
 
@@ -109,9 +112,23 @@ local function CreateOverlayFrame()
   deathsFS:SetFontObject(GameFontHighlightSmall)
   deathsFS:SetPoint("TOP", timerFS, "BOTTOM", 0, -10)
 
+  -- WP-3 additions: interrupt count (always shown once a key is active)
+  -- and pull progress (shown only when Interrupts.lua/RouteImport.lua found
+  -- an MDT route to compare against -- see MA:Overlay_Refresh() below).
+  -- Same FontString-row layout pattern as the three rows above.
+  local interruptsFS = f:CreateFontString(nil, "OVERLAY")
+  interruptsFS:SetFontObject(GameFontHighlightSmall)
+  interruptsFS:SetPoint("TOP", deathsFS, "BOTTOM", 0, -10)
+
+  local pullFS = f:CreateFontString(nil, "OVERLAY")
+  pullFS:SetFontObject(GameFontHighlightSmall)
+  pullFS:SetPoint("TOP", interruptsFS, "BOTTOM", 0, -10)
+
   f.forcesFS = forcesFS
   f.timerFS = timerFS
   f.deathsFS = deathsFS
+  f.interruptsFS = interruptsFS
+  f.pullFS = pullFS
 
   -- Restore the saved position (defaulted in Bootstrap.lua's
   -- defaults.global.overlayPosition) rather than whatever anchor
@@ -154,6 +171,21 @@ function MA:Overlay_Refresh()
     frame.deathsFS:SetText(string.format("Deaths: %d  (-%s)", deaths, FormatElapsed(timeLost)))
   else
     frame.deathsFS:SetText(string.format("Deaths: %d", deaths))
+  end
+
+  local interrupts = state.interrupts or {}
+  frame.interruptsFS:SetText(string.format("Interrupts: %d", interrupts.total or 0))
+
+  -- Only shown when RouteImport.lua actually found an MDT route to compare
+  -- against -- no route means nothing to show, not "Pull ? / ?".
+  local route = state.route
+  if route and route.plannedPulls then
+    frame.pullFS:SetText(string.format(
+      "Pull %d / %d", route.currentPullIndex or 1, #route.plannedPulls
+    ))
+    frame.pullFS:Show()
+  else
+    frame.pullFS:Hide()
   end
 
   frame:Show()
