@@ -40,10 +40,16 @@ postmortem extract-interrupts "WTF/Account/<ACCOUNT>/SavedVariables/Postmortem.l
 postmortem analyze ... --interrupt-data interrupt_data.json
 
 # ...or record live while you play (saves each run to its own file and
-# auto-analyzes the moment the key ends)
+# auto-analyzes the moment the key ends; add --upload to also post each
+# run to a public tracker automatically, with no per-run command)
 postmortem record "path/to/Logs/WoWCombatLog.txt" \
-    --route route.txt --dungeon-data mdt_data.json --analyze --out runs/
+    --route route.txt --dungeon-data mdt_data.json --analyze --out runs/ \
+    --upload https://your-tracker.example
 ```
+
+Prefer a GUI over the terminal? See [Desktop app](#desktop-app) below —
+its "Watch Live" mode does the same auto-analyze-and-upload thing with a
+single button instead of a long-running command.
 
 `postmortem runs <log>` lists every M+ run found in a log so you can
 pick one with `analyze --run N` (default: the last run).
@@ -96,6 +102,36 @@ helper. There's no automated test suite for this half of the project (WoW's
 Lua API isn't something `pytest` can exercise) — correctness here leans on
 grounding every API call in real, currently-shipping addon behavior and on
 in-game testing.
+
+## Desktop app
+
+A pywebview GUI over the same analysis pipeline, for anyone who'd rather
+not touch a terminal at all — pick a log with a native file dialog, click
+a button, read the report in-app.
+
+```bash
+pip install -e ".[desktop]"
+postmortem-desktop          # or: python -m postmortem.desktop
+```
+
+Four screens: **New Analysis** (one-off, same options as `analyze`),
+**Watch Live**, **History**, and **Settings** (where every path/URL below
+is saved once and reused).
+
+**Watch Live** is the no-terminal equivalent of `record --analyze
+--upload`: point it at your live `WoWCombatLog.txt`, click *Start
+watching*, and leave it running while you play — every completed key is
+analyzed and automatically posted to your configured tracker site the
+moment it ends, with a live activity log of what happened (run detected →
+analyzed → uploaded, or exactly what failed and why). *Stop watching*
+ends the session; closing the app does too.
+
+To build a standalone binary (no Python install needed on the target
+machine): `pip install -e ".[dev,desktop]"` then `pyinstaller
+build/postmortem.spec` — produces a double-clickable `.app` (macOS) or a
+`.exe` folder (Windows, run from whichever OS you're building for;
+PyInstaller doesn't cross-compile). `.github/workflows/release-desktop.yml`
+does this in CI for both platforms on every tag push.
 
 ## What you get
 
@@ -214,6 +250,13 @@ deployed instance to upload automatically:
 ```bash
 postmortem analyze "path/to/Logs/WoWCombatLog.txt" --upload https://your-tracker.example
 ```
+
+The site also takes a raw `WoWCombatLog.txt` directly at `<site
+url>/upload` — a plain file picker in the browser, no install of
+anything at all. Every completed key in the file is analyzed
+server-side and posted automatically; this is the same analysis
+pipeline (`combatlog`/`analysis`), just running on the server instead of
+locally.
 
 See [site/README.md](site/README.md) for local development and the
 Fly.io deploy runbook.

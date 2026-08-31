@@ -18,6 +18,11 @@ classifiers = [
 
 [project.scripts]
 postmortem = "postmortem.cli:main"
+# Registered unconditionally (setuptools has no "only with this extra"
+# concept for entry points) -- calling it without `pip install
+# ".[desktop]"` first fails with a clear ImportError on `webview`,
+# same as any other optional-dependency console script.
+postmortem-desktop = "postmortem.desktop.app:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "pyinstaller>=6.0"]

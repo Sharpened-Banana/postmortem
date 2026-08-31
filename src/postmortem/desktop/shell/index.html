@@ -19,6 +19,7 @@
     <nav class="topnav">
       <button type="button" class="navbtn" data-screen="home">Home</button>
       <button type="button" class="navbtn" data-screen="new">New Analysis</button>
+      <button type="button" class="navbtn" data-screen="watch">Watch Live</button>
       <button type="button" class="navbtn" data-screen="history">History</button>
       <button type="button" class="navbtn" data-screen="settings">Settings</button>
     </nav>
@@ -45,6 +46,12 @@
           <h3>New Analysis</h3>
           <p>Pick a combat log, choose a run, and get a full post-mortem: pulls, deaths, route adherence, kick efficiency, and more.</p>
           <button type="button" class="btn btn-primary btn-block" data-nav="new">Start a new analysis</button>
+        </div>
+        <div class="card">
+          <div class="card-icon">👁</div>
+          <h3>Watch Live</h3>
+          <p>Leave this running while you play — every completed key is analyzed and uploaded automatically, no further clicks.</p>
+          <button type="button" class="btn btn-block" data-nav="watch">Open Watch Live</button>
         </div>
         <div class="card">
           <div class="card-icon">📜</div>
@@ -162,6 +169,76 @@
       </div>
     </section>
 
+    <!-- ============================== WATCH LIVE ========================= -->
+    <section id="screen-watch" class="screen" hidden>
+      <div class="page-head">
+        <h1>Watch Live</h1>
+        <p class="sub">Leave this running while you play. Every completed Mythic+ key is analyzed and uploaded automatically — no clicks per run.</p>
+      </div>
+
+      <div class="content-max busy-wrap" id="watch-wrap">
+        <div class="banner banner-error" id="watch-error-banner" hidden></div>
+        <div class="banner banner-hint" id="watch-no-site-hint" hidden>
+          <span>💡</span>
+          <span>No public tracker site URL is set, so Watch Live has nowhere to upload to. Set one in <strong>Settings</strong> first.</span>
+        </div>
+
+        <fieldset id="watch-setup-fields">
+          <legend>1. Combat log</legend>
+          <div class="field">
+            <label>Combat log file</label>
+            <div class="field-row">
+              <input type="text" id="watch-log-path" class="log-path-display" readonly placeholder="No file selected">
+              <button type="button" class="btn" id="watch-pick-log-btn">Choose file…</button>
+            </div>
+            <div class="help">Set a default in Settings to have this pre-filled.</div>
+          </div>
+        </fieldset>
+
+        <fieldset id="watch-optional-fields">
+          <legend>2. Route &amp; dungeon data (optional)</legend>
+
+          <div class="field">
+            <label>MDT route</label>
+            <div class="field-row">
+              <textarea id="watch-route-text" placeholder="Paste an MDT export string here, or choose a file…"></textarea>
+            </div>
+            <div class="field-row" style="margin-top: 8px; justify-content: flex-end;">
+              <button type="button" class="btn btn-sm" id="watch-route-pick-btn">Choose route file…</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Dungeon data file</label>
+            <div class="field-row">
+              <input type="text" id="watch-dungeon-data-path" readonly placeholder="Not set">
+              <button type="button" class="btn" id="watch-dungeon-data-pick-btn">Choose file…</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Avoidable-damage data file</label>
+            <div class="field-row">
+              <input type="text" id="watch-avoidable-data-path" readonly placeholder="Not set">
+              <button type="button" class="btn" id="watch-avoidable-data-pick-btn">Choose file…</button>
+            </div>
+          </div>
+        </fieldset>
+
+        <div class="field-row">
+          <button type="button" class="btn btn-primary" id="watch-start-btn" disabled>▶ Start watching</button>
+          <button type="button" class="btn btn-secondary" id="watch-stop-btn" hidden>■ Stop watching</button>
+        </div>
+
+        <div class="watch-status" id="watch-status" hidden></div>
+
+        <div class="watch-log-wrap" id="watch-log-list-wrap" hidden>
+          <div class="watch-log-head">Activity</div>
+          <ul class="watch-log" id="watch-log-list"></ul>
+        </div>
+      </div>
+    </section>
+
     <!-- ============================== HISTORY ============================ -->
     <section id="screen-history" class="screen" hidden>
       <div class="page-head">
@@ -266,7 +343,16 @@
         <div class="field">
           <label>Public tracker site URL</label>
           <input type="text" id="set-site-url" placeholder="e.g. https://postmortem.fly.dev">
-          <div class="help">Where "Upload to site" on a report screen sends runs. Anyone can browse an uploaded run — see the site's own /about page for what "uploading" means.</div>
+          <div class="help">Where "Upload to site" on a report screen sends runs. Anyone can browse an uploaded run — see the site's own /about page for what "uploading" means. Also where Watch Live automatically uploads to.</div>
+        </div>
+
+        <div class="field">
+          <label>Combat log file (for Watch Live)</label>
+          <div class="field-row">
+            <input type="text" id="set-wow-log-path" placeholder="e.g. …/World of Warcraft/_retail_/Logs/WoWCombatLog.txt">
+            <button type="button" class="btn" id="set-wow-log-pick-btn">Choose file…</button>
+          </div>
+          <div class="help">Pre-fills Watch Live's log path so you don't have to pick it every session.</div>
         </div>
 
         <button type="button" class="btn btn-primary" id="set-save-btn">Save settings</button>

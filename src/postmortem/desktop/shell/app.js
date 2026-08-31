@@ -79,16 +79,19 @@ function setBusy(overlayEl, busy, message) {
 
 // -- screen routing -----------------------------------------------------
 
-const SCREEN_IDS = ["home", "new", "history", "settings", "report"];
+const SCREEN_IDS = ["home", "new", "watch", "history", "settings", "report"];
 
 // Ephemeral (error/success) banners a prior screen visit may have left
 // showing -- cleared on every navigation so a stale message from a
-// previous action doesn't linger into an unrelated screen. home-hint is
-// intentionally excluded: it's a persistent settings-driven hint, not a
-// one-off action result.
+// previous action doesn't linger into an unrelated screen. home-hint and
+// watch-no-site-hint are intentionally excluded: they're persistent
+// settings-driven hints, not one-off action results, and watch-status/
+// watch-log-list are excluded because watching should keep showing its
+// live state across navigation, not reset every time you leave the screen.
 const EPHEMERAL_BANNER_IDS = [
   "na-error-banner", "hist-error-banner",
   "set-error-banner", "set-success-banner", "extract-error-banner",
+  "watch-error-banner",
 ];
 
 function showScreen(name) {
@@ -119,6 +122,7 @@ function wireNav() {
 const state = {
   settings: null,
   lastReport: null, // the report dict behind the currently-shown report screen, if any -- stashed so "Upload to site" has something to send
+  watching: false, // mirrors the backend's watch-thread state, for UI purposes only
 };
 
 function defaultSettings() {
@@ -129,6 +133,7 @@ function defaultSettings() {
     default_output_dir: null,
     history_db_path: null,
     site_url: null,
+    wow_log_path: null,
   };
 }
 
@@ -367,6 +372,214 @@ async function onUploadToSite() {
 }
 
 // ===========================================================================
+// Watch Live
+// ===========================================================================
+//
+// start_watch()/stop_watch() run on a background thread in Python and
+// report progress via window.onWatchEvent(event) (called through
+// evaluate_js -- see api.py's start_watch docstring for the full set of
+// event shapes), not through a return value. state.watching mirrors the
+// backend's own watch-thread state for UI purposes only -- if the app is
+// closed and reopened, that state is gone (the watch thread was daemon
+// and died with the old process too), so there's nothing to restore on
+// boot.
+
+const wt = {};
+
+function initWatch() {
+  wt.errorBanner = document.getElementById("watch-error-banner");
+  wt.noSiteHint = document.getElementById("watch-no-site-hint");
+  wt.setupFields = document.getElementById("watch-setup-fields");
+  wt.optionalFields = document.getElementById("watch-optional-fields");
+  wt.logPath = document.getElementById("watch-log-path");
+  wt.pickLogBtn = document.getElementById("watch-pick-log-btn");
+  wt.routeText = document.getElementById("watch-route-text");
+  wt.routePickBtn = document.getElementById("watch-route-pick-btn");
+  wt.dungeonDataPath = document.getElementById("watch-dungeon-data-path");
+  wt.dungeonDataPickBtn = document.getElementById("watch-dungeon-data-pick-btn");
+  wt.avoidableDataPath = document.getElementById("watch-avoidable-data-path");
+  wt.avoidableDataPickBtn = document.getElementById("watch-avoidable-data-pick-btn");
+  wt.startBtn = document.getElementById("watch-start-btn");
+  wt.stopBtn = document.getElementById("watch-stop-btn");
+  wt.status = document.getElementById("watch-status");
+  wt.logListWrap = document.getElementById("watch-log-list-wrap");
+  wt.logList = document.getElementById("watch-log-list");
+
+  wt.pickLogBtn.addEventListener("click", onPickWatchLog);
+  wt.routePickBtn.addEventListener("click", onPickWatchRouteFile);
+  wt.dungeonDataPickBtn.addEventListener("click", onPickWatchDungeonData);
+  wt.avoidableDataPickBtn.addEventListener("click", onPickWatchAvoidableData);
+  wt.startBtn.addEventListener("click", onStartWatch);
+  wt.stopBtn.addEventListener("click", onStopWatch);
+}
+
+function applySettingsToWatch() {
+  const s = state.settings || defaultSettings();
+  if (s.wow_log_path) wt.logPath.value = s.wow_log_path;
+  updateWatchGate();
+}
+
+function updateWatchGate() {
+  const s = state.settings || defaultSettings();
+  const hasSiteUrl = !!s.site_url;
+  wt.noSiteHint.hidden = hasSiteUrl;
+  wt.startBtn.disabled = state.watching || !hasSiteUrl || !wt.logPath.value.trim();
+}
+
+async function onPickWatchLog() {
+  hideBanner(wt.errorBanner);
+  try {
+    const path = await api().pick_log_file();
+    if (path) wt.logPath.value = path;
+  } catch (e) {
+    showBanner(wt.errorBanner, "Could not open the file picker: " + describeError(e));
+  } finally {
+    updateWatchGate();
+  }
+}
+
+async function onPickWatchRouteFile() {
+  try {
+    const path = await api().pick_route_file();
+    if (path) wt.routeText.value = path;
+  } catch (e) {
+    showBanner(wt.errorBanner, "Could not open the file picker: " + describeError(e));
+  }
+}
+
+async function onPickWatchDungeonData() {
+  try {
+    const path = await api().pick_dungeon_data_file();
+    if (path) wt.dungeonDataPath.value = path;
+  } catch (e) {
+    showBanner(wt.errorBanner, "Could not open the file picker: " + describeError(e));
+  }
+}
+
+async function onPickWatchAvoidableData() {
+  try {
+    const path = await api().pick_avoidable_data_file();
+    if (path) wt.avoidableDataPath.value = path;
+  } catch (e) {
+    showBanner(wt.errorBanner, "Could not open the file picker: " + describeError(e));
+  }
+}
+
+function setWatchingUI(isWatching) {
+  state.watching = isWatching;
+  wt.setupFields.disabled = isWatching;
+  wt.optionalFields.disabled = isWatching;
+  wt.startBtn.hidden = isWatching;
+  wt.stopBtn.hidden = !isWatching;
+  updateWatchGate();
+}
+
+async function onStartWatch() {
+  hideBanner(wt.errorBanner);
+  const logPath = wt.logPath.value.trim();
+  if (!logPath) return;
+
+  const params = { log_path: logPath };
+  const route = wt.routeText.value.trim();
+  if (route) params.route = route;
+  const dungeonData = wt.dungeonDataPath.value.trim();
+  if (dungeonData) params.dungeon_data_path = dungeonData;
+  const avoidableData = wt.avoidableDataPath.value.trim();
+  if (avoidableData) params.avoidable_data_path = avoidableData;
+
+  wt.startBtn.disabled = true;
+  try {
+    const result = await api().start_watch(params);
+    if (result && result.ok) {
+      wt.logList.innerHTML = "";
+      wt.logListWrap.hidden = true;
+      setWatchingUI(true);
+    } else {
+      showBanner(wt.errorBanner, (result && result.error) || "Could not start watching.");
+      updateWatchGate();
+    }
+  } catch (e) {
+    showBanner(wt.errorBanner, "Unexpected error while starting: " + describeError(e));
+    updateWatchGate();
+  }
+}
+
+async function onStopWatch() {
+  wt.stopBtn.disabled = true;
+  try {
+    await api().stop_watch();
+  } catch (e) {
+    showBanner(wt.errorBanner, "Unexpected error while stopping: " + describeError(e));
+  } finally {
+    wt.stopBtn.disabled = false;
+    setWatchingUI(false);
+  }
+}
+
+function watchRunLabel(zone, level) {
+  const z = zone || "Unknown dungeon";
+  return level != null ? `${z} +${level}` : z;
+}
+
+function addWatchLogEntry(cls, html) {
+  const li = document.createElement("li");
+  if (cls) li.classList.add(cls);
+  const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  li.innerHTML = `<span class="t">${time}</span><span class="msg">${html}</span>`;
+  wt.logList.appendChild(li);
+  wt.logListWrap.hidden = false;
+  wt.logList.scrollTop = wt.logList.scrollHeight;
+}
+
+function setWatchStatus(live, text) {
+  wt.status.hidden = false;
+  wt.status.classList.toggle("live", live);
+  wt.status.innerHTML = `<span class="dot"></span><span>${esc(text)}</span>`;
+}
+
+// Called by Python (webview.windows[0].evaluate_js(...)) from the watch
+// background thread -- see api.py's start_watch docstring for the full
+// set of event shapes this switches on.
+window.onWatchEvent = function (event) {
+  if (!wt.logList) return; // boot() hasn't run initWatch() yet -- ignore
+  switch (event.type) {
+    case "watching":
+      setWatchStatus(true, `Watching ${event.log_path}`);
+      addWatchLogEntry("info", `Watching <code>${esc(event.log_path)}</code>`);
+      break;
+    case "run_complete":
+      addWatchLogEntry("info", `${esc(watchRunLabel(event.zone, event.level))} complete — analyzing…`);
+      break;
+    case "analyzed": {
+      const verdict = event.timed === true ? "timed" : event.timed === false ? "over timer" : "completed";
+      addWatchLogEntry("info", `Analyzed: ${esc(watchRunLabel(event.zone, event.level))} (${verdict}) — uploading…`);
+      break;
+    }
+    case "uploaded":
+      addWatchLogEntry("ok", `Uploaded — ${esc(event.url)}`);
+      break;
+    case "run_failed":
+      addWatchLogEntry("err", `Run failed: ${esc(event.error)}`);
+      break;
+    case "analyze_failed":
+      addWatchLogEntry("err", `Analysis failed: ${esc(event.error)}`);
+      break;
+    case "upload_failed":
+      addWatchLogEntry("err", `Upload failed: ${esc(event.error)}`);
+      break;
+    case "crashed":
+      addWatchLogEntry("err", `Watching stopped unexpectedly: ${esc(event.error)}`);
+      setWatchingUI(false);
+      setWatchStatus(false, "Stopped (unexpectedly)");
+      break;
+    case "stopped":
+      addWatchLogEntry("info", "Stopped.");
+      setWatchStatus(false, "Stopped.");
+      break;
+  }
+};
+
+// ===========================================================================
 // History
 // ===========================================================================
 
@@ -451,6 +664,8 @@ function initSettings() {
   set.defaultOutputDirPickBtn = document.getElementById("set-default-output-dir-pick-btn");
   set.historyDbPath = document.getElementById("set-history-db-path");
   set.siteUrl = document.getElementById("set-site-url");
+  set.wowLogPath = document.getElementById("set-wow-log-path");
+  set.wowLogPickBtn = document.getElementById("set-wow-log-pick-btn");
   set.saveBtn = document.getElementById("set-save-btn");
   set.errorBanner = document.getElementById("set-error-banner");
   set.successBanner = document.getElementById("set-success-banner");
@@ -468,6 +683,7 @@ function initSettings() {
   set.wowAddonPickBtn.addEventListener("click", onPickWowAddonFolder);
   set.avoidableDataPickBtn.addEventListener("click", onPickSettingsAvoidableData);
   set.defaultOutputDirPickBtn.addEventListener("click", onPickDefaultOutputDir);
+  set.wowLogPickBtn.addEventListener("click", onPickSettingsWowLog);
   set.saveBtn.addEventListener("click", onSaveSettings);
 
   set.wowAddonPath.addEventListener("input", updateExtractButtonState);
@@ -483,6 +699,7 @@ function applySettingsToForm() {
   set.defaultOutputDir.value = s.default_output_dir || "";
   set.historyDbPath.value = s.history_db_path || "";
   set.siteUrl.value = s.site_url || "";
+  set.wowLogPath.value = s.wow_log_path || "";
   updateExtractButtonState();
 }
 
@@ -522,6 +739,15 @@ async function onPickDefaultOutputDir() {
   }
 }
 
+async function onPickSettingsWowLog() {
+  try {
+    const path = await api().pick_log_file();
+    if (path) set.wowLogPath.value = path;
+  } catch (e) {
+    showBanner(set.errorBanner, "Could not open the file picker: " + describeError(e));
+  }
+}
+
 async function onSaveSettings() {
   hideBanner(set.errorBanner);
   hideBanner(set.successBanner);
@@ -535,6 +761,7 @@ async function onSaveSettings() {
     default_output_dir: set.defaultOutputDir.value.trim() || null,
     history_db_path: set.historyDbPath.value.trim() || null,
     site_url: set.siteUrl.value.trim() || null,
+    wow_log_path: set.wowLogPath.value.trim() || null,
   };
 
   try {
@@ -543,6 +770,7 @@ async function onSaveSettings() {
       state.settings = { ...defaultSettings(), ...payload };
       showBanner(set.successBanner, "Settings saved.");
       renderHomeHint();
+      updateWatchGate(); // site_url may have just been set/changed
     } else {
       showBanner(set.errorBanner, (result && result.error) || "Could not save settings.");
     }
@@ -608,6 +836,7 @@ function describeError(e) {
 
 async function boot() {
   initNewAnalysis();
+  initWatch();
   initHistory();
   initSettings();
   initReportScreen();
@@ -620,6 +849,7 @@ async function boot() {
   }
 
   applySettingsToNewAnalysis();
+  applySettingsToWatch();
   applySettingsToHistory();
   applySettingsToForm();
   renderHomeHint();
