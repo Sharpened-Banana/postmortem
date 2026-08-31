@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 from pathlib import Path
 from typing import Any, Iterable, Optional
@@ -11,6 +12,8 @@ from typing import Any, Iterable, Optional
 from .analysis.avoidable import AvoidableData
 from .analysis.interruptibility import InterruptibilityData
 from .analysis.run_analyzer import analyze_run
+from .chapters import write_chapter_files
+from .clips import DEFAULT_PAD_S, FfmpegNotFoundError, clip_specs_for_chapters, cut_clips, load_chapters
 from .combatlog.parser import parse_file
 from .combatlog.segmenter import RunSegment, segment_runs
 from .mdt.decode import MDTDecodeError, decode_mdt_string
@@ -458,6 +461,47 @@ def cmd_index(args: argparse.Namespace) -> int:
     return 0
 
 
+def _write_recorded_reports(run, route, store, pull_gap_seconds: float = 5.0) -> None:
+    """Analyze one recorded run's log slice and write its JSON/HTML/text
+    reports, plus the chapters sidecars (``<run>.chapters.json`` /
+    ``<run>.vtt`` -- see :mod:`postmortem.chapters`, WP-D2) next to
+    the recorded ``.txt`` slice. ``run.started_at`` (the wall-clock moment
+    the recorder started this run, essentially simultaneous with a shell
+    hook or native OBS actually starting to record -- see
+    ``recorder.RecordedRun``) is used as the chapters' video-start
+    reference.
+
+    Chapters/VTT are written unconditionally alongside the other
+    ``--analyze`` outputs (not gated on ``--obs``/``--on-run-start`` being
+    configured): they're harmless even with no matching video, consistent
+    with how JSON/HTML/text are already all written together with no
+    individual opt-out, and a later per-pull clip-cutting work package
+    needs this file regardless of how (or whether, at record time) the
+    video was actually produced.
+
+    Kept as a standalone module-level function (rather than inline in
+    ``cmd_record``) so it can be exercised directly in tests without
+    driving the recorder's blocking ``watch()`` loop through a full CLI
+    invocation -- see ``TestRecorder`` in ``tests/test_cli_and_tools.py``.
+    """
+    # list(...) is fine here: run.path is a per-run recorded slice
+    # (Recorder opens a fresh file per CHALLENGE_MODE_START), so this
+    # never holds more than one run's events regardless.
+    segments = list(segment_runs(parse_file(run.path)))
+    if not segments:
+        return
+    report = analyze_run(segments[-1], route=route, store=store,
+                         pull_gap_seconds=pull_gap_seconds)
+    base = run.path.with_suffix("")
+    Path(f"{base}.json").write_text(json.dumps(report, indent=1),
+                                    encoding="utf-8")
+    Path(f"{base}.html").write_text(render_html(report), encoding="utf-8")
+    write_chapter_files(report, run.started_at, base)
+    print(render_text(report))
+    print(f"wrote {base}.json / {base}.html / {base}.chapters.json / {base}.vtt",
+          file=sys.stderr)
+
+
 def cmd_record(args: argparse.Namespace) -> int:
     route = _load_route(args.route) if args.route else None
     store = _load_store(args.dungeon_data)
@@ -467,20 +511,7 @@ def cmd_record(args: argparse.Namespace) -> int:
         if not args.analyze:
             return
         try:
-            # list(...) is fine here: run.path is a per-run recorded slice
-            # (Recorder opens a fresh file per CHALLENGE_MODE_START), so this
-            # never holds more than one run's events regardless.
-            segments = list(segment_runs(parse_file(run.path)))
-            if not segments:
-                return
-            report = analyze_run(segments[-1], route=route, store=store,
-                                 pull_gap_seconds=args.pull_gap)
-            base = run.path.with_suffix("")
-            Path(f"{base}.json").write_text(json.dumps(report, indent=1),
-                                            encoding="utf-8")
-            Path(f"{base}.html").write_text(render_html(report), encoding="utf-8")
-            print(render_text(report))
-            print(f"wrote {base}.json / {base}.html", file=sys.stderr)
+            _write_recorded_reports(run, route, store, pull_gap_seconds=args.pull_gap)
         except Exception as exc:  # keep recording even if analysis hiccups
             print(f"warning: auto-analysis failed: {exc}", file=sys.stderr)
 
@@ -491,6 +522,9 @@ def cmd_record(args: argparse.Namespace) -> int:
         on_run_complete=analyze_recorded,
         on_start_cmd=args.on_run_start,
         on_end_cmd=args.on_run_end,
+        obs_url=args.obs,
+        obs_password=args.obs_password,
+        obs_replay_on_death=args.obs_replay_on_death,
     )
     recorder.watch()
     return 0
@@ -508,6 +542,48 @@ def cmd_serve(args: argparse.Namespace) -> int:
         print("stopped", file=sys.stderr)
     finally:
         server.server_close()
+    return 0
+
+
+def cmd_clips(args: argparse.Namespace) -> int:
+    # Checked up front (rather than letting subprocess.run raise
+    # FileNotFoundError partway through) so a missing ffmpeg is always a
+    # clean, single-line message -- matching _load_avoidable/_load_store's
+    # SystemExit convention for a clear, expected CLI error.
+    if shutil.which("ffmpeg") is None:
+        raise SystemExit(
+            "error: ffmpeg not found on PATH -- install it to use the clips command"
+        )
+
+    video = Path(args.video)
+    report_path = Path(args.report)
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"error: could not load report {report_path}: {exc}")
+
+    chapters = load_chapters(report_path, report)
+    out_dir = Path(args.out) if args.out else video.parent / "clips"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    specs = clip_specs_for_chapters(chapters, out_dir, pad=args.pad)
+    if not specs:
+        print("no pull/death chapters found in the report -- nothing to cut",
+              file=sys.stderr)
+        return 0
+
+    try:
+        written = cut_clips(video, specs)
+    except FfmpegNotFoundError:
+        # Defensive: shutil.which already checked above, but cut_clips
+        # re-checks (it's also usable standalone), so handle this the
+        # same clean way if PATH somehow changed in between.
+        raise SystemExit(
+            "error: ffmpeg not found on PATH -- install it to use the clips command"
+        )
+
+    for path in written:
+        print(f"wrote {path}", file=sys.stderr)
     return 0
 
 
@@ -639,6 +715,27 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--on-run-end", metavar="CMD",
                    help="shell command to run when the key ends "
                         "(e.g. 'obs-cmd recording stop')")
+    p.add_argument("--obs", nargs="?", const="ws://127.0.0.1:4455", default=None,
+                   metavar="URL",
+                   help="natively drive OBS via its own WebSocket v5 API "
+                        "(no obs-cmd/third-party tool needed) -- start/stop "
+                        "recording with each key. Pass a URL (e.g. "
+                        "ws://127.0.0.1:4455, OBS's default) or just '--obs' "
+                        "alone to use that same default. If --on-run-start/"
+                        "--on-run-end are ALSO given, those shell hooks take "
+                        "precedence for that event and the native client is "
+                        "not additionally invoked for it, to avoid "
+                        "double-triggering OBS; any native-OBS failure is "
+                        "only ever a warning, recording continues regardless")
+    p.add_argument("--obs-password", metavar="PASSWORD",
+                   help="OBS WebSocket server password, if one is set "
+                        "(Tools -> WebSocket Server Settings in OBS)")
+    p.add_argument("--obs-replay-on-death", action="store_true",
+                   help="save the OBS replay buffer (SaveReplayBuffer) every "
+                        "time a player death is detected; independent of "
+                        "shell-hook precedence -- always uses the native OBS "
+                        "client when --obs is set (there's no equivalent "
+                        "shell hook for this event to conflict with)")
     p.set_defaults(func=cmd_record)
 
     p = sub.add_parser(
@@ -652,6 +749,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--bind", default="127.0.0.1",
                    help="address to bind to (default: 127.0.0.1, loopback-only)")
     p.set_defaults(func=cmd_serve)
+
+    p = sub.add_parser(
+        "clips",
+        help="cut one video clip per pull and per death via ffmpeg",
+    )
+    p.add_argument("video", help="path to the recorded video file")
+    p.add_argument("report", metavar="REPORT_JSON",
+                   help="analyzed run report JSON (see analyze/record --analyze); "
+                        "clip offsets prefer a <report>.chapters.json sidecar next "
+                        "to it if one exists, else are recomputed assuming the "
+                        "video starts exactly at run start")
+    p.add_argument("--out", metavar="DIR",
+                   help="directory to write clips into (default: a 'clips' "
+                        "subdirectory next to the video)")
+    p.add_argument("--pad", type=float, default=DEFAULT_PAD_S,
+                   help=f"seconds of padding before/after each clip "
+                        f"(default {DEFAULT_PAD_S:.0f})")
+    p.set_defaults(func=cmd_clips)
 
     return parser
 

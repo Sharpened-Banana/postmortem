@@ -2,6 +2,7 @@
 
 import json
 import textwrap
+from pathlib import Path
 
 from conftest import build_run_log
 
@@ -340,3 +341,48 @@ class TestRecorder:
         (seg,) = list(segment_runs(parse_file(run.path)))
         report = analyze_run(seg)
         assert len(report["pulls"]) == 3
+
+    def test_analyze_writes_chapters_and_vtt_alongside_json_html(self, tmp_path):
+        """WP-D2: `--analyze`'s auto-analysis wiring (cli._write_recorded_reports,
+        called from cmd_record's analyze_recorded closure) writes the chapters
+        sidecars next to the existing JSON/HTML/text reports."""
+        log = tmp_path / "WoWCombatLog.txt"
+        log.write_text(build_run_log().text(), encoding="utf-8")
+        out_dir = tmp_path / "runs"
+        rec = Recorder(
+            log_path=log, out_dir=out_dir, from_start=True, echo=lambda s: None,
+        )
+        (run,) = rec.watch(stop_after_runs=1)
+
+        from postmortem.cli import _write_recorded_reports
+        _write_recorded_reports(run, route=None, store=None)
+
+        base = run.path.with_suffix("")
+        json_path = Path(f"{base}.json")
+        html_path = Path(f"{base}.html")
+        chapters_path = Path(f"{base}.chapters.json")
+        vtt_path = Path(f"{base}.vtt")
+        assert json_path.exists()
+        assert html_path.exists()
+        assert chapters_path.exists()
+        assert vtt_path.exists()
+
+        # run.started_at is real wall-clock time.time(), while the report's
+        # own start_ts comes from the fixture log's fixed synthetic date/
+        # time -- the two can be far apart depending on when the test
+        # happens to run, so only the offset *math* (including the
+        # clamp-to-zero path) is exercised precisely in test_chapters.py;
+        # here we just confirm the wiring produces valid, sorted output.
+        chapters = json.loads(chapters_path.read_text(encoding="utf-8"))
+        assert chapters
+        assert chapters[0]["kind"] == "run_start"
+        assert all(c["offset_s"] >= 0 for c in chapters)
+        offsets = [c["offset_s"] for c in chapters]
+        assert offsets == sorted(offsets)
+        kinds = {c["kind"] for c in chapters}
+        assert "pull" in kinds or "boss_pull" in kinds
+        assert "death" in kinds  # this fixture's run has one death
+
+        vtt_text = vtt_path.read_text(encoding="utf-8")
+        assert vtt_text.startswith("WEBVTT\n\n")
+        assert "-->" in vtt_text
