@@ -436,7 +436,10 @@ the ability to update that run, but it stays visible either way.</p>
 <h2 style="font-size:14px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);margin:32px 0 10px;">Notes</h2>
 <p>Uploads are rate-limited per token and per IP. Analyzed reports
 (<code>/api/runs</code>) are capped at 5MB; raw combat logs
-(<code>/upload</code>) at 1GB. A raw log is only used to compute the
+(<code>/upload</code>) at 200MB per upload — a log with several separate
+keys in it is fine well under that; one extremely long single
+continuous key can still hit it, since memory cost scales with the
+largest individual run, not the whole file. A raw log is only used to compute the
 report — it's discarded immediately after, never stored.
 Reports are shown exactly as uploaded — this site does no additional
 verification of the underlying combat log.</p>
@@ -985,7 +988,9 @@ async def upload_form() -> HTMLResponse:
 # exceeds ~1MB regardless of how large MAX_LOG_BYTES is configured --
 # unlike a single logfile.read(MAX_LOG_BYTES + 1) call, which held the
 # *entire* upload in memory at once and made raising the cap for a real
-# multi-hour session's log a genuine OOM risk on this service's 512MB VM.
+# multi-hour session's log a genuine OOM risk (this predates the 2gb VM
+# bump -- see fly.toml -- and remains true regardless of VM size, since
+# a big enough cap can always outgrow whatever's available).
 _UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 
@@ -1014,12 +1019,14 @@ async def upload_log(
             cap_mb = config.MAX_LOG_BYTES // (1024 * 1024)
             return HTMLResponse(
                 _render_upload_result(413, {
-                    "error": f"that file is over the {cap_mb}MB limit. WoW appends to "
-                             "one combat log for as long as the game client stays "
-                             "open, so this usually means the log covers more than "
-                             "just your recent keys -- restarting WoW starts a fresh "
-                             "log file, or you can trim the file to a smaller time "
-                             "range yourself before uploading.",
+                    "error": f"that file is over the {cap_mb}MB limit. A log with "
+                             "several separate keys in it is fine well under this "
+                             "limit -- each one is handled independently. If it's "
+                             "still too big, either one single key ran unusually "
+                             "long, or WoW kept appending to one combat log across "
+                             "a long play session; restarting WoW starts a fresh log "
+                             "file, or the desktop app/CLI can analyze this exact "
+                             "file locally with no size limit at all.",
                 }),
                 status_code=413,
             )
