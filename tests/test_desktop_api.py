@@ -10,10 +10,13 @@ from __future__ import annotations
 
 import json
 import textwrap
+import threading
 
 import pytest
 
+from postmortem.desktop import api as api_module
 from postmortem.desktop import config as config_module
+from postmortem.desktop import updater as updater_module
 from postmortem.desktop.api import DesktopAPI
 from postmortem.history.store import ingest as history_ingest
 
@@ -599,3 +602,145 @@ class TestExtractDungeonData:
         result = api.extract_dungeon_data(str(not_a_dir), str(tmp_path / "out.json"))
         assert result["ok"] is False
         assert "error" in result
+
+
+# -- auto-update ----------------------------------------------------------
+
+
+class TestAutoUpdate:
+    """check_for_update()/start_update(): see updater.py for the actual
+    check/download/apply logic (covered in tests/test_desktop_updater.py)
+    -- these tests are about the bridge layer's own contract: never
+    raising, refusing to self-update outside a packaged build, refusing
+    an untrusted URL, and pushing progress via _emit_update_event
+    (monkeypatched here the same way TestWatchMode patches
+    _emit_watch_event -- there's no live pywebview window under test).
+    """
+
+    @pytest.fixture()
+    def events(self, api, monkeypatch):
+        captured = []
+        monkeypatch.setattr(api, "_emit_update_event", captured.append)
+        return captured
+
+    @pytest.fixture(autouse=True)
+    def fast_and_safe_exit(self, monkeypatch):
+        # start_update()'s success path calls time.sleep(1.5) then
+        # os._exit(0) for real -- both patched so a passing test doesn't
+        # take 1.5s and, far more importantly, doesn't kill the pytest
+        # process itself.
+        monkeypatch.setattr(api_module.time, "sleep", lambda s: None)
+        exits = []
+        monkeypatch.setattr(api_module.os, "_exit", exits.append)
+        return exits
+
+    def _wait_for(self, events, event_type, timeout=5.0):
+        import time as _time
+
+        deadline = _time.time() + timeout
+        while _time.time() < deadline:
+            for e in events:
+                if e["type"] == event_type:
+                    return e
+            _time.sleep(0.02)
+        raise AssertionError(f"no {event_type!r} event within {timeout}s; got {events}")
+
+    def test_check_for_update_reports_an_available_update(self, api, monkeypatch):
+        monkeypatch.setattr(
+            updater_module, "check_for_update",
+            lambda: {"tag": "alpha-desktop-9", "download_url": "https://x", "notes": ""},
+        )
+        result = api.check_for_update()
+        assert result == {
+            "ok": True,
+            "update": {"tag": "alpha-desktop-9", "download_url": "https://x", "notes": ""},
+        }
+
+    def test_check_for_update_reports_none_when_up_to_date(self, api, monkeypatch):
+        monkeypatch.setattr(updater_module, "check_for_update", lambda: None)
+        assert api.check_for_update() == {"ok": True, "update": None}
+
+    def test_check_for_update_never_raises(self, api, monkeypatch):
+        def boom():
+            raise RuntimeError("network exploded")
+
+        monkeypatch.setattr(updater_module, "check_for_update", boom)
+        result = api.check_for_update()
+        assert result["ok"] is False
+        assert "network exploded" in result["error"]
+
+    def test_start_update_refuses_outside_a_packaged_build(self, api, events, monkeypatch):
+        monkeypatch.setattr(api_module.sys, "frozen", False, raising=False)
+        result = api.start_update("https://github.com/x/y/releases/download/t/a.zip")
+        assert result == {"ok": False, "error": "auto-update only works in a packaged build"}
+
+    def test_start_update_refuses_an_untrusted_url(self, api, events, monkeypatch):
+        monkeypatch.setattr(api_module.sys, "frozen", True, raising=False)
+        result = api.start_update("https://evil.example.com/a.zip")
+        assert result == {"ok": False, "error": "refusing to download from an untrusted source"}
+
+    def test_second_start_update_while_one_is_running_is_rejected(
+        self, api, events, monkeypatch,
+    ):
+        monkeypatch.setattr(api_module.sys, "frozen", True, raising=False)
+        started = threading.Event()
+        finish = threading.Event()
+
+        def slow_perform_update(url, work_dir, on_progress=None):
+            started.set()
+            finish.wait(timeout=5.0)
+            raise RuntimeError("stop here -- this test only cares about the second call")
+
+        monkeypatch.setattr(updater_module, "perform_update", slow_perform_update)
+
+        first = api.start_update("https://github.com/x/y/releases/download/t/a.zip")
+        assert first == {"ok": True}
+        assert started.wait(timeout=5.0)
+
+        second = api.start_update("https://github.com/x/y/releases/download/t/a.zip")
+        assert second == {"ok": False, "error": "an update is already in progress"}
+
+        finish.set()
+
+    def test_full_success_path_downloads_applies_and_exits(
+        self, api, events, monkeypatch, tmp_path,
+    ):
+        monkeypatch.setattr(api_module.sys, "frozen", True, raising=False)
+
+        new_install = tmp_path / "extracted" / "Postmortem.app"
+        applied = []
+
+        def fake_perform_update(url, work_dir, on_progress=None):
+            if on_progress:
+                on_progress({"written": 50, "total": 100})
+            return new_install
+
+        monkeypatch.setattr(updater_module, "perform_update", fake_perform_update)
+        monkeypatch.setattr(
+            updater_module, "apply_update_and_relaunch",
+            lambda path, **kw: applied.append(path),
+        )
+
+        result = api.start_update("https://github.com/x/y/releases/download/t/a.zip")
+        assert result == {"ok": True}
+
+        self._wait_for(events, "relaunching")
+        assert applied == [new_install]
+        assert any(e["type"] == "downloading" and e["written"] == 50 for e in events)
+        assert any(e["type"] == "applying" for e in events)
+
+    def test_failure_during_download_reports_a_failed_event_not_a_crash(
+        self, api, events, monkeypatch,
+    ):
+        monkeypatch.setattr(api_module.sys, "frozen", True, raising=False)
+
+        def boom(url, work_dir, on_progress=None):
+            raise ValueError("disk full")
+
+        monkeypatch.setattr(updater_module, "perform_update", boom)
+
+        result = api.start_update("https://github.com/x/y/releases/download/t/a.zip")
+        assert result == {"ok": True}  # the thread started fine; it fails asynchronously
+
+        failed = self._wait_for(events, "failed")
+        assert "disk full" in failed["error"]
