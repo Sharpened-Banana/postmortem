@@ -25,6 +25,15 @@ def collect_reports(directory: str | Path) -> list[dict[str, Any]]:
                 report = json.load(fh)
         except (OSError, ValueError):
             continue
+        # A *.json here isn't necessarily one of our report files: the
+        # recorder writes a <run>.chapters.json sidecar (a top-level JSON
+        # *list*) into this same directory, and json.load succeeds on it.
+        # Guard the type before .get() -- a plain report.get("run") on a
+        # list raises AttributeError (not caught above), which used to
+        # crash `index`/`serve` on any directory produced by
+        # `record --analyze`.
+        if not isinstance(report, dict):
+            continue
         run = report.get("run")
         if not isinstance(run, dict) or "zone" not in run:
             continue  # not one of our reports
