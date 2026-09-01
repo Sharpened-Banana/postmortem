@@ -56,11 +56,14 @@ local function CreateOverlayFrame()
   -- non-AceGUI frame elsewhere in MDT), confirming BackdropTemplate is used
   -- outside AceGUI's own internals too.
   local f = CreateFrame("Frame", "PostmortemOverlay", UIParent, "BackdropTemplate")
-  -- Grown again to fit the post-key recap status row (see statusFS below)
-  -- and, below that, a permanent companion-app reminder row (companionFS)
-  -- shown only alongside that same recap window -- both shown only during
-  -- the recap window after a key ends.
-  f:SetSize(220, 190)
+  -- Widened slightly (220 -> 240) for the deaths/interrupts row below,
+  -- now side-by-side instead of stacked, and to give the forces bar's
+  -- overlaid text comfortable room. Height (190 -> 182) trimmed only
+  -- slightly despite that same row-merge removing a whole text row --
+  -- kept generous rather than tightly computed, since font metrics
+  -- can't be visually confirmed from here; a little extra bottom
+  -- padding is a far smaller risk than clipped text.
+  f:SetSize(240, 182)
   f:SetFrameStrata("MEDIUM")
   f:SetClampedToScreen(true)
 
@@ -97,33 +100,73 @@ local function CreateOverlayFrame()
     db.overlayPosition.y = y
   end)
 
-  -- GameFontNormal / GameFontHighlight(Small) are standard FrameXML font
-  -- templates, used the same way on plain (non-AceGUI) FontStrings in
-  -- MythicDungeonTools/Modules/MainFrame.lua:366-452 (e.g.
-  -- frame.topPanelString:SetFontObject(GameFontNormalMed3)).
-  local forcesFS = f:CreateFontString(nil, "OVERLAY")
-  forcesFS:SetFontObject(GameFontNormal)
-  forcesFS:SetPoint("TOP", f, "TOP", 0, -14)
+  -- Forces progress bar: a real StatusBar instead of plain "X / Y (Z%)"
+  -- text -- the single highest-value addition here, since a bar reads
+  -- at a glance where a percentage number needs actually reading.
+  -- CreateFrame("StatusBar", ...) + SetStatusBarTexture("Interface\\
+  -- Buttons\\WHITE8x8") + SetMinMaxValues(0,1)/SetValue(...) is a real,
+  -- currently-shipping pattern -- verified this session against
+  -- EllesmereUIMythicTimer/EUI_MythicTimer_TargetFocusBars.lua:101-108
+  -- (its own per-cast bars use the exact same plain-white fill texture
+  -- this addon's own backdrops already use, tinted via
+  -- SetStatusBarColor -- EUI_MythicTimer_TargetedSpellBars.lua:376).
+  -- Colored with this project's own brand gold (#d7a94c -- the same
+  -- accent used throughout the desktop app and public tracker site's
+  -- own dark theme, report/html.py's --accent) rather than a fresh
+  -- color choice, so the whole product reads as one visual identity.
+  local forcesBar = CreateFrame("StatusBar", nil, f)
+  forcesBar:SetHeight(20)
+  forcesBar:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -14)
+  forcesBar:SetPoint("TOPRIGHT", f, "TOPRIGHT", -14, -14)
+  forcesBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
+  forcesBar:SetStatusBarColor(0.843, 0.663, 0.298)
+  forcesBar:SetMinMaxValues(0, 1)
+  forcesBar:SetValue(0)
 
+  local forcesBarBG = forcesBar:CreateTexture(nil, "BACKGROUND")
+  forcesBarBG:SetAllPoints(forcesBar)
+  forcesBarBG:SetColorTexture(1, 1, 1, 0.12)
+
+  local forcesTextFS = forcesBar:CreateFontString(nil, "OVERLAY")
+  forcesTextFS:SetFontObject(GameFontHighlightSmall)
+  forcesTextFS:SetPoint("CENTER", forcesBar, "CENTER", 0, 0)
+
+  -- GameFontNormalLarge -- a standard FrameXML font template, real
+  -- currently-shipping usage verified this session against
+  -- BossHelper/UI/StartPage.lua:34 and ConfirmDialog.lua:69 among
+  -- others -- gives the timer real visual weight instead of matching
+  -- the same size as every stat row below it.
   local timerFS = f:CreateFontString(nil, "OVERLAY")
-  timerFS:SetFontObject(GameFontHighlight)
-  timerFS:SetPoint("TOP", forcesFS, "BOTTOM", 0, -10)
+  timerFS:SetFontObject(GameFontNormalLarge)
+  timerFS:SetPoint("TOP", forcesBar, "BOTTOM", 0, -12)
 
-  local deathsFS = f:CreateFontString(nil, "OVERLAY")
+  -- Deaths and interrupts merged into one row (left/right split within
+  -- a shared row frame, same LEFT/RIGHT-anchor-split idiom InfoWindow.lua
+  -- already uses for its urlFS/copyButton row) instead of two separate
+  -- stacked text rows -- both are single short stats, and putting them
+  -- side by side reads as a compact stat line instead of padding out
+  -- the frame with two mostly-empty rows.
+  local statsRow = CreateFrame("Frame", nil, f)
+  statsRow:SetHeight(14)
+  statsRow:SetPoint("TOP", timerFS, "BOTTOM", 0, -10)
+  statsRow:SetPoint("LEFT", f, "LEFT", 14, 0)
+  statsRow:SetPoint("RIGHT", f, "RIGHT", -14, 0)
+
+  local deathsFS = statsRow:CreateFontString(nil, "OVERLAY")
   deathsFS:SetFontObject(GameFontHighlightSmall)
-  deathsFS:SetPoint("TOP", timerFS, "BOTTOM", 0, -10)
+  deathsFS:SetPoint("LEFT", statsRow, "LEFT", 0, 0)
+  deathsFS:SetJustifyH("LEFT")
 
-  -- WP-3 additions: interrupt count (always shown once a key is active)
-  -- and pull progress (shown only when Interrupts.lua/RouteImport.lua found
-  -- an MDT route to compare against -- see MA:Overlay_Refresh() below).
-  -- Same FontString-row layout pattern as the three rows above.
-  local interruptsFS = f:CreateFontString(nil, "OVERLAY")
+  local interruptsFS = statsRow:CreateFontString(nil, "OVERLAY")
   interruptsFS:SetFontObject(GameFontHighlightSmall)
-  interruptsFS:SetPoint("TOP", deathsFS, "BOTTOM", 0, -10)
+  interruptsFS:SetPoint("RIGHT", statsRow, "RIGHT", 0, 0)
+  interruptsFS:SetJustifyH("RIGHT")
 
+  -- Pull progress (shown only when Interrupts.lua/RouteImport.lua found an
+  -- MDT route to compare against -- see MA:Overlay_Refresh() below).
   local pullFS = f:CreateFontString(nil, "OVERLAY")
   pullFS:SetFontObject(GameFontHighlightSmall)
-  pullFS:SetPoint("TOP", interruptsFS, "BOTTOM", 0, -10)
+  pullFS:SetPoint("TOP", statsRow, "BOTTOM", 0, -10)
 
   -- Post-key recap status: shown only during the RECAP_DURATION_S window
   -- Tracker.lua opens after CHALLENGE_MODE_COMPLETED/RESET (see
@@ -146,7 +189,8 @@ local function CreateOverlayFrame()
   companionFS:SetJustifyH("CENTER")
   companionFS:SetTextColor(0.55, 0.72, 1.0)
 
-  f.forcesFS = forcesFS
+  f.forcesBar = forcesBar
+  f.forcesTextFS = forcesTextFS
   f.timerFS = timerFS
   f.deathsFS = deathsFS
   f.interruptsFS = interruptsFS
@@ -184,11 +228,17 @@ function MA:Overlay_Refresh()
     return
   end
   local forces = state.forces or {}
-  frame.forcesFS:SetText(string.format(
+  local pct = forces.percent or 0
+  -- Forces can read slightly over 100% (an overpull past the exact
+  -- requirement) -- clamped here since StatusBar values outside
+  -- SetMinMaxValues' range aren't guaranteed to render sensibly, even
+  -- though the *text* below still shows the real, unclamped percent.
+  frame.forcesBar:SetValue(math.min(1, math.max(0, pct / 100)))
+  frame.forcesTextFS:SetText(string.format(
     "%d / %d (%.1f%%)",
     forces.current or 0,
     forces.total or 0,
-    forces.percent or 0
+    pct
   ))
   frame.timerFS:SetText(FormatElapsed(state.elapsed))
 
@@ -198,6 +248,13 @@ function MA:Overlay_Refresh()
     frame.deathsFS:SetText(string.format("Deaths: %d  (-%s)", deaths, FormatElapsed(timeLost)))
   else
     frame.deathsFS:SetText(string.format("Deaths: %d", deaths))
+  end
+  -- A death is worth drawing the eye to; no deaths stays the same
+  -- neutral highlight color the rest of the stat rows use.
+  if deaths > 0 then
+    frame.deathsFS:SetTextColor(1.0, 0.5, 0.5)
+  else
+    frame.deathsFS:SetTextColor(1.0, 1.0, 1.0)
   end
 
   local interrupts = state.interrupts or {}
