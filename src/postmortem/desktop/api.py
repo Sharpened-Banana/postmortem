@@ -30,6 +30,7 @@ testable exactly like the rest of this codebase (see
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -211,9 +212,66 @@ class DesktopAPI:
                 fetcher = cached_fetcher(_default_fetcher)
             enrich_report(report, raiderio_region, fetcher=fetcher)
 
-        return {"ok": True, "report": report, "html": render_html(report)}
+        html = render_html(report)
+        saved = self._save_report_locally(report, html)
+        return {"ok": True, "report": report, "html": html, "saved": saved}
+
+    def _save_report_locally(self, report: dict, html: str) -> Optional[dict]:
+        """Best-effort: write this analyzed report's JSON/HTML next to
+        every other locally-saved report and ingest it into the local
+        run-history database, so a "New Analysis" run shows up on the
+        History screen exactly like a Watch Live run already does --
+        with zero required setup (see ``config.resolve_output_dir``/
+        ``resolve_history_db_path``'s own "works with zero setup"
+        fallback, the same philosophy ``start_watch()`` already
+        established for its own recorded-run output).
+
+        Returns ``{"json_path", "html_path", "run_id"}`` on success, or
+        ``None`` if saving failed for any reason (an unwritable
+        directory, a locked database, ...) -- this must never block
+        showing the report itself, the same "best-effort bonus step"
+        philosophy as Raider.io enrichment and site uploads elsewhere in
+        this codebase.
+        """
+        try:
+            settings = _config.load_settings()
+            out_dir = _config.resolve_output_dir(settings, "analyzed-runs")
+            out_dir.mkdir(parents=True, exist_ok=True)
+            base = out_dir / _cli._report_basename(report)
+            json_path = base.with_suffix(".json")
+            html_path = base.with_suffix(".html")
+            json_path.write_text(json.dumps(report, indent=1), encoding="utf-8")
+            html_path.write_text(html, encoding="utf-8")
+
+            from ..history.store import ingest as ingest_history
+            db_path = _config.resolve_history_db_path(settings)
+            run_id = ingest_history(report, db_path, source_path=json_path, html_path=html_path)
+            return {"json_path": str(json_path), "html_path": str(html_path), "run_id": run_id}
+        except Exception:
+            return None
 
     # -- history ----------------------------------------------------------
+
+    def get_default_paths(self) -> dict:
+        """The effective output-folder/history-database paths reports get
+        saved to right now -- the saved ``default_output_dir``/
+        ``history_db_path`` settings when set, otherwise the same
+        zero-config defaults ``_save_report_locally``/``start_watch``
+        actually use (see ``config.resolve_output_dir``/
+        ``resolve_history_db_path``). Purely informational (the UI shows
+        these as hints -- e.g. Settings' placeholder text, History's
+        pre-filled database field) -- nothing here writes anything.
+        Never raises.
+        """
+        try:
+            settings = _config.load_settings()
+            return {
+                "ok": True,
+                "output_dir": str(_config.resolve_output_dir(settings, "analyzed-runs")),
+                "history_db_path": str(_config.resolve_history_db_path(settings)),
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     def list_history(
         self, db_path: Optional[str] = None, directory: Optional[str] = None,
@@ -356,10 +414,8 @@ class DesktopAPI:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
-        out_dir = params.get("out_dir") or settings.get("default_output_dir")
-        if not out_dir:
-            from ..appdirs import config_dir
-            out_dir = str(config_dir() / "watch-runs")
+        out_dir = params.get("out_dir") or str(_config.resolve_output_dir(settings, "watch-runs"))
+        history_db_path = _config.resolve_history_db_path(settings)
 
         def on_run_complete(run: Any) -> None:
             # Runs on the watch thread itself (Recorder calls this
@@ -371,7 +427,7 @@ class DesktopAPI:
             # watch stopped) -- the UI needs to tell "still watching,
             # one run had a problem" apart from "not watching anymore".
             try:
-                self._handle_watched_run(run, route, store, avoidable, site_url)
+                self._handle_watched_run(run, route, store, avoidable, site_url, history_db_path)
             except Exception as exc:
                 self._emit_watch_event({"type": "run_failed", "error": str(exc)})
 
@@ -423,7 +479,7 @@ class DesktopAPI:
         self._emit_watch_event({"type": "stopped"})
         return {"ok": True}
 
-    def _handle_watched_run(self, run, route, store, avoidable, site_url) -> None:
+    def _handle_watched_run(self, run, route, store, avoidable, site_url, history_db_path) -> None:
         """One completed run, from Recorder's ``on_run_complete``:
         analyze it and upload it automatically, pushing progress to the
         UI as each step happens. Reuses ``cli.py``'s own
@@ -451,6 +507,21 @@ class DesktopAPI:
             "level": report["run"].get("keystone_level"),
             "timed": report["run"].get("timed"),
         })
+
+        # Best-effort, same reasoning as _save_report_locally's own try/
+        # except: a Watch Live run should land in the same local history
+        # a "New Analysis" run does (one unified History screen, not two
+        # separate silos), but a database hiccup here must never stop
+        # the run from still uploading below.
+        try:
+            base = run.path.with_suffix("")
+            from ..history.store import ingest as ingest_history
+            ingest_history(
+                report, history_db_path,
+                source_path=f"{base}.json", html_path=f"{base}.html",
+            )
+        except Exception:
+            pass
 
         from .. import upload as _upload
         result = _upload.upload_report(report, site_url)
