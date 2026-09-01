@@ -141,6 +141,31 @@ def segment_runs(
             if current is None:
                 continue
             p = event.params
+            # A CHALLENGE_MODE_END always carries its own instance id as
+            # its first param -- confirmed against real reported logs
+            # (2026-09-01): WoW fires one, all-zeroed
+            # ("...END,<id>,0,0,0,0.000000,0.000000"), immediately before
+            # *every* CHALLENGE_MODE_START, always carrying that
+            # upcoming key's own instance id. Harmless in the ordinary
+            # case (no run is open between keys, so the `current is
+            # None` check above already ignores it) -- but if the
+            # previous key never got its own real END (abandoned/reset)
+            # and a new key starts right after, this phantom event's
+            # instance doesn't match the still-open run at all. Blindly
+            # closing the run with it -- as this code used to -- reports
+            # a genuinely abandoned key as a false "depleted" completion
+            # (completed=True, success=False) instead of leaving it open
+            # so the next CHALLENGE_MODE_START's own "different key"
+            # branch above correctly yields it as abandoned
+            # (completed=False). Only treat this as a real completion
+            # when the instance actually matches.
+            end_instance = p[0].strip() if p else ""
+            if (
+                end_instance.lstrip("-").isdigit()
+                and int(end_instance) != current.instance_id
+            ):
+                current.events.append(event)
+                continue
             current.end_ts = event.ts
             current.completed = True
             current.success = (to_int(p[1]) if len(p) > 1 else 0) != 0
