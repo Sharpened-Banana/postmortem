@@ -4,6 +4,8 @@ __pycache__/
 build/*
 !build/postmortem.spec
 !build/entry.py
+!build/postmortem.icns
+!build/postmortem.ico
 dist/
 .pytest_cache/
 mdt_data.json
