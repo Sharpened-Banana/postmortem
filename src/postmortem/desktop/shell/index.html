@@ -338,13 +338,13 @@
             <input type="text" id="set-default-output-dir" placeholder="Not set">
             <button type="button" class="btn" id="set-default-output-dir-pick-btn">Choose folder…</button>
           </div>
-          <div class="help">Where reports are written by default.</div>
+          <div class="help">Where every analyzed and watched run's report gets saved. Already works with no setup — leave this blank and reports still save to the folder shown above as a placeholder.</div>
         </div>
 
         <div class="field">
           <label>History database path</label>
           <input type="text" id="set-history-db-path" placeholder="Not set">
-          <div class="help">A SQLite database file for run history tracking. No picker for this one — type or paste a path.</div>
+          <div class="help">A SQLite database file for run history tracking. Already works with no setup — leave this blank and every run still gets recorded to the database shown above as a placeholder. No picker for this one — type or paste a path.</div>
         </div>
 
         <div class="field">
@@ -403,6 +403,7 @@
       <div class="report-chrome">
         <button type="button" class="btn btn-secondary btn-sm" id="report-back-btn">← Back to New Analysis</button>
         <span class="dim" id="report-context-label"></span>
+        <span class="dim saved-status" id="report-saved-status" hidden></span>
         <button type="button" class="btn btn-sm report-chrome-upload" id="report-upload-btn">Upload to site</button>
         <span class="upload-status" id="report-upload-status" hidden></span>
       </div>
