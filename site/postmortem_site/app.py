@@ -626,6 +626,13 @@ browser. Send this page to anyone you want a log from.</p>
   upload your next one.</p>
 </div>
 <div class="guide-qa">
+  <div class="q">It says a key started but never finished</div>
+  <p class="a">If the group voted to abandon that key, this is expected — WoW doesn't log an
+  ending for an abandoned key, only for one that actually times or depletes, so there's genuinely
+  nothing to analyze from it. If the key actually finished normally, the log may have been
+  grabbed before WoW wrote the ending.</p>
+</div>
+<div class="guide-qa">
   <div class="q">It says the file is too big</div>
   <p class="a">Only happens with one very long, unbroken key. A log with several keys in it —
   even a whole night's worth — is fine well under the limit.</p>
@@ -1087,11 +1094,22 @@ def _handle_log_upload(
                 continue
 
             if not segment.completed:
-                # A CHALLENGE_MODE_START with no matching END: either the
-                # key is still in progress when this log was grabbed, or
-                # WoW never got to write the END line (a crash, a /reload
-                # at exactly the wrong moment, or the log file being cut
-                # off partway through). Either way, there's genuinely
+                # A CHALLENGE_MODE_START with no matching END. Confirmed
+                # against a real report (2026-09-01) that this includes a
+                # perfectly normal case, not just crashes/truncated logs:
+                # a group voting to abandon the key. WoW's own vote-to-
+                # abandon flow doesn't write a CHALLENGE_MODE_END at all --
+                # only a timed or depleted verdict does (the real log in
+                # that report ends with one player hearthing out and
+                # another taking fall damage at open-world coordinates,
+                # with zero CHALLENGE_MODE_END anywhere in the file). The
+                # other real cause is still possible too: the key is still
+                # in progress when this log was grabbed, or WoW never got
+                # to write the END line (a crash, a /reload at exactly the
+                # wrong moment, the log file cut off partway through).
+                # There's no signal in the combat log that tells these
+                # apart -- an abandon and a not-yet-finished key look
+                # identical from here. Either way, there's genuinely
                 # nothing to analyze -- no wall-clock end point, no
                 # success/fail verdict -- but it's worth telling the
                 # uploader a key WAS found, not staying silent about it.
@@ -1160,10 +1178,13 @@ def _handle_log_upload(
                     "runs": [],
                     "message": f"found {len(incomplete_runs)} key(s) that started but never "
                                f"finished in this log ({found}) -- there's nothing to analyze "
-                               "without an end point. If that key actually finished, the log "
-                               "may have been grabbed while WoW was still writing it, or "
-                               "cut off partway through -- try again once you're fully done "
-                               "playing (back at the character screen is safest).",
+                               "without an end point. If the group voted to abandon the key, "
+                               "that's normal and expected: WoW doesn't log an ending for an "
+                               "abandoned key, only for one that reaches a timed or depleted "
+                               "verdict, so there's genuinely nothing here to upload. If the "
+                               "key actually finished normally, the log may have been grabbed "
+                               "before WoW wrote the ending -- try again once the timer "
+                               "verdict has actually shown up in your objective tracker.",
                 }
             return 200, {
                 "ok": True,
