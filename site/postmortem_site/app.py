@@ -18,6 +18,7 @@ import hashlib
 import html
 import json
 import os
+import re
 import secrets
 import tempfile
 import time
@@ -138,6 +139,10 @@ _CHROME_STYLE = """
   margin-top:56px; color:var(--dim); font-size:12.5px; text-align:center; }
 .site-footer a { color:var(--dim); }
 .site-footer a:hover { color:var(--text); }
+.site-download-bar { padding:14px 28px 0; }
+.site-download-link { color:var(--dim); font-size:13px; font-weight:600;
+  text-decoration:none; }
+.site-download-link:hover { color:var(--accent); text-decoration:none; }
 """
 
 # Full page style, for pages this module builds outright (landing,
@@ -211,17 +216,27 @@ def _page(title: str, active: str, body: str) -> str:
 """
 
 
-def _inject_chrome(rendered_html: str, active: str) -> str:
+def _inject_chrome(rendered_html: str, active: str, extra_nav: str = "") -> str:
     """Splice the shared nav/footer onto report/html.py's or
     report/index.py's own already-complete HTML document -- see the
     module note above on why those two modules are never modified
     directly. Their own <style>/:root and body content render exactly
     as they always have; this only adds chrome around them.
+
+    ``extra_nav``, when given, is a small extra chrome element (its own
+    .site-* scoped markup) placed right after the header -- e.g.
+    run_detail()'s "Download HTML" link. A separate element rather than
+    something spliced into _site_nav() itself, since _site_nav() is
+    shared by every page (including the ones this module builds outright
+    via _page()) and this is specific to whichever single call site
+    passes it.
     """
     with_style = rendered_html.replace(
         "</head>", f"{_FONTS_LINK}<style>{_CHROME_STYLE}</style></head>", 1,
     )
-    with_nav = with_style.replace("<body>", f"<body>{_site_nav(active)}", 1)
+    with_nav = with_style.replace(
+        "<body>", f"<body>{_site_nav(active)}{extra_nav}", 1,
+    )
     return with_nav.replace("</body>", f"{_site_footer()}</body>", 1)
 
 
@@ -496,7 +511,14 @@ async def run_detail(run_id: int):
     report = await run_in_threadpool(_load_report, run_id)
     if report is None:
         return JSONResponse({"error": "not found"}, status_code=404)
-    return HTMLResponse(_inject_chrome(render_html(report), "runs"))
+    download_bar = (
+        f'<div class="wrap site-download-bar">'
+        f'<a class="site-download-link" href="/runs/{run_id}/download" download>'
+        f"⬇ Download HTML</a></div>"
+    )
+    return HTMLResponse(
+        _inject_chrome(render_html(report), "runs", extra_nav=download_bar)
+    )
 
 
 @app.get("/api/runs/{run_id}")
@@ -505,6 +527,38 @@ async def api_run_detail(run_id: int):
     if report is None:
         return JSONResponse({"error": "not found"}, status_code=404)
     return JSONResponse(report)
+
+
+def _download_filename(report: dict[str, Any]) -> str:
+    """Mirrors recorder.py's own saved-run naming convention
+    (stamp_zone_level) so a run downloaded from the site looks like one
+    saved locally by the CLI/desktop app -- same shape, same idea."""
+    run = report.get("run") or {}
+    safe_zone = re.sub(r"[^A-Za-z0-9]+", "", run.get("zone") or "") or "run"
+    level = run.get("keystone_level")
+    start_ts = run.get("start_ts")
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(start_ts)) if start_ts else "report"
+    return f"{stamp}_{safe_zone}_{level if level is not None else 'x'}.html"
+
+
+@app.get("/runs/{run_id}/download")
+async def run_download(run_id: int):
+    report = await run_in_threadpool(_load_report, run_id)
+    if report is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    # The *unwrapped* render_html() output -- not _inject_chrome()'s
+    # site-branded version. A downloaded file is meant to be the same
+    # portable, self-contained report the CLI/desktop app produce (see
+    # the module note near _inject_chrome() on why report/html.py's own
+    # output is always already a complete document on its own); site nav
+    # pointing back at a live URL doesn't belong in a file someone saves
+    # or forwards to someone else.
+    filename = _download_filename(report)
+    return Response(
+        content=render_html(report),
+        media_type="text/html",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # -- upload ----------------------------------------------------------------

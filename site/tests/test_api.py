@@ -298,6 +298,60 @@ class TestSiteChrome:
         resp = client.get("/")
         assert "be the first" in resp.text.lower()
 
+
+class TestDownloadHtml:
+    """GET /runs/{id}/download -- a portable, standalone copy of the
+    report, matching exactly what the CLI/desktop app save locally (the
+    *unwrapped* report/html.py output, no site nav/footer -- see the
+    route's own comment on why chrome doesn't belong in a file someone
+    saves or forwards to someone else)."""
+
+    def test_download_link_present_on_run_detail_page(self, client, report):
+        resp = _upload(client, report)
+        run_id = resp.json()["run_id"]
+
+        detail = client.get(f"/runs/{run_id}")
+        assert f'href="/runs/{run_id}/download"' in detail.text
+        assert "Download HTML" in detail.text
+
+    def test_download_returns_attachment_with_html_extension(self, client, report):
+        resp = _upload(client, report)
+        run_id = resp.json()["run_id"]
+
+        download = client.get(f"/runs/{run_id}/download")
+        assert download.status_code == 200
+        assert download.headers["content-type"].startswith("text/html")
+        disposition = download.headers["content-disposition"]
+        assert disposition.startswith("attachment;")
+        assert disposition.endswith('.html"')
+        # zone name (sanitized to alnum-only) shows up in the filename,
+        # matching recorder.py's own saved-run naming convention
+        safe_zone = "".join(c for c in report["run"]["zone"] if c.isalnum())
+        assert safe_zone in disposition
+
+    def test_downloaded_content_is_the_unwrapped_report_no_site_chrome(
+        self, client, report,
+    ):
+        resp = _upload(client, report)
+        run_id = resp.json()["run_id"]
+
+        download = client.get(f"/runs/{run_id}/download")
+        # the report's own content is there...
+        assert report["run"]["zone"] in download.text
+        assert '"report-data"' in download.text
+        # ...but none of the site's own chrome is
+        assert "site-header" not in download.text
+        assert "site-footer" not in download.text
+        assert "fonts.googleapis.com" not in download.text
+
+        # and it matches the CLI/desktop app's own renderer output exactly
+        from postmortem.report.html import render_html
+        assert download.text == render_html(report)
+
+    def test_download_nonexistent_run_404(self, client):
+        resp = client.get("/runs/999/download")
+        assert resp.status_code == 404
+
     def test_landing_page_shows_recent_run_and_stats(self, client, report):
         resp = _upload(client, report)
         run_id = resp.json()["run_id"]
