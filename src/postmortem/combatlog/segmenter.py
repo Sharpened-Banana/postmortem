@@ -30,6 +30,36 @@ class RunSegment:
         )
         return max(0.0, end - self.start_ts)
 
+    @property
+    def likely_abandoned(self) -> bool:
+        """Best-effort guess for a run with no CHALLENGE_MODE_END: did the
+        group leave the instance (hard-abandon vote, or just walking/
+        hearthing out) rather than the log merely being cut off mid-key or
+        a crash? Only meaningful when ``completed`` is already False --
+        WoW never writes an explicit "abandoned" marker to the combat log
+        itself (confirmed: the real client event that fires on an abandon,
+        CHALLENGE_MODE_RESET, is Lua-only and never reaches the combat log
+        text file), so this is inference, not a certain answer.
+
+        Looks for a ZONE_CHANGE to a different zone than this run's own
+        instance_id anywhere in this segment's events. Deliberately checks
+        ZONE_CHANGE (the overall instance/zone), not MAP_CHANGE (which
+        changes between a multi-floor dungeon's own sublevels *without*
+        leaving the instance -- using it here would false-positive on a
+        normal floor transition mid-key).
+        """
+        if self.instance_id is None:
+            return False
+        for event in self.events:
+            if event.name != "ZONE_CHANGE" or not event.params:
+                continue
+            raw = event.params[0].strip()
+            if not raw.lstrip("-").isdigit():
+                continue
+            if int(raw) != self.instance_id:
+                return True
+        return False
+
     def summary(self) -> dict[str, Any]:
         return {
             "zone": self.zone_name,

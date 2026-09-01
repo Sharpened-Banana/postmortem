@@ -70,11 +70,12 @@ class TestLogUpload:
     def test_a_key_that_started_but_never_ended_gets_a_specific_message(self, client):
         # Regression test for a real report (2026-09-01): a real 22-minute
         # King's Rest key with a genuine CHALLENGE_MODE_START and no
-        # CHALLENGE_MODE_END (the log was grabbed before the key finished,
-        # or WoW never wrote the ending) got the exact same generic "no
-        # completed runs" message as a log with zero M+ content at all --
-        # confusing when you know you played a real key. This is the same
-        # shape of real line the report's log actually had.
+        # CHALLENGE_MODE_END got the exact same generic "no completed
+        # runs" message as a log with zero M+ content at all -- confusing
+        # when you know you played a real key. No ZONE_CHANGE follows here,
+        # so this is the ambiguous case (RunSegment.likely_abandoned is
+        # False) -- ended-normally-but-cut-off and abandoned look
+        # identical without one.
         started_not_ended = (
             '8/31/2026 22:50:23.411-4  CHALLENGE_MODE_START,"Kings\' Rest",1762,249,10,[158,9,10]\n'
         )
@@ -83,6 +84,26 @@ class TestLogUpload:
         text = resp.text.lower()
         assert "started but never finished" in text
         assert "kings" in text  # html.escape() turns the apostrophe into &#x27;
+        assert "no sign of the group leaving" in text
+        assert client.get("/api/runs").json() == []
+
+    def test_an_abandoned_key_gets_a_confident_message(self, client):
+        # Same real report, but with the actual follow-up line the real
+        # log had: a ZONE_CHANGE out of the instance right after the
+        # unfinished CHALLENGE_MODE_START (see RunSegment.likely_abandoned
+        # -- confirmed against the real reported log directly, not just
+        # this synthetic reproduction). The message should sound confident
+        # here, not hedge between two equally-likely explanations.
+        abandoned = (
+            '8/31/2026 22:50:23.411-4  CHALLENGE_MODE_START,"Kings\' Rest",1762,249,10,[158,9,10]\n'
+            '8/31/2026 23:12:28.450-4  ZONE_CHANGE,1,"Stormwind City",1\n'
+        )
+        resp = client.post("/upload", files=_upload_file(abandoned))
+        assert resp.status_code == 200
+        text = resp.text.lower()
+        assert "started but never finished" in text
+        assert "left the dungeon without finishing" in text
+        assert "no sign of the group leaving" not in text
         assert client.get("/api/runs").json() == []
 
     def test_second_upload_from_same_browser_is_rate_limited(self, client, raw_log_text):
