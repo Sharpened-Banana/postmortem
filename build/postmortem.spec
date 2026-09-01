@@ -39,6 +39,19 @@ REPO_ROOT = os.path.dirname(SPEC_DIR)
 
 entry_script = os.path.join(SPEC_DIR, "entry.py")
 
+# App icon: .icns on macOS (BUNDLE() below needs that exact format), .ico
+# on Windows (EXE()'s icon= param). Neither format works on the other
+# platform, so this is picked per-platform rather than passing one path
+# to both -- same reasoning as the sys.platform gate on BUNDLE() itself
+# further down. Both files are generated once from the same 1024x1024
+# source art (not derived at build time) and checked in here.
+if sys.platform == "darwin":
+    icon_path = os.path.join(SPEC_DIR, "postmortem.icns")
+elif sys.platform == "win32":
+    icon_path = os.path.join(SPEC_DIR, "postmortem.ico")
+else:
+    icon_path = None
+
 # Destination side ('postmortem/desktop/shell') matters more than the
 # source side: once frozen, app.py's own
 # `Path(__file__).resolve().parent / "shell"` lookup resolves against
@@ -83,6 +96,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=icon_path,
 )
 
 coll = COLLECT(
@@ -99,16 +113,13 @@ coll = COLLECT(
 # macOS only: wrap the onedir COLLECT() output in a real .app bundle.
 # A bare Unix executable has no dock icon and awkward Finder
 # double-click behavior -- BUNDLE() is the standard PyInstaller way to
-# get a proper double-clickable macOS app. No custom icon exists in this
-# repo yet (confirmed -- no .icns/.ico anywhere), so PyInstaller's
-# default icon is used; that's an accepted gap for this pass, not an
-# oversight. Not code-signed/notarized either (no paid Apple Developer
-# account available) -- see release-desktop.yml's top comment for the
-# resulting Gatekeeper-warning caveat.
+# get a proper double-clickable macOS app. Not code-signed/notarized
+# (no paid Apple Developer account available) -- see release-desktop.yml's
+# top comment for the resulting Gatekeeper-warning caveat.
 if sys.platform == "darwin":
     app = BUNDLE(
         coll,
         name="Postmortem.app",
-        icon=None,
+        icon=icon_path,
         bundle_identifier="com.postmortem.desktop",
     )
