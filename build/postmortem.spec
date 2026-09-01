@@ -52,6 +52,30 @@ elif sys.platform == "win32":
 else:
     icon_path = None
 
+# Windows only: pywebview's default GUI backend (webview/platforms/winforms.py)
+# hosts its window via .NET WinForms regardless of which browser engine
+# ends up rendering inside it (WebView2 or the legacy MSHTML control), so
+# pythonnet/clr_loader -- the bridge that loads the .NET runtime -- is a
+# hard dependency of running this app at all on Windows, not an optional
+# extra. pythonnet 3.x ships its own PyInstaller hook (pythonnet/
+# _pyinstaller/hook-clr.py) and pyinstaller-hooks-contrib ships one for
+# clr_loader (hook-clr_loader.py) -- both are confirmed to run during this
+# project's own CI build (`pyinstaller build/postmortem.spec` logs show
+# both "Processing standard module hook" lines) -- but a real crash was
+# reported (2026-09-01, "Failed to resolve Python.Runtime.Loader.Initialize")
+# on a real Windows machine despite that clean build, a well-documented
+# unresolved-upstream pywebview/pythonnet/PyInstaller interaction (see
+# r0x0r/pywebview#1215, pyinstaller/pyinstaller#6572). These hiddenimports
+# are cheap, harmless insurance on top of the hooks -- not a confirmed fix,
+# since the leading suspect for that specific crash is actually
+# environmental (running straight out of a still-zipped/"Mark of the Web"
+# download rather than a properly extracted folder) rather than a
+# packaging gap. Real Windows testing is what actually confirms either
+# way -- this can't be verified from a macOS build machine.
+hiddenimports = []
+if sys.platform == "win32":
+    hiddenimports = ["clr", "clr_loader", "pythonnet"]
+
 # Destination side ('postmortem/desktop/shell') matters more than the
 # source side: once frozen, app.py's own
 # `Path(__file__).resolve().parent / "shell"` lookup resolves against
@@ -68,7 +92,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[(shell_src, shell_dst)],
-    hiddenimports=[],
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
