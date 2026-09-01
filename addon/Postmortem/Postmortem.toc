@@ -3,6 +3,7 @@
 ## Author: lonezebra
 ## Version: 0.1.0
 ## Notes: Live companion to the Postmortem analysis tool -- recording helper, live stats, route tracking.
+## IconTexture: Interface\AddOns\Postmortem\media\icon-64.png
 ## SavedVariables: PostmortemDB, PostmortemSpellDB
 ## LoadSavedVariablesFirst: 1
 

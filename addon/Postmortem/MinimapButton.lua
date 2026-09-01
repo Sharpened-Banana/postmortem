@@ -30,7 +30,7 @@ function MA:MinimapButton_Initialize()
   local dataObject = LDB:NewDataObject(ADDON_NAME, {
     type = "launcher",
     text = "Postmortem",
-    icon = "Interface\\Icons\\INV_Relics_Hourglass_02",
+    icon = "Interface\\AddOns\\Postmortem\\media\\icon-32.png",
     OnClick = function(_, button)
       if button == "RightButton" then
         MA:Info_ShowLinkPopup()
