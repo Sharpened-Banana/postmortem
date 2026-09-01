@@ -255,3 +255,42 @@ class TestMismatchedEndDoesNotCloseAWrongRun:
         b.end(60)  # default instance=2830, matches
         (run,) = list(segment_runs(iter_events(b.lines)))
         assert run.completed and run.success
+
+    def test_phantom_end_with_the_SAME_instance_still_does_not_close(self):
+        # The gap the first instance-only fix (commit e32b32c) missed,
+        # found by a later debug sweep: an abandoned key immediately
+        # followed by another key in the *same dungeon* (a re-run after
+        # depleting, or someone else's key of the same map). The phantom
+        # END's instance then matches the abandoned run's own instance,
+        # so an instance-mismatch check alone wouldn't fire -- but the
+        # phantom's totalTimeMs is still 0, which is what actually
+        # identifies it.
+        b = LogBuilder()
+        b.start(0, zone="Altar of Fangs", instance=2993, cm=588, lvl=10)
+        b.player_damage(5, DPS1, b.npc_guid(1, "1"), "X", 1, "S", 10)
+        b.raw(20, "CHALLENGE_MODE_END,2993,0,0,0,0.000000,0.000000")  # phantom, same instance
+        b.start(21, zone="Altar of Fangs", instance=2993, cm=588, lvl=10)  # re-run, same dungeon
+        b.end(600, instance=2993, lvl=10, ms=580000)
+
+        runs = list(segment_runs(iter_events(b.lines)))
+        assert len(runs) == 2
+        assert not runs[0].completed  # abandoned, not a false depleted completion
+        assert runs[0].success is None
+        # (likely_abandoned is a separate ZONE_CHANGE-based heuristic, not
+        # exercised here -- this test is about the phantom not falsely
+        # closing the run.)
+        assert runs[1].completed and runs[1].success
+
+    def test_a_real_depletion_still_closes_as_completed_but_not_timed(self):
+        # The phantom signal is totalTimeMs==0, NOT success==0 -- a real
+        # depleted (completed-but-not-timed) key has success=0 with a
+        # genuinely nonzero totalTimeMs, and must still be reported as a
+        # real completion, not left open as if abandoned.
+        b = LogBuilder()
+        b.start(0)  # default instance=2830
+        b.player_damage(5, DPS1, b.npc_guid(1, "1"), "X", 1, "S", 10)
+        b.raw(60, "CHALLENGE_MODE_END,2830,0,10,1800000,0.000000,0.000000")  # depleted: not timed, real duration
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        assert run.completed
+        assert run.success is False
+        assert run.duration_ms == 1800000

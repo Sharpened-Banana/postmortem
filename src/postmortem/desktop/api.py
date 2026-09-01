@@ -493,7 +493,11 @@ class DesktopAPI:
             "type": "run_complete", "zone": run.zone, "level": run.keystone_level,
         })
 
-        report = _cli._write_recorded_reports(run, route, store)
+        # Pass avoidable through: start_watch loads (and validates) the
+        # avoidable-damage data file, but until 2026-09-01 this call
+        # dropped it on the floor -- a Watch Live run silently produced
+        # no avoidable-damage breakdown even with the file set in the UI.
+        report = _cli._write_recorded_reports(run, route, store, avoidable=avoidable)
         if report is None:
             self._emit_watch_event({
                 "type": "analyze_failed",

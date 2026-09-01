@@ -695,6 +695,24 @@ class TestAnalyzeRun:
         assert "<svg" in html
         assert '"map":' in html
 
+    def test_html_title_escapes_a_malicious_zone_name(self):
+        # Stored-XSS regression (2026-09-01): the report <title> took the
+        # zone name unescaped, and zone comes straight from a combat log's
+        # CHALLENGE_MODE_START -- attacker-chosen text once a log is
+        # uploaded to the public tracker, whose CSP allows inline scripts.
+        # A "</title><script>" zone must not produce a live script element
+        # in the document head.
+        from postmortem.report.html import render_html
+
+        report = {"run": {"zone": "</title><script>alert(1)</script>",
+                          "keystone_level": 10}}
+        html = render_html(report)
+        # The title is escaped, and the embedded JSON separately escapes
+        # "</" to "<\/", so the raw breakout string appears nowhere live.
+        assert "</title><script>alert(1)</script>" not in html
+        assert "<script>alert(1)</script>" not in html
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+
     def test_renderer_omits_map_without_dungeon_data(self, run_segment, route):
         from postmortem.report.html import render_html
 
