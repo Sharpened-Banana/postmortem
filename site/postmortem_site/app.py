@@ -171,6 +171,7 @@ def _site_nav(active: str) -> str:
     links = [
         ("home", "/", "Home"),
         ("runs", "/runs", "Browse Runs"),
+        ("guide", "/guide", "Guide"),
         ("about", "/about", "About"),
     ]
     items = "".join(
@@ -469,6 +470,185 @@ verification of the underlying combat log.</p>
 @app.get("/about")
 async def about() -> HTMLResponse:
     return HTMLResponse(_page("About — Postmortem", "about", _ABOUT_BODY))
+
+
+# -- guide (non-technical, click-by-click walkthrough + FAQ) ---------------
+#
+# Distinct from About above: About is a project-overview/reference page
+# (tokens, rate limits, exact byte caps) for anyone curious how the site
+# works. This is the page to hand a non-technical friend who's never done
+# this before -- illustrated steps, zero jargon, nothing assumed. --teal/
+# --teal-dim are the only tokens not already in _PAGE_STYLE (via
+# _CHROME_STYLE); everything else reuses the site's existing palette.
+_GUIDE_CSS = """
+.guide-wrap { max-width:680px; padding-top:48px; padding-bottom:8px; }
+.guide-wrap { --teal:#4ecdb0; --teal-dim:rgba(78,205,176,.14); }
+.guide-wrap h1 { font-size:26px; color:var(--text); margin-bottom:6px; }
+.guide-wrap p.lead { color:var(--dim); max-width:480px; }
+.guide-badges { display:flex; gap:10px; margin:22px 0 8px; flex-wrap:wrap; }
+.guide-badge { display:flex; align-items:center; gap:7px; font-size:12.5px; font-weight:600;
+  color:var(--dim); background:var(--panel); border:1px solid var(--line);
+  border-radius:999px; padding:7px 13px; }
+.guide-steps { display:flex; flex-direction:column; gap:16px; margin-top:28px; }
+.guide-step { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+  padding:22px 22px 24px; }
+.guide-step.done { border-color:rgba(78,205,176,.4);
+  background:linear-gradient(180deg,rgba(78,205,176,.06),var(--panel)); }
+.guide-step-head { display:flex; align-items:center; gap:12px; margin-bottom:6px; }
+.guide-num { flex:none; width:30px; height:30px; border-radius:999px; background:var(--accent-dim);
+  border:1px solid rgba(215,169,76,.4); color:var(--accent); font-weight:700; font-size:14px;
+  display:flex; align-items:center; justify-content:center; }
+.guide-step.done .guide-num { background:var(--teal-dim); border-color:rgba(78,205,176,.45); color:var(--teal); }
+.guide-step h2 { font-size:16.5px; color:var(--text); margin:0; }
+.guide-step-body { color:var(--dim); margin:0 0 0 42px; }
+.guide-step-body p { margin:0 0 8px; }
+.guide-step-body p:last-child { margin-bottom:0; }
+.guide-step-body strong { color:var(--text); }
+.guide-illus { margin:14px 0 0 42px; background:var(--panel2); border:1px solid var(--line);
+  border-radius:var(--radius-sm); padding:14px 16px; }
+.guide-path { display:flex; align-items:center; flex-wrap:wrap; gap:6px; font-size:13px; }
+.guide-crumb { background:var(--bg); border:1px solid var(--line); border-radius:6px;
+  padding:5px 9px; color:var(--text); font-weight:500; }
+.guide-sep { color:var(--dim); }
+.guide-check-row { display:flex; align-items:center; gap:10px; font-size:14px; color:var(--text); }
+.guide-checkbox { width:16px; height:16px; border-radius:4px; background:var(--teal);
+  flex:none; display:inline-block; text-align:center; line-height:16px; color:#0d2a24; font-size:11px; }
+.guide-dropzone { border:2px dashed rgba(78,205,176,.45); border-radius:10px; padding:18px;
+  text-align:center; background:rgba(78,205,176,.05); color:var(--dim); font-size:13.5px; }
+.guide-dropzone .fname { display:inline-block; margin-top:8px; font-size:12px; color:var(--dim);
+  background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:3px 8px; }
+.guide-path-hint { margin:12px 0 0 42px; font-size:13px; color:var(--dim); }
+.guide-cta-row { margin:16px 0 0 42px; }
+.guide-cta { display:inline-block; background:var(--accent); color:var(--accent-ink);
+  font-weight:700; font-size:14px; text-decoration:none; padding:10px 20px;
+  border-radius:999px; }
+.guide-cta:hover { background:#e2b75c; text-decoration:none; }
+.guide-faq { margin-top:44px; }
+.guide-faq h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--dim);
+  margin-bottom:14px; }
+.guide-qa { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius-sm);
+  padding:14px 16px; margin-bottom:10px; }
+.guide-qa .q { font-weight:600; color:var(--text); font-size:14px; margin-bottom:4px; }
+.guide-qa .a { color:var(--dim); font-size:13.5px; margin:0; }
+@media (max-width:520px) {
+  .guide-step-body, .guide-illus, .guide-path-hint, .guide-cta-row { margin-left:0; }
+}
+"""
+
+_GUIDE_BODY = f"""
+<style>{_GUIDE_CSS}</style>
+<div class="wrap guide-wrap">
+<h1>Getting your log to Postmortem</h1>
+<p class="lead">Five steps, no installs, no addons required — just your normal game and a web
+browser. Send this page to anyone you want a log from.</p>
+
+<div class="guide-badges">
+  <span class="guide-badge">About 5 minutes</span>
+  <span class="guide-badge">Nothing to install</span>
+  <span class="guide-badge">Raw log never stored — see below</span>
+</div>
+
+<div class="guide-steps">
+
+  <div class="guide-step">
+    <div class="guide-step-head"><span class="guide-num">1</span><h2>Make sure your combat log is turned on</h2></div>
+    <div class="guide-step-body">
+      <p>In game, press <strong>Esc</strong> &rarr; <strong>Options</strong> &rarr;
+      <strong>System</strong> &rarr; <strong>Network</strong>, and make sure
+      <strong>Advanced Combat Logging</strong> is checked. You only have to do this once —
+      it stays on.</p>
+    </div>
+    <div class="guide-illus">
+      <div class="guide-check-row"><span class="guide-checkbox">✓</span> Advanced Combat Logging</div>
+    </div>
+  </div>
+
+  <div class="guide-step">
+    <div class="guide-step-head"><span class="guide-num">2</span><h2>Play your key or raid as normal</h2></div>
+    <div class="guide-step-body">
+      <p>That's it — nothing else to do while you play. The game quietly writes everything to
+      a file in the background.</p>
+    </div>
+  </div>
+
+  <div class="guide-step">
+    <div class="guide-step-head"><span class="guide-num">3</span><h2>Find the log file</h2></div>
+    <div class="guide-step-body">
+      <p>When you're done playing, open the <strong>Battle.net</strong> app. Click
+      <strong>World of Warcraft</strong> on the left, then the small <strong>gear icon</strong>
+      next to the orange Play button, then <strong>Show in Explorer</strong> (Mac: <strong>Show
+      in Finder</strong>).</p>
+      <p>That opens your WoW folder directly — no typing needed. From there, open
+      <strong>_retail_</strong>, then <strong>Logs</strong>. Your file is called
+      <strong>WoWCombatLog.txt</strong>.</p>
+    </div>
+    <div class="guide-illus">
+      <div class="guide-path">
+        <span class="guide-crumb">gear icon</span><span class="guide-sep">&rarr;</span>
+        <span class="guide-crumb">Show in Explorer</span><span class="guide-sep">&rarr;</span>
+        <span class="guide-crumb">_retail_</span><span class="guide-sep">&rarr;</span>
+        <span class="guide-crumb">Logs</span>
+      </div>
+    </div>
+    <p class="guide-path-hint">Prefer to type it? On Windows it's usually at
+    <code>C:\\Program Files (x86)\\World of Warcraft\\_retail_\\Logs</code>; on Mac, inside the
+    WoW app's own install folder at the same relative path.</p>
+  </div>
+
+  <div class="guide-step">
+    <div class="guide-step-head"><span class="guide-num">4</span><h2>Upload the file</h2></div>
+    <div class="guide-step-body">
+      <p>Go to the <a href="/upload">upload page</a> and drop <strong>WoWCombatLog.txt</strong>
+      onto it, or click to browse and pick it. Then click <strong>Analyze &amp; upload</strong>.</p>
+    </div>
+    <div class="guide-illus">
+      <div class="guide-dropzone">Drop your file here<br>
+        <span class="fname">WoWCombatLog.txt</span></div>
+    </div>
+    <div class="guide-cta-row"><a class="guide-cta" href="/upload">Open the upload page</a></div>
+  </div>
+
+  <div class="guide-step done">
+    <div class="guide-step-head"><span class="guide-num">✓</span><h2>Done — grab your link</h2></div>
+    <div class="guide-step-body">
+      <p>Every completed key in the log gets analyzed automatically. When it finishes, you'll
+      see a link to each run's report — that's the one to share.</p>
+    </div>
+  </div>
+
+</div>
+
+<div class="guide-faq">
+<h2>If something looks off</h2>
+<div class="guide-qa">
+  <div class="q">Nothing showed up after uploading</div>
+  <p class="a">Advanced Combat Logging was probably off during that key — check step 1, then
+  upload your next one.</p>
+</div>
+<div class="guide-qa">
+  <div class="q">It says the file is too big</div>
+  <p class="a">Only happens with one very long, unbroken key. A log with several keys in it —
+  even a whole night's worth — is fine well under the limit.</p>
+</div>
+<div class="guide-qa">
+  <div class="q">Is anything private in there?</div>
+  <p class="a">The raw file itself is never kept — only the finished report (damage, deaths,
+  timing) gets saved, and the raw log is discarded the moment it's processed.</p>
+</div>
+<div class="guide-qa">
+  <div class="q">Do I need the desktop app or addon?</div>
+  <p class="a">No — this page and the upload form are the whole thing. The desktop app and WoW
+  addon exist too, for anyone who wants automatic per-key uploads while they play, but neither
+  is required just to send a log.</p>
+</div>
+</div>
+</div>
+"""
+
+
+@app.get("/guide")
+async def guide() -> HTMLResponse:
+    return HTMLResponse(_page("Guide — Postmortem", "guide", _GUIDE_BODY))
 
 
 # -- feed ----------------------------------------------------------------
@@ -991,7 +1171,8 @@ _UPLOAD_FORM_BODY = f"""
 <div class="wrap upload-wrap">
 <h1>Upload a run</h1>
 <p class="lead">Pick your <code>WoWCombatLog.txt</code> directly — every completed
-Mythic+ key in it gets analyzed and posted automatically. No install, no app.</p>
+Mythic+ key in it gets analyzed and posted automatically. No install, no app.
+Not sure where to find that file? <a href="/guide">step-by-step guide</a>.</p>
 <form method="post" action="/upload" enctype="multipart/form-data">
   <div class="dropzone">
     <input type="file" name="logfile" accept=".txt" required>

@@ -249,6 +249,7 @@ class TestSiteChrome:
     PAGES_AND_ACTIVE = [
         ("/", "home"),
         ("/runs", "runs"),
+        ("/guide", "guide"),
         ("/about", "about"),
         ("/upload", "upload"),
     ]
@@ -270,6 +271,9 @@ class TestSiteChrome:
 
         resp = client.get("/runs")
         assert '<a href="/runs" class="active">' in resp.text
+
+        resp = client.get("/guide")
+        assert '<a href="/guide" class="active">' in resp.text
 
         resp = client.get("/about")
         assert '<a href="/about" class="active">' in resp.text
@@ -297,6 +301,32 @@ class TestSiteChrome:
     def test_landing_page_shows_empty_state_with_no_runs(self, client):
         resp = client.get("/")
         assert "be the first" in resp.text.lower()
+
+
+class TestGuidePage:
+    """/guide -- the non-technical, click-by-click walkthrough + FAQ
+    (distinct from /about, which is a project-overview/reference page --
+    see the module comment above _GUIDE_CSS)."""
+
+    def test_guide_covers_the_five_steps(self, client):
+        resp = client.get("/guide")
+        assert resp.status_code == 200
+        for phrase in (
+            "Advanced Combat Logging",
+            "Show in Explorer",
+            "_retail_",
+            "WoWCombatLog.txt",
+            "Analyze &amp; upload",
+        ):
+            assert phrase in resp.text
+
+    def test_guide_links_to_the_real_upload_page(self, client):
+        resp = client.get("/guide")
+        assert 'href="/upload"' in resp.text
+
+    def test_upload_page_links_back_to_the_guide(self, client):
+        resp = client.get("/upload")
+        assert 'href="/guide"' in resp.text
 
 
 class TestDownloadHtml:
