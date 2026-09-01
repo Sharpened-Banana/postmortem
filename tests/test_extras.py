@@ -7,7 +7,7 @@ import subprocess
 
 import pytest
 
-from conftest import build_run_log
+from conftest import DPS1, LogBuilder, build_run_log
 
 from postmortem.cli import main
 from postmortem.raiderio import (
@@ -626,6 +626,66 @@ class TestRecorderWaitsForLogFile:
         runs = rec.watch()  # must return, not hang/raise, and never see the file
         assert runs == []
         assert not log.exists()
+
+
+class TestRecorderResumesInProgressRun:
+    """Real report (2026-09-01): a key that finished completely normally
+    was never picked up by Watch Live -- no error, nothing in the
+    activity list, silence. Root cause: the key had already started
+    (CHALLENGE_MODE_START already written) before Watch Live was turned
+    on, so watch()'s usual "skip to end-of-file, only tail what's new"
+    behavior for an already-existing file skipped straight past that
+    START. When the run's own CHALLENGE_MODE_END arrived later, _feed()
+    had no open run to close (self._current was still None), so the END
+    matched nothing and was silently dropped."""
+
+    def test_a_key_already_in_progress_when_watch_starts_is_still_caught(self, tmp_path):
+        b = LogBuilder()
+        b.start(0)  # the key already began before watch() opens the file
+        b.player_damage(5, DPS1, b.npc_guid(1, "1"), "X", 1, "S", 10)
+        log = tmp_path / "WoWCombatLog.txt"
+        log.write_text(b.text(), encoding="utf-8")
+
+        rec = Recorder(log_path=log, out_dir=tmp_path / "runs", echo=lambda s: None)
+
+        import threading
+        import time
+
+        def finish_the_key_after_a_moment():
+            time.sleep(0.2)
+            end_only = LogBuilder()
+            end_only.end(60)
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(end_only.text())
+
+        threading.Thread(target=finish_the_key_after_a_moment, daemon=True).start()
+        runs = rec.watch(stop_after_runs=1)
+
+        assert len(runs) == 1
+        assert runs[0].completed
+
+    def test_a_run_already_finished_before_watch_starts_is_not_replayed(self, tmp_path):
+        # The normal case this fix must not disturb: watch() starting
+        # against a log whose last run already has its own END should
+        # still only tail what's new from here, not re-report history.
+        log = tmp_path / "WoWCombatLog.txt"
+        log.write_text(build_run_log().text(), encoding="utf-8")
+
+        rec = Recorder(
+            log_path=log, out_dir=tmp_path / "runs",
+            poll_interval=0.05, echo=lambda s: None,
+        )
+
+        import threading
+        import time
+
+        def stop_after_a_moment():
+            time.sleep(0.3)
+            rec.request_stop()
+
+        threading.Thread(target=stop_after_a_moment, daemon=True).start()
+        runs = rec.watch()
+        assert runs == []
 
 
 class TestRecorderHooks:

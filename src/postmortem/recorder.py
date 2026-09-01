@@ -107,6 +107,20 @@ class Recorder:
         click Start, then go play) used to crash immediately with
         ``FileNotFoundError``; it now waits quietly for the file to show
         up, same as it already waits for new lines once open.
+
+        Starting a watch *after* a key is already underway is also normal
+        (open the app mid-pull, or a multi-key session where an earlier
+        key already wrote a CHALLENGE_MODE_START before this watch began)
+        -- confirmed as a real report (2026-09-01): a key that finished
+        completely normally was never picked up because watch() had
+        skipped straight to end-of-file on open, past the START that was
+        already sitting there, so the run's own CHALLENGE_MODE_END later
+        matched nothing (``_feed()`` only reacts to an END while
+        ``_current`` is set) and was silently dropped -- no error, no
+        event, nothing. Fixed by scanning a pre-existing file once on
+        open for its most recent CHALLENGE_MODE_START with no
+        CHALLENGE_MODE_END after it, and resuming from there instead of
+        EOF when one is found.
         """
         self.out_dir.mkdir(parents=True, exist_ok=True)
         runs: list[RecordedRun] = []
@@ -131,7 +145,10 @@ class Recorder:
         # history to skip -- everything in it is fresh, from right now --
         # so seeking to its end here would silently miss it entirely.
         if not self.from_start and not waited_for_file:
-            fh.seek(0, os.SEEK_END)
+            resume_at, in_progress = self._find_resume_point(fh)
+            fh.seek(resume_at)
+            if in_progress:
+                self.echo("  found a key already in progress -- resuming it")
         try:
             while not self._stop_requested:
                 line = fh.readline()
@@ -158,6 +175,37 @@ class Recorder:
 
     def _open(self):
         return open(self.log_path, "r", encoding="utf-8", errors="replace")
+
+    def _find_resume_point(self, fh) -> tuple[int, bool]:
+        """Scan a pre-existing log file once (only called right after
+        opening it in ``watch()``) for its most recent CHALLENGE_MODE_START
+        with no CHALLENGE_MODE_END after it -- an already-in-progress run
+        at the moment watching started. Returns ``(offset, in_progress)``:
+        the byte offset ``watch()`` should seek to (right at that START
+        line when one is found and still unmatched, otherwise end-of-file
+        -- the normal "only tail what's new" behavior), and whether an
+        in-progress run was actually found.
+
+        Uses ``fh.tell()``/``readline()`` (not manual byte-length math) so
+        the returned offset is safe to pass back to this same text-mode
+        file handle's ``seek()`` -- see the Python docs' own caveat that a
+        text stream's ``tell()`` value is only meaningful when taken at a
+        line boundary like this, not derived by summing decoded string
+        lengths (multi-byte UTF-8 content would throw that off).
+        """
+        pending_start_offset: Optional[int] = None
+        offset = fh.tell()
+        line = fh.readline()
+        while line:
+            if _START_RE.search(line):
+                pending_start_offset = offset
+            elif _END_RE.search(line):
+                pending_start_offset = None
+            offset = fh.tell()
+            line = fh.readline()
+        if pending_start_offset is not None:
+            return pending_start_offset, True
+        return offset, False
 
     def _truncated(self, fh) -> bool:
         try:
