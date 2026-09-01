@@ -35,6 +35,22 @@ jobs:
         with:
           python-version: "3.11"
 
+      # Stamps the tag being released (e.g. "alpha-desktop-8") into
+      # _version.py *before* `pip install` below copies the package
+      # into site-packages -- that's the copy PyInstaller actually
+      # bundles, so this has to happen first. Not committed back to the
+      # repo: this only touches the CI runner's own checkout. A source
+      # checkout / dev run never touches this file, so it keeps
+      # _version.py's checked-in "dev" placeholder, which
+      # desktop/updater.py already treats as "not a release build" --
+      # see that module's own docstring.
+      - name: Stamp version
+        shell: bash
+        run: |
+          cat > src/postmortem/desktop/_version.py <<EOF
+          VERSION = "${GITHUB_REF_NAME}"
+          EOF
+
       - name: Install package + build tooling
         run: pip install ".[dev,desktop]"
 
