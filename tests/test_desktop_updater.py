@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import io
 import sys
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -360,6 +361,22 @@ class TestDownloadUpdate:
 
 
 class TestApplyUpdateAndRelaunch:
+    @pytest.fixture(autouse=True)
+    def isolated_tempdir(self, tmp_path, monkeypatch):
+        # apply_update_and_relaunch() always calls the real
+        # tempfile.mkdtemp() itself for its helper script's directory
+        # (not parameterized -- there's no caller-supplied "put your
+        # helper script here" concept) -- redirected into tmp_path so
+        # exercising it for real in these tests doesn't scatter
+        # "postmortem-update-*" directories across the real system temp
+        # folder on every test run (confirmed: it had, dozens of times,
+        # by the time this was noticed).
+        real_mkdtemp = tempfile.mkdtemp
+        monkeypatch.setattr(
+            tempfile, "mkdtemp",
+            lambda *a, **kw: real_mkdtemp(*a, **{**kw, "dir": tmp_path}),
+        )
+
     def test_refuses_outside_a_frozen_build(self, tmp_path, monkeypatch):
         monkeypatch.setattr(sys, "frozen", False, raising=False)
         with pytest.raises(RuntimeError):
