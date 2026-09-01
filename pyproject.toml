@@ -27,7 +27,7 @@ postmortem-desktop = "postmortem.desktop.app:main"
 [project.optional-dependencies]
 dev = ["pytest>=7", "pyinstaller>=6.0"]
 site = ["fastapi>=0.110", "uvicorn[standard]>=0.30", "python-multipart>=0.0.9"]
-desktop = ["pywebview>=6.0"]
+desktop = ["pywebview>=6.0", "certifi"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

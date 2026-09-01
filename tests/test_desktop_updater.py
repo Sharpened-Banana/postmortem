@@ -24,6 +24,59 @@ import pytest
 from postmortem.desktop import updater
 
 
+# -- SSL context (frozen-build cert bundle) ----------------------------
+
+
+class TestSSLContext:
+    """Real report (2026-09-01): the update banner never appeared on a
+    real installed macOS build, with no visible error anywhere. Root
+    cause, confirmed with a real PyInstaller build: a frozen app has no
+    CA certificate bundle of its own, so urllib.request.urlopen() over
+    https:// raised ssl.SSLCertVerificationError (wrapped as a
+    urllib.error.URLError) on every single call -- caught and silently
+    turned into None by _default_fetcher's own except clause (by
+    design, so a real network hiccup can't crash the update check),
+    which made the whole feature look like it was just quietly doing
+    nothing. certifi ships a real CA bundle file PyInstaller's own
+    built-in hook bundles automatically the moment certifi is imported
+    anywhere in the app -- confirmed with a real local PyInstaller
+    build that a plain https:// GitHub API call fails without this and
+    succeeds with it.
+    """
+
+    def test_module_level_ssl_context_is_set_up_from_certifi(self):
+        # certifi is a real desktop-extra dependency (pyproject.toml) --
+        # this is really just confirming the module-level try/except
+        # around `import certifi` actually resolved to the "have it"
+        # branch in this environment, not the ImportError fallback.
+        assert updater._SSL_CONTEXT is not None
+
+    def test_default_fetcher_passes_the_ssl_context_to_urlopen(self, monkeypatch):
+        captured = {}
+
+        def fake_urlopen(req, timeout=None, context=None):
+            captured["context"] = context
+            raise updater.urllib.error.URLError("stop here, this test only cares about the call args")
+
+        monkeypatch.setattr(updater.urllib.request, "urlopen", fake_urlopen)
+        assert updater._default_fetcher("https://api.github.com/x") is None
+        assert captured["context"] is updater._SSL_CONTEXT
+
+    def test_download_update_passes_the_ssl_context_to_urlopen(self, monkeypatch, tmp_path):
+        captured = {}
+
+        def fake_urlopen(req, timeout=None, context=None):
+            captured["context"] = context
+            raise updater.urllib.error.URLError("stop here, this test only cares about the call args")
+
+        monkeypatch.setattr(updater.urllib.request, "urlopen", fake_urlopen)
+        with pytest.raises(updater.urllib.error.URLError):
+            updater.download_update(
+                "https://github.com/x/y/releases/download/t/a.zip", tmp_path / "out.zip",
+            )
+        assert captured["context"] is updater._SSL_CONTEXT
+
+
 # -- check_for_update ---------------------------------------------------
 
 
@@ -194,7 +247,7 @@ class TestDownloadUpdate:
         payload = b"x" * 1000
         monkeypatch.setattr(
             updater.urllib.request, "urlopen",
-            lambda req, timeout=None: _FakeResponse(payload, content_length=len(payload)),
+            lambda req, timeout=None, context=None: _FakeResponse(payload, content_length=len(payload)),
         )
         progress = []
         dest = tmp_path / "out.zip"
@@ -210,7 +263,7 @@ class TestDownloadUpdate:
         payload = b"y" * 500
         monkeypatch.setattr(
             updater.urllib.request, "urlopen",
-            lambda req, timeout=None: _FakeResponse(payload),
+            lambda req, timeout=None, context=None: _FakeResponse(payload),
         )
         dest = tmp_path / "out.zip"
         updater.download_update("https://github.com/x/y/releases/download/t/a.zip", dest)
@@ -298,7 +351,7 @@ class TestPerformUpdate:
         payload = build_fake_zip_bytes()
         monkeypatch.setattr(
             updater.urllib.request, "urlopen",
-            lambda req, timeout=None: _FakeResponse(payload, content_length=len(payload)),
+            lambda req, timeout=None, context=None: _FakeResponse(payload, content_length=len(payload)),
         )
 
         work_dir = tmp_path / "work"
