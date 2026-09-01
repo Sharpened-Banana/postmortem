@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import ssl
 import stat
 import subprocess
 import sys
@@ -48,6 +49,30 @@ from typing import Callable, Optional
 from urllib.parse import urlsplit
 
 from ._version import VERSION
+
+# A PyInstaller-frozen build has no CA certificate bundle of its own --
+# confirmed as the real cause of a real report (2026-09-01: "no update
+# banner" on a real installed macOS build, with the update check itself
+# never actually failing loudly -- reproduced directly: without a
+# locatable cert store, urllib.request.urlopen() over https:// raises
+# ssl.SSLCertVerificationError, wrapped as a urllib.error.URLError,
+# which _default_fetcher's own except clause (by design, to never let a
+# network hiccup crash the update check) was silently swallowing every
+# single time. ``certifi`` ships its own CA bundle as a real file
+# (certifi.where()), which is what actually needs bundling -- passing
+# it explicitly here, rather than relying on the interpreter's own
+# guess at a system cert path, is what makes this work the same whether
+# frozen or not. Only imported here (desktop/updater.py is desktop-only
+# code, never imported by the plain CLI or the site) -- tolerant of it
+# being missing anyway (falls back to the interpreter's own default
+# verification behavior) rather than a hard ImportError, since a
+# missing optional dependency shouldn't be worse than the bug this
+# fixes.
+try:
+    import certifi
+    _SSL_CONTEXT: Optional[ssl.SSLContext] = ssl.create_default_context(cafile=certifi.where())
+except ImportError:
+    _SSL_CONTEXT = None
 
 REPO = "Sharpened-Banana/postmortem"
 _RELEASES_LATEST_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
@@ -85,7 +110,7 @@ def _default_fetcher(url: str) -> Optional[dict]:
         "Accept": "application/vnd.github+json",
     })
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=10, context=_SSL_CONTEXT) as resp:
             return json.load(resp)
     except (urllib.error.URLError, OSError, ValueError):
         return None
@@ -142,7 +167,7 @@ def download_update(url: str, dest: Path, on_progress: Optional[ProgressCallback
     if not _is_trusted_download_url(url):
         raise ValueError(f"refusing to download from untrusted host: {url}")
     req = urllib.request.Request(url, headers={"User-Agent": "postmortem-desktop"})
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with urllib.request.urlopen(req, timeout=30, context=_SSL_CONTEXT) as resp:
         total = resp.headers.get("Content-Length")
         total = int(total) if total and total.isdigit() else None
         written = 0
