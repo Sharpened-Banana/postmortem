@@ -30,7 +30,11 @@ testable exactly like the rest of this codebase (see
 
 from __future__ import annotations
 
+import os
+import sys
+import tempfile
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional
@@ -43,6 +47,7 @@ from ..recorder import Recorder
 from ..report.html import render_html
 from ..report.index import collect_reports, render_index
 from . import config as _config
+from . import updater as _updater
 
 
 class DesktopAPI:
@@ -61,6 +66,8 @@ class DesktopAPI:
         # stateless, so this is the one place instance state lives.
         self._watch_recorder: Optional[Recorder] = None
         self._watch_thread: Optional[threading.Thread] = None
+        # Auto-update state (see check_for_update/start_update below).
+        self._update_thread: Optional[threading.Thread] = None
 
     # -- run listing --------------------------------------------------------
 
@@ -469,6 +476,94 @@ class DesktopAPI:
             import json as _json
             import webview
             webview.windows[0].evaluate_js(f"window.onWatchEvent({_json.dumps(event)})")
+        except Exception:
+            pass
+
+    # -- auto-update ----------------------------------------------------------
+    #
+    # Same "runs on a background thread, progress pushed via events"
+    # shape as watch mode above (see that section's own comment) --
+    # downloading+applying an update takes real time and ends with this
+    # process exiting itself, so there's no single return value that
+    # could describe the whole operation.
+    #
+    # Events (window.onUpdateEvent in shell/app.js):
+    #   {"type": "downloading", "written": int, "total": int|None}
+    #     -- streamed periodically while the update zip downloads.
+    #     "total" is None when the server didn't send a Content-Length.
+    #   {"type": "applying"}
+    #     -- download done, extracting and validating the new build.
+    #   {"type": "relaunching"}
+    #     -- the swap is handed off to a detached helper; this process
+    #        is about to exit. The UI should show this as "success" --
+    #        there's no further event coming.
+    #   {"type": "failed", "error": str}
+    #     -- the download, extraction, or validation failed. The
+    #        current install was never touched (the swap only happens
+    #        after everything downloaded and validated cleanly).
+
+    def check_for_update(self) -> dict:
+        """Check GitHub for a newer ``alpha-desktop-N`` build than the
+        one currently running. Returns ``{"ok": True, "update": {...}}``
+        (see ``updater.check_for_update()``'s own docstring for the
+        dict's shape) when one's available, or
+        ``{"ok": True, "update": None}`` when there isn't one -- a dev
+        build, no network, and "already on the latest" all look like
+        this alike, since none of them are errors. Never raises.
+        """
+        try:
+            return {"ok": True, "update": _updater.check_for_update()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def start_update(self, download_url: str) -> dict:
+        """Start downloading and applying an update (the
+        ``download_url`` from a prior ``check_for_update()`` call).
+        Returns ``{"ok": True}`` once the update thread is running, or
+        ``{"ok": False, "error": "..."}`` if one's already in progress,
+        this isn't a packaged build (nothing to self-update out of a
+        source checkout), or ``download_url`` isn't a trusted GitHub
+        host. Never raises -- everything past that point is reported via
+        ``window.onUpdateEvent`` instead, since this process exits
+        itself on success.
+        """
+        if self._update_thread is not None and self._update_thread.is_alive():
+            return {"ok": False, "error": "an update is already in progress"}
+        if not getattr(sys, "frozen", False):
+            return {"ok": False, "error": "auto-update only works in a packaged build"}
+        if not _updater._is_trusted_download_url(download_url):
+            return {"ok": False, "error": "refusing to download from an untrusted source"}
+
+        def run_update() -> None:
+            try:
+                work_dir = Path(tempfile.mkdtemp(prefix="postmortem-update-dl-"))
+
+                def on_progress(p: dict) -> None:
+                    self._emit_update_event({"type": "downloading", **p})
+
+                new_install = _updater.perform_update(download_url, work_dir, on_progress=on_progress)
+                self._emit_update_event({"type": "applying"})
+                _updater.apply_update_and_relaunch(new_install)
+                self._emit_update_event({"type": "relaunching"})
+                time.sleep(1.5)  # let the UI actually render that message first
+                os._exit(0)
+            except Exception as exc:
+                self._emit_update_event({"type": "failed", "error": str(exc)})
+
+        self._update_thread = threading.Thread(
+            target=run_update, name="postmortem-update", daemon=True,
+        )
+        self._update_thread.start()
+        return {"ok": True}
+
+    def _emit_update_event(self, event: dict) -> None:
+        """Push a live status update to the UI (``window.onUpdateEvent``
+        in shell/app.js). Best-effort, same reasoning as
+        ``_emit_watch_event`` above."""
+        try:
+            import json as _json
+            import webview
+            webview.windows[0].evaluate_js(f"window.onUpdateEvent({_json.dumps(event)})")
         except Exception:
             pass
 
