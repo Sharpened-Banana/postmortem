@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import textwrap
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -24,6 +25,28 @@ from postmortem.history.store import ingest as history_ingest
 @pytest.fixture()
 def api() -> DesktopAPI:
     return DesktopAPI()
+
+
+@pytest.fixture(autouse=True)
+def isolated_config_dir(tmp_path, monkeypatch):
+    """File-wide, not per-class: a growing number of DesktopAPI methods
+    resolve local app-data paths through desktop.config.config_dir() --
+    settings, watch-mode output, and (since analyze() started
+    auto-saving reports locally -- see api.py's _save_report_locally)
+    every analyze() call too. A real incident (2026-09-01): only
+    TestUploadReport/TestWatchMode/TestSettings had their own copy of
+    this fixture, so adding analyze()'s local auto-save made
+    TestAnalyzeSuccess's tests silently write real report files and a
+    real history.db into the developer's actual
+    ~/Library/Application Support/postmortem the moment this suite ran
+    -- caught and cleaned up by hand, not by any test. One file-wide
+    autouse fixture instead of a fixture every test class has to
+    remember to add for itself makes that structurally impossible going
+    forward, for this method or any future one.
+    """
+    fake_dir = tmp_path / "postmortem-config"
+    monkeypatch.setattr(config_module, "config_dir", lambda: fake_dir)
+    return fake_dir
 
 
 # -- list_runs ----------------------------------------------------------
@@ -149,6 +172,99 @@ class TestAnalyzeSuccess:
         })
         assert result["ok"] is True
         assert result["report"]["death_cost"]["per_death_s"] == 30
+
+
+class TestAnalyzeAutoSavesLocally:
+    """analyze() ("New Analysis") used to only ever hold its report in
+    memory for as long as the report screen stayed open -- unlike Watch
+    Live, which has always written its recorded runs to disk. Real gap
+    (2026-09-01, user question: "are reports saved locally? if not can
+    we add this?"): closing the app (or just navigating away) lost the
+    report for good, with no way back short of re-running the analysis
+    from the same log. _save_report_locally() fixes this the same way
+    start_watch() already has zero-config output -- see
+    config.resolve_output_dir/resolve_history_db_path.
+    """
+
+    def test_saves_json_and_html_and_ingests_into_history_with_zero_config(
+        self, api, log_file, isolated_config_dir,
+    ):
+        result = api.analyze({"log_path": str(log_file)})
+        assert result["ok"] is True
+        saved = result["saved"]
+        assert saved is not None
+
+        json_path = Path(saved["json_path"])
+        html_path = Path(saved["html_path"])
+        assert json_path.exists() and json_path.parent == isolated_config_dir / "analyzed-runs"
+        assert html_path.exists()
+        assert json.loads(json_path.read_text())["run"]["zone"] == "Murder Row"
+
+        assert isinstance(saved["run_id"], int)
+
+        from postmortem.history.store import query_runs
+        rows = query_runs(isolated_config_dir / "history.db")
+        assert len(rows) == 1
+        assert rows[0]["zone"] == "Murder Row"
+
+    def test_honors_configured_output_dir_and_history_db(
+        self, api, log_file, tmp_path,
+    ):
+        custom_out = tmp_path / "my-reports"
+        custom_db = tmp_path / "my-history.db"
+        api.save_settings({
+            "default_output_dir": str(custom_out), "history_db_path": str(custom_db),
+        })
+
+        result = api.analyze({"log_path": str(log_file)})
+        assert result["ok"] is True
+        saved = result["saved"]
+        assert Path(saved["json_path"]).parent == custom_out
+        assert custom_db.exists()
+
+    def test_a_second_analysis_of_the_same_run_updates_rather_than_duplicates(
+        self, api, log_file,
+    ):
+        # Store.ingest() is already idempotent on (zone, start_ts) --
+        # this just confirms analyze()'s own auto-save goes through that
+        # same path rather than e.g. re-ingesting with a fresh identity
+        # every time (re-analyzing the same log with a tweaked pull-gap
+        # setting is a completely normal thing to do).
+        api.analyze({"log_path": str(log_file)})
+        api.analyze({"log_path": str(log_file)})
+
+        from postmortem.history.store import query_runs
+        rows = query_runs(config_module.config_dir() / "history.db")
+        assert len(rows) == 1
+
+    def test_a_save_failure_does_not_break_returning_the_report(
+        self, api, log_file, monkeypatch,
+    ):
+        def boom(*a, **kw):
+            raise OSError("disk full")
+
+        monkeypatch.setattr("postmortem.history.store.ingest", boom)
+        result = api.analyze({"log_path": str(log_file)})
+        assert result["ok"] is True
+        assert result["saved"] is None
+        assert result["report"]["run"]["zone"] == "Murder Row"  # the report itself is unaffected
+
+
+class TestGetDefaultPaths:
+    def test_zero_config_reports_the_fallback_locations(self, api, isolated_config_dir):
+        result = api.get_default_paths()
+        assert result["ok"] is True
+        assert result["output_dir"] == str(isolated_config_dir / "analyzed-runs")
+        assert result["history_db_path"] == str(isolated_config_dir / "history.db")
+
+    def test_configured_settings_are_reflected(self, api, tmp_path):
+        api.save_settings({
+            "default_output_dir": str(tmp_path / "out"),
+            "history_db_path": str(tmp_path / "runs.db"),
+        })
+        result = api.get_default_paths()
+        assert result["output_dir"] == str(tmp_path / "out")
+        assert result["history_db_path"] == str(tmp_path / "runs.db")
 
 
 class TestAnalyzeFailureNeverRaises:
@@ -282,10 +398,8 @@ class TestListHistory:
 
 
 class TestUploadReport:
-    @pytest.fixture(autouse=True)
-    def isolated_config_dir(self, tmp_path, monkeypatch):
-        fake_dir = tmp_path / "config"
-        monkeypatch.setattr(config_module, "config_dir", lambda: fake_dir)
+    # config_dir isolation is now file-wide -- see the module-level
+    # isolated_config_dir fixture above.
 
     def test_no_url_and_no_saved_setting_returns_error(self, api):
         result = api.upload_report({"run": {}})
@@ -339,13 +453,9 @@ class TestWatchMode:
     run. _emit_watch_event is monkeypatched to capture events instead of
     calling the real webview.windows[0].evaluate_js(...) -- there's no
     live pywebview window under test, matching the caveat already noted
-    on the pick_* dialog methods.
+    on the pick_* dialog methods. config_dir isolation is file-wide --
+    see the module-level isolated_config_dir fixture above.
     """
-
-    @pytest.fixture(autouse=True)
-    def isolated_config_dir(self, tmp_path, monkeypatch):
-        fake_dir = tmp_path / "config"
-        monkeypatch.setattr(config_module, "config_dir", lambda: fake_dir)
 
     @pytest.fixture()
     def events(self, api, monkeypatch):
@@ -454,6 +564,37 @@ class TestWatchMode:
 
         event_types = [e["type"] for e in events]
         assert event_types == ["watching", "run_complete", "analyzed", "uploaded"]
+
+    def test_watched_runs_land_in_the_same_local_history_as_new_analysis(
+        self, api, events, tmp_path, monkeypatch, isolated_config_dir,
+    ):
+        # A Watch Live run should show up on the same History screen a
+        # "New Analysis" run does -- one unified local history, not two
+        # separate silos (see TestAnalyzeAutoSavesLocally above).
+        from conftest import build_run_log
+
+        monkeypatch.setattr(
+            "postmortem.upload.upload_report",
+            lambda report, url, **kwargs: {"ok": True, "run_id": 1, "url": "/runs/1"},
+        )
+
+        log = tmp_path / "WoWCombatLog.txt"
+        log.write_text("", encoding="utf-8")
+        api.start_watch({
+            "log_path": str(log), "site_url": "https://example.test",
+            "out_dir": str(tmp_path / "watch-runs"),
+        })
+
+        import time as _time
+        _time.sleep(0.2)
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write(build_run_log().text())
+        self._wait_for(events, "uploaded")
+
+        from postmortem.history.store import query_runs
+        rows = query_runs(isolated_config_dir / "history.db")
+        assert len(rows) == 1
+        assert rows[0]["zone"] == "Murder Row"
         assert events[1]["zone"] == "Murder Row"
         assert events[2]["timed"] is True
 
@@ -531,10 +672,8 @@ class TestWatchMode:
 
 
 class TestSettings:
-    @pytest.fixture(autouse=True)
-    def isolated_config_dir(self, tmp_path, monkeypatch):
-        fake_dir = tmp_path / "config"
-        monkeypatch.setattr(config_module, "config_dir", lambda: fake_dir)
+    # config_dir isolation is now file-wide -- see the module-level
+    # isolated_config_dir fixture above.
 
     def test_get_settings_defaults(self, api):
         assert api.get_settings() == config_module.DEFAULT_SETTINGS

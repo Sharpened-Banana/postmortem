@@ -320,6 +320,7 @@ async function onAnalyze() {
       frame.srcdoc = result.html;
       state.lastReport = result.report;
       resetUploadStatus();
+      showSavedStatus(result.saved);
       showScreen("report");
     } else {
       showBanner(na.errorBanner, (result && result.error) || "Analysis failed for an unknown reason.");
@@ -329,6 +330,17 @@ async function onAnalyze() {
   } finally {
     setBusy(na.busyOverlay, false);
     updateAnalyzeButtonState();
+  }
+}
+
+function showSavedStatus(saved) {
+  const el = document.getElementById("report-saved-status");
+  if (saved) {
+    el.textContent = "✓ Saved locally";
+    el.title = saved.json_path;
+    el.hidden = false;
+  } else {
+    el.hidden = true;
   }
 }
 
@@ -637,9 +649,25 @@ function initHistory() {
   });
 }
 
-function applySettingsToHistory() {
+async function applySettingsToHistory() {
   const s = state.settings || defaultSettings();
-  if (s.history_db_path) hist.dbPath.value = s.history_db_path;
+  if (s.history_db_path) {
+    hist.dbPath.value = s.history_db_path;
+    return;
+  }
+  // No history_db_path configured -- every analyzed/watched run still
+  // lands somewhere (see api.py's _save_report_locally/start_watch,
+  // both zero-config by default), so pre-fill with that same effective
+  // default instead of leaving the field blank and making "Load
+  // History" look like it needs setup it doesn't actually need.
+  try {
+    const result = await api().get_default_paths();
+    if (result && result.ok && !hist.dbPath.value.trim()) {
+      hist.dbPath.value = result.history_db_path;
+    }
+  } catch (e) {
+    // best-effort hint only -- leaving the field blank is a fine fallback
+  }
 }
 
 async function onPickHistoryFolder() {
@@ -725,7 +753,7 @@ function initSettings() {
   set.extractBtn.addEventListener("click", onExtractDungeonData);
 }
 
-function applySettingsToForm() {
+async function applySettingsToForm() {
   const s = state.settings || defaultSettings();
   set.wowAddonPath.value = s.wow_addon_path || "";
   set.raiderioRegion.value = s.raiderio_region || "";
@@ -735,6 +763,20 @@ function applySettingsToForm() {
   set.siteUrl.value = s.site_url || "";
   set.wowLogPath.value = s.wow_log_path || "";
   updateExtractButtonState();
+
+  // Both fields already work with zero setup (see api.py's
+  // _save_report_locally/start_watch) -- show *where* that zero-config
+  // default actually points, instead of a placeholder that just says
+  // "Not set" and implies nothing is happening until you configure it.
+  try {
+    const result = await api().get_default_paths();
+    if (result && result.ok) {
+      set.defaultOutputDir.placeholder = result.output_dir;
+      set.historyDbPath.placeholder = result.history_db_path;
+    }
+  } catch (e) {
+    // best-effort hint only -- the static "Not set" placeholder is a fine fallback
+  }
 }
 
 function updateExtractButtonState() {

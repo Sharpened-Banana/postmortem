@@ -79,6 +79,38 @@ def load_settings() -> dict[str, Any]:
     return settings
 
 
+def resolve_output_dir(settings: dict[str, Any], subdir: str) -> Path:
+    """The directory local reports of one kind get written into: the
+    ``default_output_dir`` setting when set, otherwise a per-purpose
+    subfolder under this app's own config directory. ``start_watch()``
+    (api.py) already had this exact "works with zero setup" fallback for
+    Watch Live's recorded-run output; this generalizes it (``subdir``
+    picks the purpose-specific subfolder, e.g. ``"watch-runs"`` vs.
+    ``"analyzed-runs"``) so a one-off ``analyze()`` run gets the same
+    "always saved somewhere, no configuration required" default instead
+    of the report only ever existing in memory for as long as the report
+    screen stays open.
+    """
+    configured = settings.get("default_output_dir")
+    if configured:
+        return Path(configured)
+    return config_dir() / subdir
+
+
+def resolve_history_db_path(settings: dict[str, Any]) -> Path:
+    """The local run-history database path: the ``history_db_path``
+    setting when set, otherwise a default file under this app's own
+    config directory. Same zero-config philosophy as
+    ``resolve_output_dir`` -- every analyzed/watched run gets ingested
+    here so the History screen has something to show without the user
+    ever having to configure a database path themselves.
+    """
+    configured = settings.get("history_db_path")
+    if configured:
+        return Path(configured)
+    return config_dir() / "history.db"
+
+
 def save_settings(settings: dict[str, Any]) -> None:
     """Persist ``settings`` as JSON, creating the config directory if
     needed. Merged onto ``DEFAULT_SETTINGS`` first so a partial dict
