@@ -108,6 +108,7 @@ class TestSegmenter:
         assert run.completed and run.success
         assert run.duration_ms == 600000
         assert run.wall_duration == 140.0
+        assert not run.likely_abandoned
 
     def test_abandoned_run(self):
         b = LogBuilder()
@@ -167,3 +168,44 @@ class TestSegmenter:
         assert len(runs) == 2
         assert runs[0].truncated and not runs[0].completed
         assert runs[1].completed and not runs[1].truncated
+
+
+class TestLikelyAbandoned:
+    """RunSegment.likely_abandoned: best-effort inference for a run with
+    no CHALLENGE_MODE_END. Built from a real report (2026-09-01): a
+    genuinely abandoned key's real log had no CHALLENGE_MODE_END at all,
+    but ended with the group leaving the instance (one player hearthing
+    out, another taking fall damage at open-world coordinates) -- exactly
+    the kind of departure a ZONE_CHANGE to a different zone captures.
+    """
+
+    def test_zone_change_out_of_the_instance_flags_it(self):
+        b = LogBuilder()
+        b.start(0)  # default instance=2830
+        b.player_damage(5, DPS1, b.npc_guid(1, "1"), "X", 1, "S", 10)
+        b.raw(20, 'ZONE_CHANGE,1519,"Stormwind City",1')
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        assert not run.completed
+        assert run.likely_abandoned
+
+    def test_no_zone_change_is_not_flagged(self):
+        # log just stops (crash, still in progress, cut off) -- no signal
+        # either way, so this stays an honest "don't know", not a guess.
+        b = LogBuilder()
+        b.start(0)
+        b.player_damage(5, DPS1, b.npc_guid(1, "1"), "X", 1, "S", 10)
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        assert not run.completed
+        assert not run.likely_abandoned
+
+    def test_zone_change_to_the_same_instance_is_not_flagged(self):
+        # e.g. a multi-floor dungeon's own internal transition that still
+        # carries the instance's own zone id -- not a real departure, and
+        # must not false-positive on an ordinary floor change mid-key.
+        b = LogBuilder()
+        b.start(0)  # default instance=2830
+        b.player_damage(5, DPS1, b.npc_guid(1, "1"), "X", 1, "S", 10)
+        b.raw(20, 'ZONE_CHANGE,2830,"Murder Row",8')
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        assert not run.completed
+        assert not run.likely_abandoned
