@@ -872,6 +872,85 @@ async function onExtractDungeonData() {
 }
 
 // ===========================================================================
+// Auto-update
+// ===========================================================================
+
+const upd = {};
+
+function initUpdate() {
+  upd.banner = document.getElementById("update-banner");
+  upd.text = document.getElementById("update-banner-text");
+  upd.updateBtn = document.getElementById("update-now-btn");
+  upd.updateBtn.addEventListener("click", onStartUpdate);
+  upd.available = null; // the {tag, download_url, notes} from check_for_update, once one's found
+}
+
+function showUpdateBanner(text, showButton) {
+  upd.text.textContent = text;
+  upd.updateBtn.hidden = !showButton;
+  upd.banner.hidden = false;
+}
+
+async function checkForUpdate() {
+  // Best-effort and silent on failure -- an update check should never
+  // interrupt or block using the app; no network, an API hiccup, or a
+  // dev build (which never has anything to compare against) all just
+  // mean the banner stays hidden.
+  try {
+    const result = await api().check_for_update();
+    if (result && result.ok && result.update) {
+      upd.available = result.update;
+      showUpdateBanner(`A new version (${upd.available.tag}) is available.`, true);
+    }
+  } catch (e) {
+    // silent -- see above
+  }
+}
+
+async function onStartUpdate() {
+  if (!upd.available) return;
+  upd.updateBtn.disabled = true;
+  showUpdateBanner("Starting update…", false);
+  try {
+    const result = await api().start_update(upd.available.download_url);
+    if (!result || !result.ok) {
+      showUpdateBanner("Update failed: " + ((result && result.error) || "unknown error"), true);
+      upd.updateBtn.disabled = false;
+    }
+    // On success, progress arrives via onUpdateEvent below -- the app
+    // exits itself once the update is applied, so there's no further
+    // "it worked" step to handle here.
+  } catch (e) {
+    showUpdateBanner("Update failed: " + describeError(e), true);
+    upd.updateBtn.disabled = false;
+  }
+}
+
+// Called by Python (webview.windows[0].evaluate_js(...)) from the
+// update background thread -- see api.py's start_update docstring for
+// the full set of event shapes.
+window.onUpdateEvent = function (event) {
+  if (!upd.banner) return; // boot() hasn't run initUpdate() yet -- ignore
+  switch (event.type) {
+    case "downloading": {
+      const pct = event.total ? Math.round((event.written / event.total) * 100) : null;
+      showUpdateBanner(pct != null ? `Downloading update… ${pct}%` : "Downloading update…", false);
+      break;
+    }
+    case "applying":
+      showUpdateBanner("Installing update…", false);
+      break;
+    case "relaunching":
+      showUpdateBanner("Update installed — relaunching…", false);
+      break;
+    case "failed":
+      showUpdateBanner("Update failed: " + (event.error || "unknown error"), true);
+      upd.updateBtn.disabled = false;
+      break;
+  }
+};
+
+// ===========================================================================
 // Boot
 // ===========================================================================
 
@@ -885,6 +964,7 @@ async function boot() {
   initHistory();
   initSettings();
   initReportScreen();
+  initUpdate();
   wireNav();
 
   try {
@@ -901,6 +981,8 @@ async function boot() {
 
   document.getElementById("boot-loading").hidden = true;
   showScreen("home");
+
+  checkForUpdate(); // fire-and-forget -- never blocks getting into the app
 }
 
 window.addEventListener("pywebviewready", boot);
