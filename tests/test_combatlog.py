@@ -209,3 +209,49 @@ class TestLikelyAbandoned:
         (run,) = list(segment_runs(iter_events(b.lines)))
         assert not run.completed
         assert not run.likely_abandoned
+
+
+class TestMismatchedEndDoesNotCloseAWrongRun:
+    """Real bug (2026-09-01), found via real reported combat logs -- not
+    a hypothetical: WoW fires a CHALLENGE_MODE_END with all-zero stats
+    ("...END,<id>,0,0,0,0.000000,0.000000") immediately before *every*
+    single CHALLENGE_MODE_START, always carrying that upcoming key's own
+    instance id -- confirmed against 13 real keys across 7 real logs
+    from one account, 100% consistent. Harmless in the ordinary case (no
+    run is open between keys, so segment_runs()'s own `current is None`
+    check already ignores it) -- but when the previous key was genuinely
+    abandoned (never got its own real END) and a new key starts right
+    after, this phantom event's instance doesn't match the still-open
+    run at all. The old code closed the run with it anyway, reporting a
+    genuinely abandoned key as a false "depleted" completion
+    (completed=True, success=False) instead of correctly leaving it open
+    for the next START's own "different key" branch to yield it as
+    abandoned.
+    """
+
+    def test_phantom_end_with_a_different_instance_does_not_close_the_open_run(self):
+        b = LogBuilder()
+        b.start(0, zone="Voidscar Arena", instance=2923, cm=585, lvl=10)
+        b.player_damage(5, DPS1, b.npc_guid(1, "1"), "X", 1, "S", 10)
+        # the real, always-zeroed phantom event -- instance 2859 belongs
+        # to the *next* key below, not this one.
+        b.raw(20, "CHALLENGE_MODE_END,2859,0,0,0,0.000000,0.000000")
+        b.start(21, zone="The Blinding Vale", instance=2859, cm=584, lvl=10)
+        b.end(600, instance=2859, lvl=10, ms=580000)
+
+        runs = list(segment_runs(iter_events(b.lines)))
+        assert len(runs) == 2
+        assert not runs[0].completed  # correctly abandoned, not falsely "failed"
+        assert runs[0].success is None
+        assert runs[1].completed and runs[1].success
+
+    def test_a_real_end_with_a_matching_instance_still_closes_normally(self):
+        # Regression guard: the instance-match check must not break the
+        # ordinary, correct case (every existing fixture already relies
+        # on this, but this makes the specific behavior explicit).
+        b = LogBuilder()
+        b.start(0)  # default instance=2830
+        b.player_damage(5, DPS1, b.npc_guid(1, "1"), "X", 1, "S", 10)
+        b.end(60)  # default instance=2830, matches
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        assert run.completed and run.success
