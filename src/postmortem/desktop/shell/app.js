@@ -393,6 +393,7 @@ function initWatch() {
   wt.optionalFields = document.getElementById("watch-optional-fields");
   wt.logPath = document.getElementById("watch-log-path");
   wt.pickLogBtn = document.getElementById("watch-pick-log-btn");
+  wt.pickLogFolderBtn = document.getElementById("watch-pick-log-folder-btn");
   wt.routeText = document.getElementById("watch-route-text");
   wt.routePickBtn = document.getElementById("watch-route-pick-btn");
   wt.dungeonDataPath = document.getElementById("watch-dungeon-data-path");
@@ -406,6 +407,7 @@ function initWatch() {
   wt.logList = document.getElementById("watch-log-list");
 
   wt.pickLogBtn.addEventListener("click", onPickWatchLog);
+  wt.pickLogFolderBtn.addEventListener("click", onPickWatchLogFolder);
   wt.routePickBtn.addEventListener("click", onPickWatchRouteFile);
   wt.dungeonDataPickBtn.addEventListener("click", onPickWatchDungeonData);
   wt.avoidableDataPickBtn.addEventListener("click", onPickWatchAvoidableData);
@@ -433,6 +435,26 @@ async function onPickWatchLog() {
     if (path) wt.logPath.value = path;
   } catch (e) {
     showBanner(wt.errorBanner, "Could not open the file picker: " + describeError(e));
+  } finally {
+    updateWatchGate();
+  }
+}
+
+async function onPickWatchLogFolder() {
+  // "WoWCombatLog.txt" is the fixed name WoW always uses for the log
+  // it's actively writing this session (an archived previous session's
+  // log gets a timestamp appended instead, e.g.
+  // "WoWCombatLog083126_225023.txt") -- so this resolves to the right
+  // path even before that file exists, which is exactly the point:
+  // pick_log_file()'s "open file" dialog can't select something that
+  // isn't there yet, but Recorder.watch() already knows how to wait for
+  // it to appear.
+  hideBanner(wt.errorBanner);
+  try {
+    const folder = await api().pick_folder("Choose your WoW Logs folder");
+    if (folder) wt.logPath.value = joinPath(folder, "WoWCombatLog.txt");
+  } catch (e) {
+    showBanner(wt.errorBanner, "Could not open the folder picker: " + describeError(e));
   } finally {
     updateWatchGate();
   }
@@ -676,6 +698,7 @@ function initSettings() {
   set.siteUrl = document.getElementById("set-site-url");
   set.wowLogPath = document.getElementById("set-wow-log-path");
   set.wowLogPickBtn = document.getElementById("set-wow-log-pick-btn");
+  set.wowLogFolderPickBtn = document.getElementById("set-wow-log-folder-pick-btn");
   set.saveBtn = document.getElementById("set-save-btn");
   set.errorBanner = document.getElementById("set-error-banner");
   set.successBanner = document.getElementById("set-success-banner");
@@ -694,6 +717,7 @@ function initSettings() {
   set.avoidableDataPickBtn.addEventListener("click", onPickSettingsAvoidableData);
   set.defaultOutputDirPickBtn.addEventListener("click", onPickDefaultOutputDir);
   set.wowLogPickBtn.addEventListener("click", onPickSettingsWowLog);
+  set.wowLogFolderPickBtn.addEventListener("click", onPickSettingsWowLogFolder);
   set.saveBtn.addEventListener("click", onSaveSettings);
 
   set.wowAddonPath.addEventListener("input", updateExtractButtonState);
@@ -755,6 +779,17 @@ async function onPickSettingsWowLog() {
     if (path) set.wowLogPath.value = path;
   } catch (e) {
     showBanner(set.errorBanner, "Could not open the file picker: " + describeError(e));
+  }
+}
+
+async function onPickSettingsWowLogFolder() {
+  // See onPickWatchLogFolder's comment -- same "point at the Logs
+  // folder, not a file that may not exist yet" resolution.
+  try {
+    const folder = await api().pick_folder("Choose your WoW Logs folder");
+    if (folder) set.wowLogPath.value = joinPath(folder, "WoWCombatLog.txt");
+  } catch (e) {
+    showBanner(set.errorBanner, "Could not open the folder picker: " + describeError(e));
   }
 }
 

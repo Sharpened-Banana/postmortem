@@ -322,6 +322,7 @@ a { color: var(--blue); }
   display: flex;
   gap: 8px;
   align-items: stretch;
+  flex-wrap: wrap;
 }
 
 .field-row > input,
