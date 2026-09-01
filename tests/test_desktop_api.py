@@ -671,6 +671,23 @@ class TestWatchMode:
 # -- settings ---------------------------------------------------------------
 
 
+class TestGetVersion:
+    def test_reports_the_stamped_version(self, api, monkeypatch):
+        import postmortem.desktop._version as version_module
+        monkeypatch.setattr(version_module, "VERSION", "alpha-desktop-11")
+        assert api.get_version() == {"ok": True, "version": "alpha-desktop-11"}
+
+    def test_a_source_checkout_reports_dev(self, api):
+        # _version.py's checked-in placeholder -- see that module's own
+        # docstring. Not monkeypatched here on purpose: this confirms
+        # the real, currently-checked-in value, which matters because
+        # it's exactly what tells check_for_update() "this isn't a
+        # release build, don't offer an update".
+        import postmortem.desktop._version as version_module
+        assert version_module.VERSION == "dev"
+        assert api.get_version() == {"ok": True, "version": "dev"}
+
+
 class TestSettings:
     # config_dir isolation is now file-wide -- see the module-level
     # isolated_config_dir fixture above.
