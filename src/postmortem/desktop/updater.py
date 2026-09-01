@@ -184,18 +184,86 @@ def download_update(url: str, dest: Path, on_progress: Optional[ProgressCallback
 
 
 def _safe_extract(zip_path: Path, dest_dir: Path) -> None:
-    """``ZipFile.extractall()``, but rejecting any entry that would
-    escape ``dest_dir`` (an absolute path, or one that ``..``s out) --
-    defense-in-depth for an archive that, while normally only ever
-    produced by our own CI, is about to be relaunched as a real
-    executable, so it's cheap insurance to actually check first."""
+    """Extract a zip archive by hand -- NOT ``ZipFile.extractall()``,
+    which does neither of the two things a macOS ``.app`` bundle
+    actually needs. Confirmed as a real bug (2026-09-01): a real
+    self-applied update downloaded, validated, and swapped in cleanly,
+    but the result was completely unlaunchable
+    ("Launchd job spawn failed"). Root cause, found by diffing the
+    broken build against a known-good one extracted the normal way (via
+    ``ditto``/``unzip``, not this module):
+
+    1. ``extractall()`` doesn't restore Unix permission bits at all --
+       the main executable came out ``-rw-r--r--`` instead of
+       ``-rwxr-xr-x``, so nothing could even launch it.
+    2. ``extractall()`` doesn't reconstruct symlinks -- each one came
+       out as an ordinary file whose *content* is the literal target
+       path text, not a real symlink. This project's own build
+       (``build/postmortem.spec``) has real symlinks inside the bundle
+       (e.g. ``Contents/Frameworks/postmortem`` -> ``../Resources/
+       postmortem``), and macOS's own ``Python.framework`` layout is
+       symlink-heavy internally (``Versions/Current`` -> ``Versions/A``,
+       etc.) -- losing those breaks the bundle's own internal structure,
+       not just this project's files.
+
+    A zip entry's Unix mode (including the ``S_IFLNK`` file-type bit)
+    lives in ``ZipInfo.external_attr``'s upper 16 bits -- the same
+    encoding ``ditto``/``unzip``/``zip`` all honor. For an entry with
+    that bit set, the entry's stored "content" is the link target text,
+    not file data. The Windows zip (``Compress-Archive``, no Unix
+    concept of any of this) simply never sets these bits, so every
+    branch below that depends on them is a no-op there -- no
+    platform-specific handling needed here.
+
+    Still rejects any entry that would escape ``dest_dir`` (an absolute
+    path, or one that ``..``s out) -- defense-in-depth for an archive
+    that, while normally only ever produced by our own CI, is about to
+    be relaunched as a real executable, so it's cheap insurance to
+    actually check first.
+    """
     with zipfile.ZipFile(zip_path) as zf:
         dest_resolved = dest_dir.resolve()
-        for member in zf.namelist():
-            target = (dest_dir / member).resolve()
+        infos = zf.infolist()
+        targets: dict[str, Path] = {}
+        for info in infos:
+            target = (dest_dir / info.filename).resolve()
             if dest_resolved not in target.parents and target != dest_resolved:
-                raise ValueError(f"refusing to extract unsafe zip entry: {member}")
-        zf.extractall(dest_dir)
+                raise ValueError(f"refusing to extract unsafe zip entry: {info.filename}")
+            targets[info.filename] = target
+
+        # Directories (and every entry's parent dir) before any file/
+        # symlink content -- a zip isn't guaranteed to list explicit
+        # directory entries in (or even at all) before the files inside
+        # them.
+        for info in infos:
+            if info.is_dir():
+                targets[info.filename].mkdir(parents=True, exist_ok=True)
+            else:
+                targets[info.filename].parent.mkdir(parents=True, exist_ok=True)
+
+        for info in infos:
+            if info.is_dir():
+                continue
+            target = targets[info.filename]
+            mode = info.external_attr >> 16
+            if mode and stat.S_ISLNK(mode):
+                if target.exists() or target.is_symlink():
+                    target.unlink()
+                target.symlink_to(zf.read(info.filename).decode("utf-8"))
+            else:
+                with zf.open(info) as src, open(target, "wb") as dst:
+                    dst.write(src.read())
+                if mode:
+                    target.chmod(mode)
+
+        # Directory permissions last -- a restrictive mode applied
+        # before its contents are written could block writing them.
+        for info in infos:
+            if not info.is_dir():
+                continue
+            mode = info.external_attr >> 16
+            if mode:
+                targets[info.filename].chmod(mode)
 
 
 def _validate_macos_bundle(extract_dir: Path) -> Path:
