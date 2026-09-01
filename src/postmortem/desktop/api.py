@@ -640,6 +640,17 @@ class DesktopAPI:
 
     # -- settings -----------------------------------------------------------
 
+    def get_version(self) -> dict:
+        """The build tag this running app was stamped with (see
+        ``_version.py`` -- ``"dev"`` for a source checkout). Purely
+        informational: shown in Settings so there's some visible answer
+        to "which build am I on", which otherwise has no answer anywhere
+        in the UI even though it's exactly the thing the update banner
+        (see ``check_for_update``) is comparing against. Never raises.
+        """
+        from ._version import VERSION
+        return {"ok": True, "version": VERSION}
+
     def get_settings(self) -> dict:
         """Return persisted desktop settings (see ``desktop/config.py``),
         merged with defaults for any field never saved. Always succeeds
