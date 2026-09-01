@@ -140,3 +140,14 @@ class TestMDTString:
             decode_mdt_string("!~MDT2~definitely-not-base64!!!")
         with pytest.raises(MDTDecodeError):
             decode_mdt_string("")
+
+    def test_garbled_print_and_legacy_strings_raise_MDTDecodeError_not_valueerror(self):
+        # Regression (2026-09-01 debug sweep): the "!"-print and ancient
+        # LibCompress paths ran decode_for_print / ace decoding, which
+        # raise bare ValueError (char outside the alphabet) or
+        # OverflowError (ace ^F float) -- these escaped past _load_route's
+        # `except MDTDecodeError`, giving a raw traceback on any mistyped
+        # or garbled paste instead of a clean "could not decode" message.
+        for bad in ["!abc$def", "!abc=def", "~garbage~", "xxxxxxxxxx", "!!!"]:
+            with pytest.raises(MDTDecodeError):
+                decode_mdt_string(bad)

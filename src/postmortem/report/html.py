@@ -6,6 +6,7 @@ renders the tables and the pull timeline. No external resources.
 
 from __future__ import annotations
 
+import html
 import json
 from typing import Any
 
@@ -484,5 +485,16 @@ def render_html(report: dict[str, Any]) -> str:
     run = report.get("run", {})
     title = f"{run.get('zone') or report.get('dungeon', {}).get('name', 'M+')}" \
             f" +{run.get('keystone_level', '?')} — post-mortem"
+    # html.escape the title before it lands in <title>__TITLE__</title>:
+    # `zone` (and keystone_level) come straight from a combat log's
+    # CHALLENGE_MODE_START, i.e. attacker-chosen text (a player names their
+    # own character/the log is uploaded to the public tracker), and the
+    # site's CSP allows inline scripts -- an un-escaped "</title><script>"
+    # zone was a real stored-XSS vector (found 2026-09-01). The embedded
+    # JSON below is separately guarded by the </-splitting on the next
+    # line, and every log-derived field the client-side JS renders goes
+    # through its own esc(); this <title> was the one server-side gap.
     payload = json.dumps(report).replace("</", "<\\/")
-    return _TEMPLATE.replace("__TITLE__", title).replace("__REPORT_JSON__", payload)
+    return _TEMPLATE.replace("__TITLE__", html.escape(title)).replace(
+        "__REPORT_JSON__", payload
+    )

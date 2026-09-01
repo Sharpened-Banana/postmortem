@@ -408,6 +408,34 @@ class TestRecorder:
         on_disk = json.loads(Path(f"{base}.json").read_text(encoding="utf-8"))
         assert report == on_disk
 
+    def test_write_recorded_reports_threads_avoidable_data(self, tmp_path):
+        """Regression (2026-09-01 debug sweep): Watch Live loaded and
+        validated the avoidable-damage data file but never passed it into
+        analysis -- _write_recorded_reports had no `avoidable` param, so a
+        watched run silently produced no avoidable-damage breakdown even
+        with the file set. build_run_log()'s Dark Bolt (1216538) hits the
+        healer, so tagging it must now surface an avoidable_damage section
+        -- and its absence without the param proves the threading is what
+        matters."""
+        from postmortem.analysis.avoidable import AvoidableData
+        from postmortem.cli import _write_recorded_reports
+
+        log = tmp_path / "WoWCombatLog.txt"
+        log.write_text(build_run_log().text(), encoding="utf-8")
+        rec = Recorder(log_path=log, out_dir=tmp_path / "runs",
+                       from_start=True, echo=lambda s: None)
+        (run,) = rec.watch(stop_after_runs=1)
+
+        avoidable = AvoidableData(spells={1216538: {"name": "Dark Bolt", "note": None}})
+        with_av = _write_recorded_reports(run, route=None, store=None,
+                                          avoidable=avoidable)
+        assert "avoidable_damage" in with_av
+
+        # same run, no avoidable data -> no section (proves it's threaded,
+        # not incidentally always present)
+        without_av = _write_recorded_reports(run, route=None, store=None)
+        assert "avoidable_damage" not in without_av
+
     def test_request_stop_ends_a_live_watch_loop(self, tmp_path):
         """request_stop() (added for the desktop app's watch mode, which
         runs watch() on a background thread it can't send a

@@ -11,3 +11,4 @@ dist/
 mdt_data.json
 runs/
 reports/
+.DS_Store

@@ -119,6 +119,29 @@ class TestHistoryIndex:
         (tmp_path / "other.json").write_text('{"hello": "world"}')
         assert collect_reports(tmp_path) == []
 
+    def test_ignores_a_top_level_list_json_without_crashing(self, tmp_path):
+        # Regression (2026-09-01 debug sweep): `record --analyze` writes a
+        # <run>.chapters.json sidecar -- a top-level JSON *list* -- into
+        # the same directory as the reports. collect_reports (and cli.py's
+        # _scan_report_files) called report.get("run") without a type
+        # check, so a list raised AttributeError (not caught by the
+        # OSError/ValueError guard), crashing `index` and 500ing every
+        # `serve` request on any real record-produced directory.
+        (tmp_path / "run.chapters.json").write_text('[{"title": "Pull 1", "t": 0}]')
+        (tmp_path / "scalar.json").write_text('42')
+        assert collect_reports(tmp_path) == []
+
+    def test_index_survives_a_chapters_sidecar_next_to_a_real_report(
+        self, tmp_path, log_file, route_string, dungeon_data_file,
+    ):
+        out_dir = self._make_reports(tmp_path, log_file, route_string,
+                                     dungeon_data_file)
+        # mimic the recorder's sidecar landing beside the real report
+        (out_dir / "somerun.chapters.json").write_text('[{"title": "Pull 1", "t": 0}]')
+        rows = collect_reports(out_dir)
+        assert len(rows) == 1  # the real report, sidecar cleanly skipped
+        assert rows[0]["zone"] == "Murder Row"
+
 
 class TestHistoryCharts:
     """render_index()'s trend-chart markup, at the template/string level

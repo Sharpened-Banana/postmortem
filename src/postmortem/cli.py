@@ -420,6 +420,11 @@ def _scan_report_files(directory: str | Path) -> Iterable[tuple[Path, dict]]:
                 report = json.load(fh)
         except (OSError, ValueError):
             continue
+        # Skip non-dict top-level JSON (e.g. the recorder's
+        # <run>.chapters.json sidecar, a top-level list) before .get() --
+        # see the matching guard in report.index.collect_reports for why.
+        if not isinstance(report, dict):
+            continue
         run = report.get("run")
         if not isinstance(run, dict) or "zone" not in run:
             continue  # not one of our reports
@@ -462,7 +467,7 @@ def cmd_index(args: argparse.Namespace) -> int:
 
 
 def _write_recorded_reports(
-    run, route, store, pull_gap_seconds: float = 5.0,
+    run, route, store, pull_gap_seconds: float = 5.0, avoidable=None,
 ) -> Optional[dict]:
     """Analyze one recorded run's log slice and write its JSON/HTML/text
     reports, plus the chapters sidecars (``<run>.chapters.json`` /
@@ -501,7 +506,7 @@ def _write_recorded_reports(
     if not segments:
         return None
     report = analyze_run(segments[-1], route=route, store=store,
-                         pull_gap_seconds=pull_gap_seconds)
+                         avoidable=avoidable, pull_gap_seconds=pull_gap_seconds)
     base = run.path.with_suffix("")
     Path(f"{base}.json").write_text(json.dumps(report, indent=1),
                                     encoding="utf-8")
