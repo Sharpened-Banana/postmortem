@@ -141,24 +141,36 @@ def segment_runs(
             if current is None:
                 continue
             p = event.params
-            # A CHALLENGE_MODE_END always carries its own instance id as
-            # its first param -- confirmed against real reported logs
-            # (2026-09-01): WoW fires one, all-zeroed
-            # ("...END,<id>,0,0,0,0.000000,0.000000"), immediately before
-            # *every* CHALLENGE_MODE_START, always carrying that
-            # upcoming key's own instance id. Harmless in the ordinary
-            # case (no run is open between keys, so the `current is
-            # None` check above already ignores it) -- but if the
-            # previous key never got its own real END (abandoned/reset)
-            # and a new key starts right after, this phantom event's
-            # instance doesn't match the still-open run at all. Blindly
-            # closing the run with it -- as this code used to -- reports
-            # a genuinely abandoned key as a false "depleted" completion
-            # (completed=True, success=False) instead of leaving it open
-            # so the next CHALLENGE_MODE_START's own "different key"
-            # branch above correctly yields it as abandoned
-            # (completed=False). Only treat this as a real completion
-            # when the instance actually matches.
+            total_time_ms = to_int(p[3]) if len(p) > 3 else 0
+            # WoW fires an all-zeroed phantom CHALLENGE_MODE_END
+            # ("...END,<id>,0,0,0,0.000000,0.000000") immediately before
+            # *every* CHALLENGE_MODE_START -- confirmed against real logs
+            # (2026-09-01), where every one of 13 keys' pre-start phantoms
+            # had timed=0/level=0/totalTimeMs=0, and every real end (timed
+            # OR depleted) had a nonzero totalTimeMs. totalTimeMs
+            # (params[3]) == 0 is thus the phantom's unambiguous signature:
+            # a run that reaches a real END always ran for nonzero time.
+            #
+            # A phantom on an OPEN run means that run is being abandoned/
+            # reset without a real completion (the next key is spinning
+            # up). Yield it as abandoned right here rather than closing it
+            # as a false "depleted" completion (completed=True,
+            # success=False, duration 0). Yielding at the phantom -- not
+            # deferring to the next CHALLENGE_MODE_START's "different key"
+            # branch -- is what correctly handles an abandoned key
+            # followed by another key in the *same* dungeon at the *same*
+            # level: that next START would otherwise hit the /reload
+            # same-key MERGE path and fold the two runs into one. The
+            # phantom END between them is exactly what distinguishes a real
+            # key transition (phantom present) from a mid-key /reload (bare
+            # re-logged START, no phantom) -- so keying the split on the
+            # phantom, not on the START, gets both cases right.
+            if total_time_ms == 0:
+                yield current  # abandoned run
+                current = None
+                continue
+            # Instance-mismatch defense: a stray *real* END (nonzero
+            # duration) for some other instance shouldn't close this run.
             end_instance = p[0].strip() if p else ""
             if (
                 end_instance.lstrip("-").isdigit()
@@ -169,7 +181,7 @@ def segment_runs(
             current.end_ts = event.ts
             current.completed = True
             current.success = (to_int(p[1]) if len(p) > 1 else 0) != 0
-            current.duration_ms = to_int(p[3]) if len(p) > 3 else None
+            current.duration_ms = total_time_ms
             current.events.append(event)
             yield current
             current = None

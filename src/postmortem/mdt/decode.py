@@ -45,11 +45,30 @@ def _deflate(data: bytes) -> bytes:
 
 
 def decode_mdt_string(text: str) -> Any:
-    """Decode any MDT export string into a plain Python structure."""
+    """Decode any MDT export string into a plain Python structure.
+
+    Every decode failure is raised as :class:`MDTDecodeError` -- callers
+    (e.g. cli.py's ``_load_route``, the site's route paste) catch exactly
+    that. The sub-decoders below can raise bare ``ValueError`` (e.g.
+    ``decode_for_print`` on a character outside its alphabet) or
+    ``OverflowError`` (ace's ``^F`` float path) on a mistyped/garbled
+    paste; the wrapper converts those so a bad string yields the clean
+    error message rather than a raw traceback. ``MDTDecodeError`` itself
+    subclasses ``ValueError``, so it's re-raised unchanged first.
+    """
     text = text.strip()
     if not text:
         raise MDTDecodeError("empty import string")
 
+    try:
+        return _decode_mdt_body(text)
+    except MDTDecodeError:
+        raise
+    except (ValueError, OverflowError) as exc:
+        raise MDTDecodeError(f"could not decode MDT string: {exc}") from None
+
+
+def _decode_mdt_body(text: str) -> Any:
     if text.startswith(MDT2_PREFIX):
         payload = text[len(MDT2_PREFIX):]
         # Base64 with tolerant padding
