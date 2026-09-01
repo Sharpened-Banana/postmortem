@@ -1118,6 +1118,11 @@ def _handle_log_upload(
                         "zone": segment.zone_name,
                         "level": segment.keystone_level,
                         "wall_duration_s": round(segment.wall_duration, 1),
+                        # Computed before segment.events is cleared below --
+                        # see RunSegment.likely_abandoned's own docstring
+                        # for what this actually checks and why it's a
+                        # best-effort guess, not a certain answer.
+                        "likely_abandoned": segment.likely_abandoned,
                     })
                 segment.events = []
                 continue
@@ -1173,18 +1178,33 @@ def _handle_log_upload(
                     f"{r['zone']} (+{r['level']})" if r["level"] else r["zone"]
                     for r in incomplete_runs
                 )
+                # likely_abandoned (RunSegment's own property, computed
+                # per-run above) is a real signal, not a guess dressed up
+                # as one: it's set when the log shows the group leaving
+                # the instance (a ZONE_CHANGE away from it) after the key
+                # started. When that's what happened, say so with real
+                # confidence instead of hedging across two possibilities
+                # that aren't actually equally likely here.
+                if any(r["likely_abandoned"] for r in incomplete_runs):
+                    cause = (
+                        "Looks like the group left the dungeon without finishing it "
+                        "(an abandon or reset) -- that's expected: WoW doesn't log an "
+                        "ending for that, only for a timed or depleted verdict, so "
+                        "there's genuinely nothing here to analyze."
+                    )
+                else:
+                    cause = (
+                        "There's no sign of the group leaving the instance in this "
+                        "log, so it may still be in progress, or the log was cut off "
+                        "before WoW wrote the ending -- try again once the timer "
+                        "verdict has actually shown up in your objective tracker."
+                    )
                 return 200, {
                     "ok": True,
                     "runs": [],
                     "message": f"found {len(incomplete_runs)} key(s) that started but never "
                                f"finished in this log ({found}) -- there's nothing to analyze "
-                               "without an end point. If the group voted to abandon the key, "
-                               "that's normal and expected: WoW doesn't log an ending for an "
-                               "abandoned key, only for one that reaches a timed or depleted "
-                               "verdict, so there's genuinely nothing here to upload. If the "
-                               "key actually finished normally, the log may have been grabbed "
-                               "before WoW wrote the ending -- try again once the timer "
-                               "verdict has actually shown up in your objective tracker.",
+                               f"without an end point. {cause}",
                 }
             return 200, {
                 "ok": True,
