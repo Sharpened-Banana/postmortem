@@ -224,6 +224,92 @@ class TestExtractUpdate:
             updater._safe_extract(zip_path, staging)
 
 
+# -- permissions and symlinks (the real 2026-09-01 self-update failure) -----
+
+
+def _zip_info(name: str, unix_mode: int) -> zipfile.ZipInfo:
+    """A ZipInfo with its Unix mode bits set in external_attr's upper 16
+    bits -- exactly the encoding ditto/unzip/zip all honor, including
+    the S_IFLNK file-type bit for a symlink entry."""
+    info = zipfile.ZipInfo(name)
+    info.external_attr = unix_mode << 16
+    return info
+
+
+class TestSafeExtractPreservesPermissionsAndSymlinks:
+    """Real, reproduced failure (2026-09-01): a self-applied update
+    downloaded, validated, and swapped in cleanly, but the result was
+    completely unlaunchable (macOS: "Launchd job spawn failed").
+    Root-caused by diffing the broken build against a known-good one
+    extracted the normal way (ditto/unzip, not this module): plain
+    ZipFile.extractall() drops the executable bit entirely, and doesn't
+    reconstruct symlinks at all -- each one came out as an ordinary
+    file whose *content* is the literal target path text. This
+    project's own build has real symlinks in it (build/postmortem.spec's
+    own datas entry becomes one), and macOS's Python.framework layout is
+    symlink-heavy internally, so this wasn't a cosmetic gap -- it broke
+    the bundle's own structure, not just permissions.
+    """
+
+    def test_the_executable_bit_survives_extraction(self, tmp_path):
+        zip_path = tmp_path / "update.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr(_zip_info("Postmortem.app/Contents/MacOS/Postmortem", 0o755), b"fake binary")
+        staging = tmp_path / "staging"
+        staging.mkdir()
+        updater._safe_extract(zip_path, staging)
+
+        exe = staging / "Postmortem.app/Contents/MacOS/Postmortem"
+        assert exe.stat().st_mode & 0o111  # any execute bit set
+
+    def test_a_symlink_entry_becomes_a_real_symlink_not_a_text_file(self, tmp_path):
+        import stat as _stat
+
+        zip_path = tmp_path / "update.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr(
+                _zip_info("Postmortem.app/Contents/Frameworks/postmortem", _stat.S_IFLNK | 0o755),
+                "../Resources/postmortem",
+            )
+            zf.writestr("Postmortem.app/Contents/Resources/postmortem/marker.txt", b"real content")
+        staging = tmp_path / "staging"
+        staging.mkdir()
+        updater._safe_extract(zip_path, staging)
+
+        link = staging / "Postmortem.app/Contents/Frameworks/postmortem"
+        assert link.is_symlink()
+        assert link.readlink() == Path("../Resources/postmortem")
+        # and it actually resolves to the real content through the symlink
+        assert (link / "marker.txt").read_text() == "real content"
+
+    def test_directories_get_their_own_permissions_without_blocking_extraction(self, tmp_path):
+        # A restrictive directory mode applied too early (before its
+        # contents are written) would break extraction outright --
+        # confirms the ordering (dirs -> files/symlinks -> dir modes
+        # last) actually holds.
+        zip_path = tmp_path / "update.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr(_zip_info("Postmortem.app/Contents/MacOS/", 0o755), "")
+            zf.writestr(_zip_info("Postmortem.app/Contents/MacOS/Postmortem", 0o755), b"fake binary")
+        staging = tmp_path / "staging"
+        staging.mkdir()
+        updater._safe_extract(zip_path, staging)
+
+        exe = staging / "Postmortem.app/Contents/MacOS/Postmortem"
+        assert exe.read_bytes() == b"fake binary"
+        assert exe.stat().st_mode & 0o111
+
+    def test_windows_style_zip_with_no_unix_attrs_still_extracts_cleanly(self, tmp_path):
+        # Compress-Archive (the real Windows asset's packaging tool)
+        # never sets these bits at all -- every mode/symlink branch
+        # above must be a safe no-op, not a crash, for that zip.
+        zip_path = _build_zip(tmp_path, {"Postmortem.exe": b"fake exe", "_internal/base_library.zip": b"fake"})
+        staging = tmp_path / "staging"
+        staging.mkdir()
+        updater._safe_extract(zip_path, staging)
+        assert (staging / "Postmortem.exe").read_bytes() == b"fake exe"
+
+
 # -- download_update (network mocked) ----------------------------------------
 
 
