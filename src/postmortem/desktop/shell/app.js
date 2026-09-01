@@ -949,6 +949,18 @@ async function checkForUpdate() {
   }
 }
 
+async function showVersionLine() {
+  try {
+    const result = await api().get_version();
+    const el = document.getElementById("set-version-line");
+    if (result && result.ok && el) {
+      el.textContent = `Version: ${result.version}`;
+    }
+  } catch (e) {
+    // purely informational -- a blank line is a fine fallback
+  }
+}
+
 async function onStartUpdate() {
   if (!upd.available) return;
   upd.updateBtn.disabled = true;
@@ -1025,6 +1037,7 @@ async function boot() {
   showScreen("home");
 
   checkForUpdate(); // fire-and-forget -- never blocks getting into the app
+  showVersionLine(); // same -- purely informational, must never block boot
 }
 
 window.addEventListener("pywebviewready", boot);
