@@ -1051,6 +1051,16 @@ def _handle_log_upload(
         segment_iter = segment_runs(parse_file(log_path), max_run_events=config.MAX_RUN_EVENTS)
         results = []
         seen_any_completed = False
+        # Keys that started but never got a matching CHALLENGE_MODE_END --
+        # tracked separately from `results` (real analyzed/failed runs) so
+        # the "nothing found" response below can tell "this log genuinely
+        # has no M+ content" apart from "a key started but the log doesn't
+        # show it finishing" -- a real, reported case (2026-09-01): a
+        # 22-minute King's Rest key with a real CHALLENGE_MODE_START and no
+        # END got the exact same generic message as an empty/non-M+ log,
+        # which reads as "nothing was detected" when something very much
+        # was -- just not a *completed* run.
+        incomplete_runs: list[dict[str, Any]] = []
         while True:
             try:
                 segment = next(segment_iter)
@@ -1077,6 +1087,21 @@ def _handle_log_upload(
                 continue
 
             if not segment.completed:
+                # A CHALLENGE_MODE_START with no matching END: either the
+                # key is still in progress when this log was grabbed, or
+                # WoW never got to write the END line (a crash, a /reload
+                # at exactly the wrong moment, or the log file being cut
+                # off partway through). Either way, there's genuinely
+                # nothing to analyze -- no wall-clock end point, no
+                # success/fail verdict -- but it's worth telling the
+                # uploader a key WAS found, not staying silent about it.
+                if segment.zone_name:
+                    incomplete_runs.append({
+                        "zone": segment.zone_name,
+                        "level": segment.keystone_level,
+                        "wall_duration_s": round(segment.wall_duration, 1),
+                    })
+                segment.events = []
                 continue
             seen_any_completed = True
 
@@ -1125,6 +1150,21 @@ def _handle_log_upload(
             # got truncated (too large) rather than genuinely completed.
             # That's a real result worth showing (see the segment.truncated
             # branch above), not the generic "nothing found" message.
+            if incomplete_runs:
+                found = ", ".join(
+                    f"{r['zone']} (+{r['level']})" if r["level"] else r["zone"]
+                    for r in incomplete_runs
+                )
+                return 200, {
+                    "ok": True,
+                    "runs": [],
+                    "message": f"found {len(incomplete_runs)} key(s) that started but never "
+                               f"finished in this log ({found}) -- there's nothing to analyze "
+                               "without an end point. If that key actually finished, the log "
+                               "may have been grabbed while WoW was still writing it, or "
+                               "cut off partway through -- try again once you're fully done "
+                               "playing (back at the character screen is safest).",
+                }
             return 200, {
                 "ok": True,
                 "runs": [],
