@@ -416,7 +416,8 @@ class TestPlanGeometry:
         dungeon.pois = {1: [MapPOI(type="dungeonEntrance", x=779.77, y=-509.6, size_mult=1.5)]}
         geo = plan_geometry(dungeon)
         assert geo["pois"] == [
-            {"type": "dungeonEntrance", "x": 779.77, "y": -509.6, "size_mult": 1.5}
+            {"type": "dungeonEntrance", "x": 779.77, "y": -509.6, "size_mult": 1.5,
+             "sublevel": 1}  # which floor's canvas it's on (see mapart.py)
         ]
 
 

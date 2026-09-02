@@ -235,6 +235,15 @@ class DesktopAPI:
                 fetcher = cached_fetcher(_default_fetcher)
             enrich_report(report, raiderio_region, fetcher=fetcher)
 
+        # Route-map background from the user's own MDT install (mapart.py):
+        # best-effort, embedded into the local report only -- upload.py
+        # strips it before anything goes to the public site.
+        from .. import mapart
+        mdt_dir = mapart.mdt_dir_from_log_path(log_path) or mapart.mdt_dir_from_log_path(
+            _config.load_settings().get("wow_log_path") or ""
+        )
+        mapart.attach_map_backgrounds(report, mdt_dir, store)
+
         html = render_html(report)
         saved = self._save_report_locally(report, html)
         return {"ok": True, "report": report, "html": html, "saved": saved}
@@ -473,6 +482,11 @@ class DesktopAPI:
         # in which case the in-game writeback is simply skipped.
         from ..addon_results import addon_dir_from_log_path
         addon_dir = addon_dir_from_log_path(log_path)
+        # ...and the installed MythicDungeonTools folder, for the route
+        # map's background art (mapart.py). None when MDT isn't installed
+        # -> reports simply have no background.
+        from .. import mapart
+        mdt_dir = mapart.mdt_dir_from_log_path(log_path)
 
         # Two threads, not one. Recorder.watch() (the *tailing* thread)
         # calls on_run_complete synchronously from inside its read loop,
@@ -504,6 +518,7 @@ class DesktopAPI:
                 try:
                     self._handle_watched_run(
                         run, route, store, avoidable, site_url, history_db_path, addon_dir,
+                        mdt_dir,
                     )
                 except Exception as exc:
                     self._emit_watch_event({"type": "run_failed", "error": str(exc)})
@@ -737,7 +752,7 @@ class DesktopAPI:
         return str(_config.resolve_watch_log_path(folder))
 
     def _handle_watched_run(self, run, route, store, avoidable, site_url,
-                            history_db_path, addon_dir=None) -> None:
+                            history_db_path, addon_dir=None, mdt_dir=None) -> None:
         """One completed run, from Recorder's ``on_run_complete``:
         analyze it and upload it automatically, pushing progress to the
         UI as each step happens. Reuses ``cli.py``'s own
@@ -762,7 +777,13 @@ class DesktopAPI:
         # avoidable-damage data file, but until 2026-09-01 this call
         # dropped it on the floor -- a Watch Live run silently produced
         # no avoidable-damage breakdown even with the file set in the UI.
-        report = _cli._write_recorded_reports(run, route, store, avoidable=avoidable)
+        from .. import mapart
+        report = _cli._write_recorded_reports(
+            run, route, store, avoidable=avoidable,
+            # embed the floor's map art from the user's MDT install into the
+            # local report (best-effort; upload.py strips it before the site)
+            enrich=lambda r: mapart.attach_map_backgrounds(r, mdt_dir, store),
+        )
         if report is None:
             self._emit_watch_event({
                 "type": "analyze_failed",

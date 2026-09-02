@@ -485,15 +485,20 @@ def plan_geometry(
                 "is_boss": enemy.is_boss,
                 "plan_pull": plan_pull,
                 "deviated": plan_pull in deviated_pulls if plan_pull is not None else False,
+                # Which floor's 840x555 canvas this point lives on -- the
+                # renderer draws one panel per floor (each with its own
+                # background art when available, see mapart.py).
+                "sublevel": clone.sublevel if clone.sublevel is not None else 1,
             })
 
     pois: list[dict[str, Any]] = []
-    for sublevel_pois in data.pois.values():
+    for sublevel, sublevel_pois in data.pois.items():
         for poi in sublevel_pois:
             xs.append(poi.x)
             ys.append(poi.y)
             pois.append({
                 "type": poi.type, "x": poi.x, "y": poi.y, "size_mult": poi.size_mult,
+                "sublevel": int(sublevel) if sublevel is not None else 1,
             })
 
     if xs and ys:
