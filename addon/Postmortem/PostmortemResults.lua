@@ -1,0 +1,11 @@
+-- PostmortemResults.lua
+-- Placeholder / stub. This file is OVERWRITTEN by the Postmortem desktop
+-- companion app after every analyzed run (see the Python side's
+-- addon_results.py), which fills PostmortemResults with the crunched
+-- stats. Results.lua reads that global and shows it in-game via
+-- /pm results. It's a regular .toc-loaded data file, NOT a SavedVariable,
+-- so /reload never clobbers the app's write (the RaiderIO db/*.lua
+-- pattern). Shipped as an explicit nil so a fresh install (before any run
+-- has been analyzed) has a well-defined empty state instead of a
+-- file-not-found on load.
+PostmortemResults = nil
