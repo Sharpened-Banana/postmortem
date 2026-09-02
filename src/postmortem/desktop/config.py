@@ -103,6 +103,37 @@ def resolve_output_dir(settings: dict[str, Any], subdir: str) -> Path:
     return config_dir() / subdir
 
 
+def resolve_watch_log_path(folder: str | Path) -> Path:
+    """The combat log to watch inside a WoW ``Logs`` folder: the most
+    recently modified ``WoWCombatLog*.txt`` file, or ``folder /
+    "WoWCombatLog.txt"`` when none exist yet.
+
+    WoW does NOT reliably reuse one stable ``WoWCombatLog.txt`` filename
+    for "the log this session is actively writing to" -- some installs
+    always append a session timestamp instead (confirmed real 2026-09-01:
+    a real user's Logs folder held only ``WoWCombatLog-<timestamp>.txt``
+    archives, seven sessions running, never once a plain-named file), so
+    hardcoding that plain name (as both the Watch tab's and Settings'
+    "choose your WoW Logs folder" pickers used to) silently pointed Watch
+    Live at a file that would never exist on those installs. The file
+    actually being written to right now -- whatever it's named -- is
+    always the one with the newest mtime, since only an open, growing log
+    keeps getting touched; an archived prior session's file is frozen the
+    moment that session ended. Falling back to the plain name when no log
+    exists yet at all preserves ``Recorder.watch()``'s existing "wait for
+    the first key of a fresh session" behavior.
+    """
+    folder = Path(folder)
+    candidates = sorted(
+        folder.glob("WoWCombatLog*.txt"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if candidates:
+        return candidates[0]
+    return folder / "WoWCombatLog.txt"
+
+
 def resolve_history_db_path(settings: dict[str, Any]) -> Path:
     """The local run-history database path: the ``history_db_path``
     setting when set, otherwise a default file under this app's own

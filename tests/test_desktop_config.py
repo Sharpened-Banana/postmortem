@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from postmortem.desktop import config
@@ -90,3 +92,36 @@ class TestTolerantOfBadState:
         # settings_path()'s parent doesn't exist at all -- open() raises
         # FileNotFoundError (an OSError), which must be swallowed too.
         assert config.load_settings() == config.DEFAULT_SETTINGS
+
+
+class TestResolveWatchLogPath:
+    """Some WoW installs never write a stable "WoWCombatLog.txt" -- every
+    session's log gets a timestamp appended instead (confirmed real
+    2026-09-01). resolve_watch_log_path() must find the log actually
+    being written to right now, not assume the plain name."""
+
+    def test_falls_back_to_plain_name_when_nothing_logged_yet(self, tmp_path):
+        assert config.resolve_watch_log_path(tmp_path) == tmp_path / "WoWCombatLog.txt"
+
+    def test_falls_back_when_folder_does_not_exist(self, tmp_path):
+        missing = tmp_path / "does-not-exist"
+        assert config.resolve_watch_log_path(missing) == missing / "WoWCombatLog.txt"
+
+    def test_picks_the_most_recently_modified_timestamped_log(self, tmp_path):
+        older = tmp_path / "WoWCombatLog-083126_032155.txt"
+        newer = tmp_path / "WoWCombatLog-090126_203647.txt"
+        older.write_text("old session", encoding="utf-8")
+        time.sleep(0.01)
+        newer.write_text("current session", encoding="utf-8")
+        assert config.resolve_watch_log_path(tmp_path) == newer
+
+    def test_prefers_an_actively_growing_plain_named_log(self, tmp_path):
+        # An install that DOES use the stable plain name: an archived
+        # previous session sits alongside it, but the plain file is the
+        # one being actively written to (newest mtime) and must win.
+        archived = tmp_path / "WoWCombatLog-083126_032155.txt"
+        archived.write_text("archived session", encoding="utf-8")
+        time.sleep(0.01)
+        active = tmp_path / "WoWCombatLog.txt"
+        active.write_text("this session so far", encoding="utf-8")
+        assert config.resolve_watch_log_path(tmp_path) == active
