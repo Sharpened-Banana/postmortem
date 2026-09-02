@@ -27,7 +27,11 @@ postmortem-desktop = "postmortem.desktop.app:main"
 [project.optional-dependencies]
 dev = ["pytest>=7", "pyinstaller>=6.0"]
 site = ["fastapi>=0.110", "uvicorn[standard]>=0.30", "python-multipart>=0.0.9"]
-desktop = ["pywebview>=6.0", "certifi"]
+# pillow: stitches MDT's dungeon map tiles into the route map's
+# background (postmortem/mapart.py). Optional by design -- the core
+# package stays stdlib-only and the report simply has no background
+# without it.
+desktop = ["pywebview>=6.0", "certifi", "pillow>=10"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

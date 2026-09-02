@@ -535,6 +535,36 @@ class TestRecorder:
         assert vtt_text.startswith("WEBVTT\n\n")
         assert "-->" in vtt_text
 
+    def test_write_recorded_reports_enrich_hook_runs_before_rendering(self, tmp_path):
+        """The desktop app embeds map art through this hook (mapart.py);
+        it must see the finished report before HTML is rendered, and a
+        raising hook must never cost the run its reports."""
+        log = tmp_path / "WoWCombatLog.txt"
+        log.write_text(build_run_log().text(), encoding="utf-8")
+        rec = Recorder(log_path=log, out_dir=tmp_path / "runs", from_start=True,
+                       echo=lambda s: None)
+        (run,) = rec.watch(stop_after_runs=1)
+
+        from postmortem.cli import _write_recorded_reports
+        seen = {}
+
+        def enrich(report):
+            seen["zone"] = report["run"]["zone"]
+            report["_enriched"] = True
+
+        report = _write_recorded_reports(run, route=None, store=None, enrich=enrich)
+        assert seen == {"zone": "Murder Row"}
+        assert report["_enriched"] is True
+        # the written JSON carries what the hook added (it ran before writes)
+        written = json.loads(Path(f"{run.path.with_suffix('')}.json").read_text(encoding="utf-8"))
+        assert written["_enriched"] is True
+
+        def boom(report):
+            raise RuntimeError("no art today")
+
+        report2 = _write_recorded_reports(run, route=None, store=None, enrich=boom)
+        assert report2 is not None and report2["run"]["zone"] == "Murder Row"
+
     def test_write_recorded_reports_returns_the_analyzed_report(self, tmp_path):
         """_write_recorded_reports' return value (added for the desktop
         app's watch mode, and for `record --upload`'s CLI parity with
