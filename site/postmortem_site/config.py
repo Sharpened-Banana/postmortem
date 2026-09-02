@@ -14,6 +14,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from postmortem.bundled import bundled_dungeon_data_path
+
 # Where the site's SQLite database lives. Overridable via env var so
 # tests can point this at a tmp path instead of the real prod location.
 DB_PATH = os.environ.get("MYTHIC_SITE_DB", "/data/runs.db")
@@ -27,7 +29,10 @@ DB_PATH = os.environ.get("MYTHIC_SITE_DB", "/data/runs.db")
 # happens; there's no auto-refresh. Overridable via env var for tests.
 DUNGEON_DATA_PATH = os.environ.get(
     "MYTHIC_SITE_DUNGEON_DATA",
-    str(Path(__file__).resolve().parent / "dungeon_data.json"),
+    # Shipped inside the `postmortem` package (postmortem/data/), shared
+    # with the desktop app -- one copy so the two can't drift. Was a
+    # private copy next to this file until 2026-09-02.
+    str(bundled_dungeon_data_path()),
 )
 
 # Upload body-size cap, in bytes. 5MB is comfortably above the real

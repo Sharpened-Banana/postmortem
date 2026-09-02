@@ -44,7 +44,9 @@ from typing import Any, Optional
 from .. import cli as _cli
 from ..combatlog.parser import parse_file
 from ..combatlog.segmenter import segment_runs
+from ..mdt.decode import MDTDecodeError, decode_mdt_string
 from ..mdt.extract import write_dungeon_data
+from ..mdt.route import Route
 from ..recorder import Recorder
 from ..report.html import render_html
 from ..report.index import collect_reports, render_index
@@ -176,7 +178,11 @@ class DesktopAPI:
             raise SystemExit("error: log_path is required")
 
         route = _cli._load_route(params["route"]) if params.get("route") else None
-        store = _cli._load_store(params.get("dungeon_data_path"))
+        store = _cli._load_store(
+            params.get("dungeon_data_path")
+            # zero-config fallback: app data folder, then the packaged copy
+            or _config.resolve_dungeon_data_path(_config.load_settings())
+        )
         avoidable = _cli._load_avoidable(
                 params.get("avoidable_data_path")
                 # zero-config fallback: <config dir>/avoidable_spells.json
@@ -185,6 +191,12 @@ class DesktopAPI:
 
         run_selector = str(params.get("run_selector") or "last")
         segment = _cli._pick_run(segment_runs(parse_file(log_path)), run_selector)
+        if route is None:
+            # No route pasted for this analysis: fall back to the saved
+            # default for whichever dungeon this run turns out to be.
+            route = self._default_route_for(
+                segment.challenge_map_id, segment.zone_name, store,
+            )
 
         # _resolve_timer_par_ms only reads a handful of attributes off
         # its `args` -- a SimpleNamespace with the same names stands in
@@ -438,7 +450,11 @@ class DesktopAPI:
 
         try:
             route = _cli._load_route(params["route"]) if params.get("route") else None
-            store = _cli._load_store(params.get("dungeon_data_path"))
+            store = _cli._load_store(
+                params.get("dungeon_data_path")
+                # zero-config fallback: app data folder, then the packaged copy
+                or _config.resolve_dungeon_data_path(settings)
+            )
             avoidable = _cli._load_avoidable(
                 params.get("avoidable_data_path")
                 # zero-config fallback: <config dir>/avoidable_spells.json
@@ -561,6 +577,101 @@ class DesktopAPI:
         self._emit_watch_event({"type": "stopped"})
         return {"ok": True}
 
+    # -- default routes ---------------------------------------------------------
+
+    def add_default_route(self, text: str) -> dict:
+        """Save an MDT export string as the default route for the dungeon
+        it belongs to (the string carries MDT's dungeon index itself, so
+        nothing has to be labeled). One entry per dungeon: pasting a
+        second route for the same dungeon replaces the first.
+
+        Returns ``{"ok": True, "default_routes": [...]}`` (the full saved
+        list, for the UI to re-render) or ``{"ok": False, "error": ...}``
+        for an undecodable string. Never raises.
+        """
+        text = (text or "").strip()
+        if not text:
+            return {"ok": False, "error": "paste an MDT export string first"}
+        try:
+            route = Route.from_preset(decode_mdt_string(text))
+        except (MDTDecodeError, ValueError, KeyError, TypeError) as exc:
+            return {"ok": False, "error": f"that doesn't decode as an MDT export string: {exc}"}
+        if route.dungeon_idx is None:
+            return {"ok": False, "error": "that route doesn't say which dungeon it's for"}
+
+        # Fill in the ids/name a run will be matched on later, from
+        # whatever dungeon data is available *now* -- so matching never
+        # needs a data file at analysis time.
+        settings = _config.load_settings()
+        name: Optional[str] = None
+        map_id: Optional[int] = None
+        data_path = _config.resolve_dungeon_data_path(settings)
+        if data_path is not None:
+            try:
+                data = _cli._load_store(str(data_path)).by_dungeon_idx(route.dungeon_idx)
+            except Exception:
+                data = None
+            if data is not None:
+                name, map_id = data.name, data.map_id
+
+        entry = {
+            "dungeon_idx": route.dungeon_idx,
+            "dungeon_name": name,
+            "challenge_map_id": map_id,
+            "route_name": route.name or None,
+            "route": text,
+        }
+        routes = [
+            r for r in (settings.get("default_routes") or [])
+            if isinstance(r, dict) and r.get("dungeon_idx") != route.dungeon_idx
+        ]
+        routes.append(entry)
+        routes.sort(key=lambda r: (r.get("dungeon_name") or "", r.get("dungeon_idx") or 0))
+        settings["default_routes"] = routes
+        try:
+            _config.save_settings(settings)
+        except OSError as exc:
+            return {"ok": False, "error": f"could not save settings: {exc}"}
+        return {"ok": True, "default_routes": routes}
+
+    def remove_default_route(self, dungeon_idx: int) -> dict:
+        """Drop the saved default route for one dungeon. Idempotent."""
+        settings = _config.load_settings()
+        routes = [
+            r for r in (settings.get("default_routes") or [])
+            if isinstance(r, dict) and r.get("dungeon_idx") != dungeon_idx
+        ]
+        settings["default_routes"] = routes
+        try:
+            _config.save_settings(settings)
+        except OSError as exc:
+            return {"ok": False, "error": f"could not save settings: {exc}"}
+        return {"ok": True, "default_routes": routes}
+
+    def _default_route_for(self, challenge_map_id, zone_name, store) -> Optional[Route]:
+        """The saved default route for a run, decoded -- or None. Any
+        problem (no match, a string that no longer decodes) just means
+        "no route", never an error: a default is a convenience, not a
+        requirement. Applied wherever a run has no explicit route: Watch
+        Live (per run, since one watch spans many dungeons) and one-off
+        analysis."""
+        settings = _config.load_settings()
+        dungeon_idx = None
+        if store is not None and challenge_map_id is not None:
+            data = store.by_challenge_map_id(challenge_map_id)
+            if data is not None:
+                dungeon_idx = data.dungeon_idx
+        text = _config.resolve_default_route(
+            settings, challenge_map_id=challenge_map_id,
+            zone_name=zone_name, dungeon_idx=dungeon_idx,
+        )
+        if not text:
+            return None
+        try:
+            return Route.from_preset(decode_mdt_string(text))
+        except Exception:
+            return None
+
     def resolve_wow_log_path(self, folder: str) -> str:
         """The log file to watch inside a WoW ``Logs`` folder the user
         just picked: see ``config.resolve_watch_log_path`` for why this
@@ -584,6 +695,13 @@ class DesktopAPI:
         self._emit_watch_event({
             "type": "run_complete", "zone": run.zone, "level": run.keystone_level,
         })
+
+        if route is None:
+            # No route pasted on the Watch Live screen: use the saved
+            # default for *this run's* dungeon. Resolved per run, not once
+            # in start_watch, because one watch spans a whole session of
+            # different dungeons.
+            route = self._default_route_for(run.challenge_map_id, run.zone, store)
 
         # Pass avoidable through: start_watch loads (and validates) the
         # avoidable-damage data file, but until 2026-09-01 this call

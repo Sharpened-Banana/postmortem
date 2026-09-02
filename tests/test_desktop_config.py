@@ -42,6 +42,7 @@ class TestLoadSaveRoundTrip:
             "site_url": "https://postmortem.fly.dev",
             "wow_log_path": "/wow/Logs/WoWCombatLog.txt",
             "watch_auto_start": True,
+            "default_routes": [],
         }
         config.save_settings(settings)
         assert config.load_settings() == settings
@@ -113,6 +114,68 @@ class TestResolveAvoidableDataPath:
 
     def test_none_when_nothing_configured_or_present(self, isolated_config_dir):
         assert config.resolve_avoidable_data_path({"avoidable_data_path": None}) is None
+
+
+class TestResolveDungeonDataPath:
+    """Explicit setting > a dungeon_data.json in the app's data folder >
+    the copy packaged with postmortem > None."""
+
+    def test_explicit_setting_wins(self, isolated_config_dir):
+        got = config.resolve_dungeon_data_path({"dungeon_data_path": "/x/data.json"})
+        assert got == config.Path("/x/data.json")
+
+    def test_file_in_config_dir_beats_the_packaged_copy(self, isolated_config_dir):
+        isolated_config_dir.mkdir(parents=True)
+        local = isolated_config_dir / "dungeon_data.json"
+        local.write_text("{}", encoding="utf-8")
+        assert config.resolve_dungeon_data_path({}) == local
+
+    def test_falls_back_to_the_packaged_copy(self, isolated_config_dir):
+        # Nothing configured, nothing in the data folder: the copy shipped
+        # inside the package (the one the public site also uses) is used.
+        got = config.resolve_dungeon_data_path({})
+        assert got is not None and got.name == "dungeon_data.json" and got.is_file()
+
+    def test_none_when_nothing_is_available(self, isolated_config_dir, monkeypatch):
+        monkeypatch.setattr(
+            config, "bundled_dungeon_data_path",
+            lambda: isolated_config_dir / "nope" / "dungeon_data.json",
+        )
+        assert config.resolve_dungeon_data_path({}) is None
+
+
+class TestResolveDefaultRoute:
+    ROUTES = [
+        {"dungeon_idx": 160, "dungeon_name": "Murder Row",
+         "challenge_map_id": 587, "route": "MR-ROUTE"},
+        {"dungeon_idx": 164, "dungeon_name": "Altar of Fangs",
+         "challenge_map_id": None, "route": "AOF-ROUTE"},
+    ]
+
+    def _resolve(self, **kw):
+        kw.setdefault("challenge_map_id", None)
+        kw.setdefault("zone_name", None)
+        return config.resolve_default_route({"default_routes": self.ROUTES}, **kw)
+
+    def test_matches_by_challenge_map_id_first(self):
+        assert self._resolve(challenge_map_id=587, zone_name="Wrong Name") == "MR-ROUTE"
+
+    def test_matches_by_dungeon_idx(self):
+        assert self._resolve(dungeon_idx=164) == "AOF-ROUTE"
+
+    def test_matches_by_zone_name_case_insensitively_as_a_last_resort(self):
+        # entry saved with no challenge-map id (no dungeon data at the time)
+        assert self._resolve(zone_name="altar OF fangs") == "AOF-ROUTE"
+
+    def test_none_when_nothing_matches(self):
+        assert self._resolve(challenge_map_id=999, zone_name="Nowhere") is None
+
+    def test_tolerates_garbage_entries(self):
+        got = config.resolve_default_route(
+            {"default_routes": ["not a dict", {"route": ""}, None]},
+            challenge_map_id=587, zone_name="Murder Row",
+        )
+        assert got is None
 
 
 class TestResolveWatchLogPath:
