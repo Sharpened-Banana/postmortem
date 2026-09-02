@@ -418,6 +418,32 @@ class TestRecorderRunBoundaries:
         assert all(r is None for r in returned)
         assert rec._current is None            # the run was closed, not left open
 
+    def test_two_same_dungeon_keys_in_one_second_get_separate_slices(self, tmp_path):
+        # Slice filenames are only unique to the second. Two keys in the
+        # same dungeon at the same level can be processed within one second
+        # whenever the reader is catching up on buffered log (a resumed
+        # watch, or the backlog after a long analysis) -- the second used
+        # to silently overwrite the first's slice. A real log (2026-09-02)
+        # holds exactly this: two separate Altar of Fangs +7 keys.
+        b = LogBuilder()
+        b.start(0, zone="Altar of Fangs", instance=2993, cm=588, lvl=7)
+        self._filler(b, 5)
+        b.end(100, success=1, lvl=7, ms=100000, instance=2993)
+        b.start(200, zone="Altar of Fangs", instance=2993, cm=588, lvl=7)
+        self._filler(b, 205)
+        b.end(300, success=1, lvl=7, ms=100000, instance=2993)
+
+        runs, completed = self._record(tmp_path, b, stop_after_runs=2)
+
+        assert len(completed) == 2
+        first, second = completed
+        assert first.path != second.path
+        assert first.path.exists() and second.path.exists()
+        # Each slice holds exactly its own key, not one clobbering the other.
+        for run in (first, second):
+            assert run.path.read_text(encoding="utf-8").count(
+                "CHALLENGE_MODE_START") == 1
+
     def test_a_real_end_after_a_phantom_still_completes_the_next_run(self, tmp_path):
         b = LogBuilder()
         b.start(0, zone="Murder Row", instance=2830, cm=587, lvl=10)
