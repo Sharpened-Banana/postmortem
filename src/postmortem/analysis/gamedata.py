@@ -28,6 +28,11 @@ SPECS: dict[int, tuple[str, str, str]] = {
     268: ("Monk", "Brewmaster", "tank"), 269: ("Monk", "Windwalker", "dps"),
     270: ("Monk", "Mistweaver", "healer"),
     577: ("Demon Hunter", "Havoc", "dps"), 581: ("Demon Hunter", "Vengeance", "tank"),
+    # Devourer: the third Demon Hunter spec (Midnight). ID confirmed from a
+    # real 2026-09 log's COMBATANT_INFO, spec name from its own kit
+    # (Devour, Consume, Void Ray, Reap, Voidblade, Soul Immolation) --
+    # every cast is a damage ability, so dps.
+    1480: ("Demon Hunter", "Devourer", "dps"),
     1467: ("Evoker", "Devastation", "dps"), 1468: ("Evoker", "Preservation", "healer"),
     1473: ("Evoker", "Augmentation", "dps"),
 }
