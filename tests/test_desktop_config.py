@@ -39,6 +39,7 @@ class TestLoadSaveRoundTrip:
             "history_db_path": "/reports/runs.db",
             "site_url": "https://postmortem.fly.dev",
             "wow_log_path": "/wow/Logs/WoWCombatLog.txt",
+            "watch_auto_start": True,
         }
         config.save_settings(settings)
         assert config.load_settings() == settings

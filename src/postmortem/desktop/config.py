@@ -49,6 +49,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "history_db_path": None,
     "site_url": None,
     "wow_log_path": None,
+    # When True, the app starts Watch Live automatically on launch (using
+    # the saved wow_log_path + site_url), so the whole "finish a key -> it's
+    # analyzed and uploaded" loop needs zero clicks per session. Off by
+    # default: opting in is a deliberate choice, since it begins tailing a
+    # file and uploading runs the moment the app opens.
+    "watch_auto_start": False,
 }
 
 
