@@ -331,13 +331,31 @@ function mapSection() {
   const note = calibrated ? "" : `<div class="dim">No player-path overlay: ${
     esc((m.calibration||{}).reason || "not attempted")}.</div>`;
 
-  return `<h2>Route map</h2><div class="wrap map-wrap">
-    <svg viewBox="${b.min_x} ${b.min_y} ${w} ${h}" preserveAspectRatio="xMidYMid meet">
-      ${pois}${enemyDots}${paths}${deathMarks}
+  // Coordinates are MDT's planning canvas: x 0..840 left->right, y 0..-555
+  // TOP->BOTTOM (y grows negative going down). SVG's y grows downward, so
+  // drawing the raw values put the dungeon upside-down -- unnoticeable
+  // with dots alone, wrong the moment the real map sits underneath. The
+  // content group flips y once; the viewBox is expressed in that flipped
+  // frame. The floor's map art (m.backgrounds, embedded by the desktop
+  // app from the user's own MDT install -- see mapart.py) is the whole
+  // 840x555 canvas at (0,0) in the flipped frame, so it lines up with
+  // every dot with no further transform; the viewBox still crops to the
+  // planned pack extents as before.
+  const bg = (m.backgrounds || {})["1"];
+  const cw = (m.canvas || {}).width || 840, ch = (m.canvas || {}).height || 555;
+  const image = bg && bg.data_uri
+    ? `<image href="${bg.data_uri}" x="0" y="0" width="${cw}" height="${ch}" preserveAspectRatio="none" />`
+    : "";
+  const dotOpacity = image ? ` opacity="0.92"` : "";
+
+  return `<h2>Route map</h2><div class="wrap map-wrap${image ? " has-art" : ""}">
+    <svg viewBox="${b.min_x} ${(-b.max_y).toFixed(1)} ${w} ${h}" preserveAspectRatio="xMidYMid meet">
+      ${image}<g transform="scale(1,-1)"${dotOpacity}>${pois}${enemyDots}${paths}${deathMarks}</g>
     </svg></div>${note}
     <div class="legend">dot = planned enemy (color = plan pull; dashed red ring = route deviation)
       <i style="background:var(--warn)"></i>POI (entrance / marker)
-      ${calibrated ? '<i style="background:var(--bad)"></i>death (×) · colored lines = player paths' : ""}</div>`;
+      ${calibrated ? '<i style="background:var(--bad)"></i>death (×) · colored lines = player paths' : ""}
+      ${image ? " · map art from your MDT install" : ""}</div>`;
 }
 
 function pullsTable() {
