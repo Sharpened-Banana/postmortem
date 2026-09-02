@@ -170,6 +170,44 @@ class TestUploadReport:
         assert result.get("ok") is False
 
 
+class TestSiteBaseUrl:
+    """Any URL a user is likely to paste as the "site URL" must resolve
+    to the site's origin. Real bug (2026-09-02): Settings held the
+    ``/upload`` *page* URL and every Watch Live upload silently 404'd at
+    ``<site>/upload/api/runs`` -- a timed key never reached the site."""
+
+    @pytest.mark.parametrize("pasted", [
+        "https://postmortem-mplus.fly.dev",
+        "https://postmortem-mplus.fly.dev/",
+        "https://postmortem-mplus.fly.dev/upload",
+        "https://postmortem-mplus.fly.dev/upload/",
+        "https://postmortem-mplus.fly.dev/UPLOAD",
+        "https://postmortem-mplus.fly.dev/runs",
+        "https://postmortem-mplus.fly.dev/api/runs",
+        "https://postmortem-mplus.fly.dev/about",
+        "  https://postmortem-mplus.fly.dev/upload  ",
+    ])
+    def test_page_urls_normalize_to_the_origin(self, pasted):
+        assert upload.site_base_url(pasted) == "https://postmortem-mplus.fly.dev"
+
+    def test_a_nested_deployment_keeps_its_prefix(self):
+        assert upload.site_base_url("https://host/postmortem/upload") == "https://host/postmortem"
+        assert upload.site_base_url("https://host/postmortem") == "https://host/postmortem"
+
+    def test_upload_from_the_upload_page_url_hits_api_runs(self, monkeypatch):
+        seen = {}
+
+        def fake_urlopen(request, timeout=None):
+            seen["url"] = request.full_url
+            return _FakeHTTPResponse(json.dumps({"ok": True, "url": "/runs/16"}).encode())
+
+        monkeypatch.setattr(upload.urllib.request, "urlopen", fake_urlopen)
+        result = upload.upload_report({"run": {}}, "https://postmortem-mplus.fly.dev/upload",
+                                       token="tok")
+        assert seen["url"] == "https://postmortem-mplus.fly.dev/api/runs"
+        assert result["ok"] is True
+
+
 class TestCLIUploadFlag:
     """cmd_analyze's --upload wiring: uploading is a best-effort bonus
     step that never changes the command's exit code or suppresses its
