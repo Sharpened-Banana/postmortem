@@ -333,6 +333,18 @@
         </div>
 
         <div class="field">
+          <label>Default routes (one per dungeon)</label>
+          <div class="help">Paste an MDT export string once per dungeon. It self-identifies which dungeon it's for, and every key you run there — Watch Live or a one-off analysis — gets route-adherence comparison automatically, no pasting each session. A route pasted directly on the Watch Live or Analyze screen still wins for that run.</div>
+          <ul id="set-default-routes-list" class="routes-list" hidden></ul>
+          <div id="set-default-routes-empty" class="help">No default routes saved yet.</div>
+          <div class="field-row">
+            <textarea id="set-default-route-text" placeholder="Paste an MDT export string here…" rows="3"></textarea>
+            <button type="button" class="btn" id="set-default-route-add-btn">Add route</button>
+          </div>
+          <div id="set-default-route-error" class="banner banner-error" hidden></div>
+        </div>
+
+        <div class="field">
           <label>Default output folder</label>
           <div class="field-row">
             <input type="text" id="set-default-output-dir" placeholder="Not set">

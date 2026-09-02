@@ -98,7 +98,14 @@ a = Analysis(
     [entry_script],
     pathex=[],
     binaries=[],
-    datas=[(shell_src, shell_dst)],
+    datas=[
+        (shell_src, shell_dst),
+        # Bundled MDT dungeon/enemy data (postmortem/bundled.py resolves
+        # it relative to its own __file__, so it must land at this exact
+        # package-relative path -- same reasoning as shell/ above).
+        (os.path.join(REPO_ROOT, "src", "postmortem", "data"),
+         os.path.join("postmortem", "data")),
+    ],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

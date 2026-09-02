@@ -766,6 +766,14 @@ function initSettings() {
   set.wowLogFolderPickBtn.addEventListener("click", onPickSettingsWowLogFolder);
   set.saveBtn.addEventListener("click", onSaveSettings);
 
+  set.defaultRoutesList = document.getElementById("set-default-routes-list");
+  set.defaultRoutesEmpty = document.getElementById("set-default-routes-empty");
+  set.defaultRouteText = document.getElementById("set-default-route-text");
+  set.defaultRouteAddBtn = document.getElementById("set-default-route-add-btn");
+  set.defaultRouteError = document.getElementById("set-default-route-error");
+  set.defaultRouteAddBtn.addEventListener("click", onAddDefaultRoute);
+  set.defaultRoutesList.addEventListener("click", onRemoveDefaultRoute);
+
   set.wowAddonPath.addEventListener("input", updateExtractButtonState);
   set.extractOutputPickBtn.addEventListener("click", onPickExtractOutputFolder);
   set.extractBtn.addEventListener("click", onExtractDungeonData);
@@ -781,6 +789,7 @@ async function applySettingsToForm() {
   set.siteUrl.value = s.site_url || "";
   set.wowLogPath.value = s.wow_log_path || "";
   set.watchAutoStart.checked = !!s.watch_auto_start;
+  renderDefaultRoutes(s.default_routes || []);
   updateExtractButtonState();
 
   // Both fields already work with zero setup (see api.py's
@@ -854,6 +863,66 @@ async function onPickSettingsWowLogFolder() {
   }
 }
 
+function renderDefaultRoutes(routes) {
+  const list = set.defaultRoutesList;
+  list.innerHTML = "";
+  const items = Array.isArray(routes) ? routes : [];
+  for (const r of items) {
+    const li = document.createElement("li");
+    li.dataset.dungeonIdx = String(r.dungeon_idx);
+    const name = r.dungeon_name || `MDT dungeon #${r.dungeon_idx}`;
+    li.innerHTML = `<span class="name">${esc(name)}</span>`
+      + `<span class="dim">${esc(r.route_name || "")}</span>`
+      + `<button type="button" class="btn" data-remove-route="1">Remove</button>`;
+    list.appendChild(li);
+  }
+  list.hidden = items.length === 0;
+  set.defaultRoutesEmpty.hidden = items.length > 0;
+}
+
+async function onAddDefaultRoute() {
+  hideBanner(set.defaultRouteError);
+  const text = set.defaultRouteText.value.trim();
+  if (!text) return;
+  set.defaultRouteAddBtn.disabled = true;
+  try {
+    // The MDT string self-identifies its dungeon; the server decodes it,
+    // fills in name/challenge-map id from dungeon data, and saves.
+    const result = await api().add_default_route(text);
+    if (result && result.ok) {
+      state.settings = { ...(state.settings || defaultSettings()), default_routes: result.default_routes };
+      renderDefaultRoutes(result.default_routes);
+      set.defaultRouteText.value = "";
+    } else {
+      showBanner(set.defaultRouteError, (result && result.error) || "Could not add that route.");
+    }
+  } catch (e) {
+    showBanner(set.defaultRouteError, "Unexpected error: " + describeError(e));
+  } finally {
+    set.defaultRouteAddBtn.disabled = false;
+  }
+}
+
+async function onRemoveDefaultRoute(ev) {
+  const btn = ev.target.closest("[data-remove-route]");
+  if (!btn) return;
+  const li = btn.closest("li");
+  const idx = li ? Number(li.dataset.dungeonIdx) : NaN;
+  if (!Number.isFinite(idx)) return;
+  hideBanner(set.defaultRouteError);
+  try {
+    const result = await api().remove_default_route(idx);
+    if (result && result.ok) {
+      state.settings = { ...(state.settings || defaultSettings()), default_routes: result.default_routes };
+      renderDefaultRoutes(result.default_routes);
+    } else {
+      showBanner(set.defaultRouteError, (result && result.error) || "Could not remove that route.");
+    }
+  } catch (e) {
+    showBanner(set.defaultRouteError, "Unexpected error: " + describeError(e));
+  }
+}
+
 async function onSaveSettings() {
   hideBanner(set.errorBanner);
   hideBanner(set.successBanner);
@@ -869,6 +938,10 @@ async function onSaveSettings() {
     site_url: set.siteUrl.value.trim() || null,
     wow_log_path: set.wowLogPath.value.trim() || null,
     watch_auto_start: set.watchAutoStart.checked,
+    // Managed by add/remove_default_route (server-side read-modify-write),
+    // but save_settings() replaces the whole file -- so carry the current
+    // list through, or every Save would silently wipe it back to [].
+    default_routes: (state.settings && state.settings.default_routes) || [],
   };
 
   try {
