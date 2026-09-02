@@ -79,7 +79,7 @@ def _decode_mdt_body(text: str) -> Any:
             raise MDTDecodeError(f"invalid base64 in MDT2 string: {exc}") from None
         decompressed = _inflate(decoded)
         try:
-            return cbor.loads(decompressed)
+            return _normalize_cbor_strings(cbor.loads(decompressed))
         except cbor.CBORError as exc:
             raise MDTDecodeError(f"invalid CBOR in MDT2 string: {exc}") from None
 
@@ -97,6 +97,27 @@ def _decode_mdt_body(text: str) -> Any:
         "this looks like a very old MDT export (LibCompress-compressed); "
         "please re-export the route from a current MDT version"
     )
+
+
+def _normalize_cbor_strings(obj: Any) -> Any:
+    """Recursively turn CBOR byte-strings (major type 2) into ``str``.
+
+    MDT's own MDT2 exports encode every string as a CBOR *text* string,
+    so they already decode to ``str``. Keystone.guru's "Export to MDT"
+    (confirmed live, 2026-09-02) encodes them as *byte* strings instead
+    -- the identical preset, but with ``b'value'``/``b'currentDungeonIdx'``
+    keys -- so ``preset.get("value")`` found nothing and every
+    Keystone.guru string was rejected as "not an MDT route export". An
+    MDT preset is a plain Lua table of strings and numbers with no
+    binary payloads, so decoding as UTF-8 is always the right reading.
+    """
+    if isinstance(obj, bytes):
+        return obj.decode("utf-8", errors="replace")
+    if isinstance(obj, dict):
+        return {_normalize_cbor_strings(k): _normalize_cbor_strings(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_normalize_cbor_strings(v) for v in obj]
+    return obj
 
 
 def _load_ace(data: bytes) -> Any:

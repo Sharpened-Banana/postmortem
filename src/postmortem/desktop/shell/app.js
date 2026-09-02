@@ -774,6 +774,11 @@ function initSettings() {
   set.defaultRouteAddBtn.addEventListener("click", onAddDefaultRoute);
   set.defaultRoutesList.addEventListener("click", onRemoveDefaultRoute);
 
+  set.kgProfile = document.getElementById("set-kg-profile");
+  set.kgSyncBtn = document.getElementById("set-kg-sync-btn");
+  set.kgStatus = document.getElementById("set-kg-status");
+  set.kgSyncBtn.addEventListener("click", onSyncKeystoneGuru);
+
   set.wowAddonPath.addEventListener("input", updateExtractButtonState);
   set.extractOutputPickBtn.addEventListener("click", onPickExtractOutputFolder);
   set.extractBtn.addEventListener("click", onExtractDungeonData);
@@ -920,6 +925,43 @@ async function onRemoveDefaultRoute(ev) {
     }
   } catch (e) {
     showBanner(set.defaultRouteError, "Unexpected error: " + describeError(e));
+  }
+}
+
+async function onSyncKeystoneGuru() {
+  hideBanner(set.defaultRouteError);
+  set.kgStatus.hidden = true;
+  const profile = set.kgProfile.value.trim();
+  if (!profile) {
+    showBanner(set.defaultRouteError, "Paste your Keystone.guru profile URL first (https://keystone.guru/profile/12345).");
+    return;
+  }
+  set.kgSyncBtn.disabled = true;
+  set.kgStatus.textContent = "Fetching your published routes from Keystone.guru…";
+  set.kgStatus.hidden = false;
+  try {
+    const result = await api().sync_keystone_guru_routes(profile);
+    if (result && result.ok) {
+      state.settings = { ...(state.settings || defaultSettings()), default_routes: result.default_routes };
+      renderDefaultRoutes(result.default_routes);
+      const added = result.added || [];
+      const skipped = result.skipped || [];
+      let msg = added.length
+        ? `Added ${added.length} route${added.length === 1 ? "" : "s"}: ${added.map(a => a.route).join(" · ")}`
+        : "No new routes were added.";
+      if (skipped.length) {
+        msg += ` — skipped ${skipped.length}: ` + skipped.map(s => `${s.route} (${s.reason})`).join(" · ");
+      }
+      set.kgStatus.textContent = msg;
+    } else {
+      set.kgStatus.hidden = true;
+      showBanner(set.defaultRouteError, (result && result.error) || "Could not sync from Keystone.guru.");
+    }
+  } catch (e) {
+    set.kgStatus.hidden = true;
+    showBanner(set.defaultRouteError, "Unexpected error: " + describeError(e));
+  } finally {
+    set.kgSyncBtn.disabled = false;
   }
 }
 
