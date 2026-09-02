@@ -105,7 +105,12 @@ def upload_report(
         token = load_or_create_token()
 
     endpoint = f"{url.rstrip('/')}/api/runs"
-    payload = json.dumps(report).encode("utf-8")
+    # Never ship embedded dungeon map art to the site: it's Blizzard's
+    # art read from the user's own MDT install for their own local report
+    # (see mapart.py). Stripped here, at the one choke point every upload
+    # path goes through, rather than trusting each caller to remember.
+    from .mapart import strip_backgrounds
+    payload = json.dumps(strip_backgrounds(report)).encode("utf-8")
     request = urllib.request.Request(
         endpoint,
         data=payload,

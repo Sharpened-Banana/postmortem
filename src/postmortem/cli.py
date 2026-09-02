@@ -468,6 +468,7 @@ def cmd_index(args: argparse.Namespace) -> int:
 
 def _write_recorded_reports(
     run, route, store, pull_gap_seconds: float = 5.0, avoidable=None,
+    enrich=None,
 ) -> Optional[dict]:
     """Analyze one recorded run's log slice and write its JSON/HTML/text
     reports, plus the chapters sidecars (``<run>.chapters.json`` /
@@ -507,6 +508,17 @@ def _write_recorded_reports(
         return None
     report = analyze_run(segments[-1], route=route, store=store,
                          avoidable=avoidable, pull_gap_seconds=pull_gap_seconds)
+    if enrich is not None:
+        # A caller-supplied pass over the finished report before anything
+        # is rendered or written -- the desktop app uses it to embed the
+        # dungeon's map art from the user's own MDT install (mapart.py),
+        # which has to land in the dict *before* render_html() below sees
+        # it. Best-effort by contract: a raising hook must not cost the
+        # run its reports.
+        try:
+            enrich(report)
+        except Exception as exc:
+            print(f"warning: report enrichment failed: {exc}", file=sys.stderr)
     base = run.path.with_suffix("")
     Path(f"{base}.json").write_text(json.dumps(report, indent=1),
                                     encoding="utf-8")
