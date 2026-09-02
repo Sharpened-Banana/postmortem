@@ -563,7 +563,11 @@ class TestWatchMode:
         assert uploaded == [("Murder Row", "https://example.test")]
 
         event_types = [e["type"] for e in events]
-        assert event_types == ["watching", "run_complete", "analyzed", "uploaded"]
+        # run_started lands the moment the key's CHALLENGE_MODE_START is
+        # seen -- the UI's only sign of life for the whole run until then
+        assert event_types == [
+            "watching", "run_started", "run_complete", "analyzed", "uploaded",
+        ]
 
     def test_watched_runs_land_in_the_same_local_history_as_new_analysis(
         self, api, events, tmp_path, monkeypatch, isolated_config_dir,
@@ -595,8 +599,11 @@ class TestWatchMode:
         rows = query_runs(isolated_config_dir / "history.db")
         assert len(rows) == 1
         assert rows[0]["zone"] == "Murder Row"
-        assert events[1]["zone"] == "Murder Row"
-        assert events[2]["timed"] is True
+        # by type, not position: run_started now precedes run_complete
+        by_type = {e["type"]: e for e in events}
+        assert by_type["run_started"]["zone"] == "Murder Row"
+        assert by_type["run_complete"]["zone"] == "Murder Row"
+        assert by_type["analyzed"]["timed"] is True
 
         # The recorded slice's own JSON/HTML/chapters actually landed on
         # disk (same as record --analyze) -- _write_recorded_reports is
@@ -676,6 +683,84 @@ class TestWatchMode:
             fh.write(build_run_log().text())
         self._wait_for(events, "uploaded")  # upload still happens
         assert not any(e["type"] == "results_written" for e in events)
+        api.stop_watch()
+
+    def test_analysis_does_not_block_seeing_the_next_key_start(
+        self, api, events, tmp_path, monkeypatch,
+    ):
+        # Real report (2026-09-02): analysis used to run *on the tailing
+        # thread*, so for the whole duration of a big run's analysis (37
+        # minutes on one real key) no log was read and the next key's
+        # start went unseen. With analysis handed to a worker, the next
+        # key's run_started must arrive while the previous run is still
+        # being analyzed.
+        import threading
+        import time as _time
+        from conftest import LogBuilder, build_run_log
+
+        release = threading.Event()
+
+        def slow_handle(run, *args, **kwargs):
+            # the real handler emits run_complete first, then analyzes
+            api._emit_watch_event({"type": "run_complete", "zone": run.zone,
+                                   "level": run.keystone_level})
+            release.wait(timeout=10)  # simulate a long analysis
+
+        monkeypatch.setattr(api, "_handle_watched_run", slow_handle)
+
+        log = tmp_path / "WoWCombatLog.txt"
+        log.write_text("", encoding="utf-8")
+        api.start_watch({
+            "log_path": str(log), "site_url": "https://example.test",
+            "out_dir": str(tmp_path / "watch-runs"),
+        })
+        _time.sleep(0.2)
+        try:
+            with open(log, "a", encoding="utf-8") as fh:
+                fh.write(build_run_log().text())  # key 1: complete
+            self._wait_for(events, "run_complete")
+            # key 1 is now "being analyzed" (blocked on `release`). Start
+            # key 2 -- its run_started must show up regardless.
+            b = LogBuilder()
+            b.start(1000, zone="Altar of Fangs", instance=2993, cm=588, lvl=7)
+            with open(log, "a", encoding="utf-8") as fh:
+                fh.write(b.text())
+            started = [e for e in events if e["type"] == "run_started"]
+            deadline = _time.time() + 5
+            while len(started) < 2 and _time.time() < deadline:
+                _time.sleep(0.05)
+                started = [e for e in events if e["type"] == "run_started"]
+            assert [e["zone"] for e in started] == ["Murder Row", "Altar of Fangs"]
+        finally:
+            release.set()
+            api.stop_watch()
+
+    def test_a_different_key_starting_reports_the_previous_as_abandoned(
+        self, api, events, tmp_path, monkeypatch,
+    ):
+        import time as _time
+        from conftest import LogBuilder
+
+        monkeypatch.setattr(
+            "postmortem.upload.upload_report",
+            lambda report, url, **kwargs: {"ok": True, "run_id": 1, "url": "/runs/1"},
+        )
+        log = tmp_path / "WoWCombatLog.txt"
+        log.write_text("", encoding="utf-8")
+        api.start_watch({
+            "log_path": str(log), "site_url": "https://example.test",
+            "out_dir": str(tmp_path / "watch-runs"),
+        })
+        _time.sleep(0.2)
+        b = LogBuilder()
+        b.start(0, zone="Kings' Rest", instance=1762, cm=249, lvl=7)   # never ends
+        b.start(100, zone="Altar of Fangs", instance=2993, cm=588, lvl=7)
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write(b.text())
+        abandoned = self._wait_for(events, "run_abandoned")
+        assert abandoned["zone"] == "Kings' Rest"
+        started = [e["zone"] for e in events if e["type"] == "run_started"]
+        assert started == ["Kings' Rest", "Altar of Fangs"]
         api.stop_watch()
 
     def test_second_start_watch_while_active_is_rejected(

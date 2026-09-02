@@ -592,6 +592,18 @@ window.onWatchEvent = function (event) {
         `No combat log yet at <code>${esc(event.log_path)}</code> — `
         + "it'll appear automatically once you start a Mythic+ key.");
       break;
+    case "run_started":
+      // The first thing a player sees after starting a key -- without
+      // this the tab showed nothing at all until the key ended, which
+      // read as "Live isn't working" (real report, 2026-09-02).
+      setWatchStatus(true, `Recording ${watchRunLabel(event.zone, event.level)}…`);
+      addWatchLogEntry("info", `${esc(watchRunLabel(event.zone, event.level))} started — recording`);
+      break;
+    case "run_abandoned":
+      setWatchStatus(true, "Watching for the next key…");
+      addWatchLogEntry("info",
+        `${esc(watchRunLabel(event.zone, event.level))} ended without a result (abandoned) — nothing to analyze`);
+      break;
     case "run_complete":
       addWatchLogEntry("info", `${esc(watchRunLabel(event.zone, event.level))} complete — analyzing…`);
       break;

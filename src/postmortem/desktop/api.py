@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import sys
 import tempfile
 import threading
@@ -66,6 +67,12 @@ class DesktopAPI:
         # until a watch is started; every other method on this class is
         # stateless, so this is the one place instance state lives.
         self._watch_recorder: Optional[Recorder] = None
+        # Completed runs are handed from the watch (tailing) thread to a
+        # separate worker via this queue, so analysis + upload never block
+        # log reading -- see start_watch. None while not watching.
+        self._watch_queue: Optional["queue.Queue"] = None
+        self._watch_worker: Optional[threading.Thread] = None
+        self._watch_stop_sentinel: Optional[object] = None
         self._watch_thread: Optional[threading.Thread] = None
         # Auto-update state (see check_for_update/start_update below).
         self._update_thread: Optional[threading.Thread] = None
@@ -170,7 +177,11 @@ class DesktopAPI:
 
         route = _cli._load_route(params["route"]) if params.get("route") else None
         store = _cli._load_store(params.get("dungeon_data_path"))
-        avoidable = _cli._load_avoidable(params.get("avoidable_data_path"))
+        avoidable = _cli._load_avoidable(
+                params.get("avoidable_data_path")
+                # zero-config fallback: <config dir>/avoidable_spells.json
+                or _config.resolve_avoidable_data_path(_config.load_settings())
+            )
 
         run_selector = str(params.get("run_selector") or "last")
         segment = _cli._pick_run(segment_runs(parse_file(log_path)), run_selector)
@@ -367,6 +378,11 @@ class DesktopAPI:
     #        (addon_dir derivable + exists); silently absent otherwise.
     #   {"type": "uploaded", "url": str}
     #     -- the full URL (site_url + the site's own path) of the report.
+    #   {"type": "run_started", "zone": str, "level": int|None}
+    #     -- a key's CHALLENGE_MODE_START was just seen; recording it.
+    #   {"type": "run_abandoned", "zone": str, "level": int|None}
+    #     -- that key was closed without a real end (a different key
+    #        started, or WoW's phantom end): nothing to analyze.
     #   {"type": "run_failed", "error": str}
     #     -- this one run's analysis raised; watching continues.
     #   {"type": "analyze_failed", "error": str} / {"type": "upload_failed", "error": str}
@@ -423,7 +439,11 @@ class DesktopAPI:
         try:
             route = _cli._load_route(params["route"]) if params.get("route") else None
             store = _cli._load_store(params.get("dungeon_data_path"))
-            avoidable = _cli._load_avoidable(params.get("avoidable_data_path"))
+            avoidable = _cli._load_avoidable(
+                params.get("avoidable_data_path")
+                # zero-config fallback: <config dir>/avoidable_spells.json
+                or _config.resolve_avoidable_data_path(_config.load_settings())
+            )
         except SystemExit as exc:
             return {"ok": False, "error": str(exc)}
         except Exception as exc:
@@ -438,25 +458,49 @@ class DesktopAPI:
         from ..addon_results import addon_dir_from_log_path
         addon_dir = addon_dir_from_log_path(log_path)
 
+        # Two threads, not one. Recorder.watch() (the *tailing* thread)
+        # calls on_run_complete synchronously from inside its read loop,
+        # so doing the analysis + upload right there stalled log reading
+        # for the whole duration -- 37 minutes on one real 100MB+ run
+        # (2026-09-02), during which a new key's start went unseen and
+        # the UI sat silent. Completed runs are instead handed to a
+        # dedicated worker over a queue: tailing stays realtime, runs are
+        # still analyzed strictly in order, and "run_started" for the
+        # next key shows up the moment it begins.
+        work: "queue.Queue" = queue.Queue()
+        _STOP = object()
+
         def on_run_complete(run: Any) -> None:
-            # Runs on the watch thread itself (Recorder calls this
-            # synchronously from inside watch()'s loop) -- keep it
-            # resilient, since an unhandled exception here would kill
-            # the whole watch thread mid-session. "run_failed" (this one
-            # run didn't analyze/upload) is deliberately a different
-            # event type than run_watch()'s "crashed" below (the whole
-            # watch stopped) -- the UI needs to tell "still watching,
-            # one run had a problem" apart from "not watching anymore".
-            try:
-                self._handle_watched_run(
-                    run, route, store, avoidable, site_url, history_db_path, addon_dir,
-                )
-            except Exception as exc:
-                self._emit_watch_event({"type": "run_failed", "error": str(exc)})
+            work.put(run)
+
+        def worker() -> None:
+            while True:
+                run = work.get()
+                if run is _STOP:
+                    return
+                # "run_failed" (this one run didn't analyze/upload) is
+                # deliberately a different event type than run_watch()'s
+                # "crashed" (the whole watch stopped) -- the UI tells
+                # "still watching, one run had a problem" apart from "not
+                # watching anymore". Keep this resilient: an unhandled
+                # exception here would silently kill the worker and every
+                # later run would just pile up unprocessed.
+                try:
+                    self._handle_watched_run(
+                        run, route, store, avoidable, site_url, history_db_path, addon_dir,
+                    )
+                except Exception as exc:
+                    self._emit_watch_event({"type": "run_failed", "error": str(exc)})
 
         recorder = Recorder(
             log_path=Path(log_path),
             out_dir=Path(out_dir),
+            on_run_start=lambda run: self._emit_watch_event({
+                "type": "run_started", "zone": run.zone, "level": run.keystone_level,
+            }),
+            on_run_abandoned=lambda run: self._emit_watch_event({
+                "type": "run_abandoned", "zone": run.zone, "level": run.keystone_level,
+            }),
             on_run_complete=on_run_complete,
             on_waiting_for_log=lambda: self._emit_watch_event(
                 {"type": "waiting_for_log", "log_path": str(log_path)}
@@ -469,16 +513,21 @@ class DesktopAPI:
             # per-line/per-hook failure is already caught internally),
             # but opening log_path for the first time can (missing file,
             # unreadable) -- report that as a "crashed" event (distinct
-            # from on_run_complete's "run_failed" above: this means the
-            # watch thread itself exited, not just one run) instead of
-            # letting the thread die with an unhandled exception no one
-            # would see.
+            # from the worker's "run_failed" above: this means the watch
+            # thread itself exited, not just one run) instead of letting
+            # the thread die with an unhandled exception no one would see.
             try:
                 recorder.watch()
             except Exception as exc:
                 self._emit_watch_event({"type": "crashed", "error": str(exc)})
 
         self._watch_recorder = recorder
+        self._watch_queue = work
+        self._watch_stop_sentinel = _STOP
+        self._watch_worker = threading.Thread(
+            target=worker, name="postmortem-watch-worker", daemon=True,
+        )
+        self._watch_worker.start()
         self._watch_thread = threading.Thread(
             target=run_watch, name="postmortem-watch", daemon=True,
         )
@@ -497,8 +546,18 @@ class DesktopAPI:
             self._watch_recorder.request_stop()
         if self._watch_thread is not None:
             self._watch_thread.join(timeout=5.0)
+        # Let the worker finish whatever run it's on (it's daemon, so it
+        # can't outlive the app), then tell it to exit once the queue
+        # drains. Joined only briefly: a run mid-analysis can take
+        # minutes, and Stop must never freeze the UI for that.
+        if self._watch_queue is not None:
+            self._watch_queue.put(self._watch_stop_sentinel)
+        if self._watch_worker is not None:
+            self._watch_worker.join(timeout=1.0)
         self._watch_recorder = None
         self._watch_thread = None
+        self._watch_queue = None
+        self._watch_worker = None
         self._emit_watch_event({"type": "stopped"})
         return {"ok": True}
 
