@@ -613,6 +613,71 @@ class TestWatchMode:
         assert api._watch_thread is None
         assert self._wait_for(events, "stopped")
 
+    def test_writes_the_addon_results_file_when_the_addon_is_installed(
+        self, api, events, tmp_path, monkeypatch,
+    ):
+        # The in-game writeback: with the log in a real WoW layout that
+        # has the addon installed, a completed watched run drops
+        # PostmortemResults.lua into the addon folder and emits
+        # results_written, so the player can /reload to see the stats.
+        from conftest import build_run_log
+
+        monkeypatch.setattr(
+            "postmortem.upload.upload_report",
+            lambda report, url, **kwargs: {"ok": True, "run_id": 1, "url": "/runs/1"},
+        )
+
+        flavor = tmp_path / "World of Warcraft" / "_retail_"
+        (flavor / "Logs").mkdir(parents=True)
+        addon_dir = flavor / "Interface" / "AddOns" / "Postmortem"
+        addon_dir.mkdir(parents=True)
+        log = flavor / "Logs" / "WoWCombatLog.txt"
+        log.write_text("", encoding="utf-8")
+
+        api.start_watch({
+            "log_path": str(log), "site_url": "https://example.test",
+            "out_dir": str(tmp_path / "watch-runs"),
+        })
+        import time as _time
+        _time.sleep(0.2)
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write(build_run_log().text())
+
+        written_event = self._wait_for(events, "results_written")
+        assert written_event["zone"] == "Murder Row"
+        results = addon_dir / "PostmortemResults.lua"
+        assert results.exists()
+        assert "Murder Row" in results.read_text(encoding="utf-8")
+        api.stop_watch()
+
+    def test_no_addon_writeback_when_addon_not_installed(
+        self, api, events, tmp_path, monkeypatch,
+    ):
+        # Same real WoW layout but no addon folder -> no results_written
+        # event, no crash, upload still happens.
+        from conftest import build_run_log
+
+        monkeypatch.setattr(
+            "postmortem.upload.upload_report",
+            lambda report, url, **kwargs: {"ok": True, "run_id": 1, "url": "/runs/1"},
+        )
+        flavor = tmp_path / "World of Warcraft" / "_retail_"
+        (flavor / "Logs").mkdir(parents=True)  # no Interface/AddOns/Postmortem
+        log = flavor / "Logs" / "WoWCombatLog.txt"
+        log.write_text("", encoding="utf-8")
+
+        api.start_watch({
+            "log_path": str(log), "site_url": "https://example.test",
+            "out_dir": str(tmp_path / "watch-runs"),
+        })
+        import time as _time
+        _time.sleep(0.2)
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write(build_run_log().text())
+        self._wait_for(events, "uploaded")  # upload still happens
+        assert not any(e["type"] == "results_written" for e in events)
+        api.stop_watch()
+
     def test_second_start_watch_while_active_is_rejected(
         self, api, events, tmp_path,
     ):

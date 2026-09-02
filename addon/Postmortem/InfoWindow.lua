@@ -225,12 +225,14 @@ SlashCmdList["POSTMORTEM"] = function(msg)
   msg = msg:gsub("^%s+", ""):gsub("%s+$", "") -- trim
   if msg == "" then
     MA:Info_Toggle()
+  elseif msg == "results" or msg == "stats" then
+    if MA.Results_Show then MA:Results_Show() end
   elseif msg == "link" or msg == "url" then
     MA:Info_ShowLinkPopup()
   elseif msg == "minimap" then
     if MA.MinimapButton_Toggle then MA.MinimapButton_Toggle(MA) end
   else
-    print("|cffd7a94cPostmortem|r: /pm (info window), /pm link (copy download link), "
-      .. "/pm minimap (toggle minimap icon)")
+    print("|cffd7a94cPostmortem|r: /pm (info window), /pm results (in-game run stats), "
+      .. "/pm link (copy download link), /pm minimap (toggle minimap icon)")
   end
 end
