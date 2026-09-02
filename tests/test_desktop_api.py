@@ -897,6 +897,65 @@ class TestWatchMode:
         assert started == ["Kings' Rest", "Altar of Fangs"]
         api.stop_watch()
 
+    def test_catch_up_uploads_a_key_that_finished_before_the_watch_and_never_twice(
+        self, api, events, tmp_path, monkeypatch, isolated_config_dir,
+    ):
+        # Real loss (2026-09-02): a timed key sat fully written in the
+        # current log at watch start and was skipped. Now it's replayed
+        # through analyze+upload -- and because the run history then has
+        # it, a second watch on the same log does NOT upload it again.
+        import time as _time
+        from conftest import build_run_log
+
+        uploads = []
+        monkeypatch.setattr(
+            "postmortem.upload.upload_report",
+            lambda report, url, **kw: uploads.append(report["run"]["zone"]) or
+            {"ok": True, "run_id": 1, "url": "/runs/1"},
+        )
+        log = tmp_path / "WoWCombatLog.txt"
+        log.write_text(build_run_log().text(), encoding="utf-8")   # already complete
+
+        api.start_watch({"log_path": str(log), "site_url": "https://example.test",
+                         "out_dir": str(tmp_path / "watch-runs")})
+        self._wait_for(events, "uploaded")           # no new lines were ever written
+        api.stop_watch()
+        assert uploads == ["Murder Row"]
+
+        events.clear()
+        api.start_watch({"log_path": str(log), "site_url": "https://example.test",
+                         "out_dir": str(tmp_path / "watch-runs")})
+        _time.sleep(0.6)
+        api.stop_watch()
+        assert uploads == ["Murder Row"]             # still exactly once
+        assert not any(e["type"] == "uploaded" for e in events)
+
+    def test_follows_wow_to_a_new_session_log(self, api, events, tmp_path, monkeypatch):
+        import os
+        import time as _time
+        from conftest import LogBuilder, build_run_log
+
+        monkeypatch.setattr(
+            "postmortem.upload.upload_report",
+            lambda report, url, **kw: {"ok": True, "run_id": 1, "url": "/runs/1"},
+        )
+        logs = tmp_path / "Logs"; logs.mkdir()
+        old = logs / "WoWCombatLog-090226_050445.txt"
+        old.write_text("", encoding="utf-8")
+        past = _time.time() - 120
+        os.utime(old, (past, past))
+        api.start_watch({"log_path": str(old), "site_url": "https://example.test",
+                         "out_dir": str(tmp_path / "watch-runs")})
+        api._watch_recorder.rotation_check_s = 0.0
+        _time.sleep(0.3)
+
+        new = logs / "WoWCombatLog-090226_085516.txt"
+        new.write_text(build_run_log().text(), encoding="utf-8")
+        switched = self._wait_for(events, "log_switched")
+        assert switched["log_path"].endswith("WoWCombatLog-090226_085516.txt")
+        self._wait_for(events, "uploaded")
+        api.stop_watch()
+
     def test_second_start_watch_while_active_is_rejected(
         self, api, events, tmp_path,
     ):

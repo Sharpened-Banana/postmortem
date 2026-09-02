@@ -43,6 +43,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
+from .combatlog.parser import parse_line
+
 _START_RE = re.compile(r"  CHALLENGE_MODE_START,")
 _END_RE = re.compile(r"  CHALLENGE_MODE_END,")
 _DEATH_RE = re.compile(r"  UNIT_DIED,")
@@ -75,6 +77,20 @@ def _parse_start_key(line: str) -> tuple[Optional[int], Optional[int]]:
     return _to_int(m.group(3)), _to_int(m.group(4))
 
 
+def _start_identity(line: str) -> tuple[Optional[str], Optional[float]]:
+    """``(zone, start_ts)`` for a CHALLENGE_MODE_START line -- the same
+    identity the run history de-duplicates on (``Store.ingest``: zone +
+    ``report["run"]["start_ts"]``). The timestamp goes through the real
+    combat-log parser so it's bit-identical to what analysis produces."""
+    m = _START_FIELDS_RE.search(line)
+    if not m:
+        return None, None
+    event = parse_line(line)
+    if event is None:
+        return None, None
+    return m.group(1), event.ts
+
+
 def _is_phantom_end(line: str) -> bool:
     """Whether a CHALLENGE_MODE_END line is WoW's all-zeroed *phantom*
     end rather than a real one.
@@ -94,6 +110,27 @@ def _is_phantom_end(line: str) -> bool:
     if not m:
         return False
     return _to_int(m.group(4)) == 0
+
+
+def newest_combat_log(folder: str | Path) -> Optional[Path]:
+    """The most recently modified ``WoWCombatLog*.txt`` in ``folder`` --
+    the one WoW is writing to right now, whatever it's named -- or None.
+
+    WoW does not reliably reuse a stable ``WoWCombatLog.txt``: many
+    installs start a fresh ``WoWCombatLog-<session stamp>.txt`` every
+    time the client launches. The active log is always the newest by
+    mtime, since only an open log keeps being touched.
+    """
+    try:
+        candidates = list(Path(folder).glob("WoWCombatLog*.txt"))
+    except OSError:
+        return None
+    if not candidates:
+        return None
+    try:
+        return max(candidates, key=lambda p: p.stat().st_mtime)
+    except OSError:
+        return None
 
 
 @dataclass
@@ -128,6 +165,24 @@ class Recorder:
     # recording itself.
     on_run_start: Optional[Callable[[RecordedRun], None]] = None
     on_run_abandoned: Optional[Callable[[RecordedRun], None]] = None
+    # Follow WoW across log files. Many installs start a brand-new
+    # ``WoWCombatLog-<stamp>.txt`` every time the client launches, and a
+    # watch that stays on the file it opened goes quietly blind the moment
+    # the player restarts the game -- a real, timed key was lost exactly
+    # that way (2026-09-02). While idle, the newest sibling log is checked
+    # every ``rotation_check_s``; a newer one means WoW restarted: any run
+    # still open can never get its end (reported abandoned), the new file
+    # is read from its start (everything in it is this session's), and
+    # ``on_log_switched`` fires so a UI can say so.
+    follow_rotation: bool = True
+    rotation_check_s: float = 5.0
+    on_log_switched: Optional[Callable[[Path], None]] = None
+    # Catch-up: when given, every COMPLETED run already sitting in the log
+    # at open time is replayed through the normal pipeline (slice +
+    # on_run_complete) unless ``already_processed(zone, start_ts)`` says it
+    # was handled before -- the desktop app answers that from its run
+    # history. None (the CLI) keeps the old "only tail what's new" start.
+    already_processed: Optional[Callable[[str, float], bool]] = None
     on_start_cmd: Optional[str] = None  # shell hook (e.g. start OBS recording)
     on_end_cmd: Optional[str] = None    # shell hook (e.g. stop OBS recording)
     obs_url: Optional[str] = None       # e.g. ws://127.0.0.1:4455 -- native OBS control
@@ -206,7 +261,14 @@ class Recorder:
         # history to skip -- everything in it is fresh, from right now --
         # so seeking to its end here would silently miss it entirely.
         if not self.from_start and not waited_for_file:
-            resume_at, in_progress = self._find_resume_point(fh)
+            resume_at, in_progress, completed = self._find_resume_point(fh)
+            # Keys that finished before this watch began (and weren't
+            # handled by an earlier watch) get replayed through the normal
+            # pipeline first -- see _catch_up / already_processed.
+            runs.extend(self._catch_up(fh, completed))
+            if stop_after_runs and len(runs) >= stop_after_runs:
+                fh.close()
+                return runs
             fh.seek(resume_at)
             if in_progress:
                 self.echo("  found a key already in progress -- resuming it")
@@ -217,6 +279,12 @@ class Recorder:
                     if self._truncated(fh):
                         fh.close()
                         fh = self._open()
+                        continue
+                    # Idle at end-of-file: the natural moment to notice WoW
+                    # has moved on to a new session's log file.
+                    rotated = self._maybe_rotate(fh)
+                    if rotated is not None:
+                        fh = rotated
                         continue
                     time.sleep(self.poll_interval)
                     continue
@@ -234,10 +302,77 @@ class Recorder:
             fh.close()
         return runs
 
+    _last_rotation_check: float = field(default=0.0, repr=False)
+
+    def _maybe_rotate(self, fh):
+        """If a newer sibling ``WoWCombatLog*.txt`` has appeared, switch to
+        it: close any open run as abandoned (WoW restarted -- that key can
+        never get its end from the old file), reopen on the new file from
+        its START (everything in it belongs to this fresh session), fire
+        ``on_log_switched``, and return the new handle. None = no change.
+        Rate-limited to ``rotation_check_s``; every failure is treated as
+        "no change" so a transient stat error never kills the watch."""
+        if not self.follow_rotation:
+            return None
+        now = time.monotonic()
+        if now - self._last_rotation_check < self.rotation_check_s:
+            return None
+        self._last_rotation_check = now
+        try:
+            candidate = newest_combat_log(self.log_path.parent)
+            if candidate is None or candidate.resolve() == self.log_path.resolve():
+                return None
+            if candidate.stat().st_mtime <= self.log_path.stat().st_mtime:
+                return None
+        except OSError:
+            return None
+        if self._current is not None:
+            self._close_run(completed=False)
+            self._notify(self.on_run_abandoned, self._current)
+            self._current = None
+        fh.close()
+        self.log_path = candidate
+        self.echo(f"  WoW started a new log -- now watching {candidate}")
+        self._notify(self.on_log_switched, candidate)  # type: ignore[arg-type]
+        return self._open()
+
+    def _catch_up(self, fh, completed) -> list[RecordedRun]:
+        """Replay each ``(start_offset, end_offset, zone, start_ts)`` range
+        from ``_find_resume_point`` through ``_feed`` -- i.e. record its
+        slice and fire ``on_run_complete`` exactly as if it had been tailed
+        live -- unless ``already_processed(zone, start_ts)`` says it was.
+        Returns the runs that completed. Leaves ``fh`` positioned wherever
+        the last replay ended; the caller seeks to the real resume point
+        afterwards."""
+        done: list[RecordedRun] = []
+        if self.already_processed is None:
+            return done
+        for start_off, end_off, zone, start_ts in completed:
+            try:
+                if self.already_processed(zone, start_ts):
+                    continue
+            except Exception:
+                continue
+            self.echo(f"  catching up on a finished key found in the log: {zone}")
+            fh.seek(start_off)
+            while fh.tell() < end_off:
+                line = fh.readline()
+                if not line:
+                    break
+                run = self._feed(line)
+                if run is not None:
+                    done.append(run)
+            # a range that somehow didn't close cleanly must not bleed into
+            # the live tail as an open run
+            if self._current is not None:
+                self._close_run(completed=False)
+                self._current = None
+        return done
+
     def _open(self):
         return open(self.log_path, "r", encoding="utf-8", errors="replace")
 
-    def _find_resume_point(self, fh) -> tuple[int, bool]:
+    def _find_resume_point(self, fh) -> tuple[int, bool, list]:
         """Scan a pre-existing log file once (only called right after
         opening it in ``watch()``) for its most recent CHALLENGE_MODE_START
         with no CHALLENGE_MODE_END after it -- an already-in-progress run
@@ -255,18 +390,32 @@ class Recorder:
         lengths (multi-byte UTF-8 content would throw that off).
         """
         pending_start_offset: Optional[int] = None
+        pending_start_line: Optional[str] = None
+        # Every completed run seen on the way, as (start_offset,
+        # end_offset_after_END, zone, start_ts) -- what _catch_up() replays
+        # for keys that finished before this watch began (2026-09-02: a
+        # timed key sat fully written in the current log at open time and
+        # the old "skip to EOF" start silently walked past it).
+        completed: list[tuple[int, int, str, float]] = []
         offset = fh.tell()
         line = fh.readline()
         while line:
             if _START_RE.search(line):
                 pending_start_offset = offset
+                pending_start_line = line
             elif _END_RE.search(line):
+                if (pending_start_offset is not None and pending_start_line
+                        and not _is_phantom_end(line)):
+                    zone, start_ts = _start_identity(pending_start_line)
+                    if zone is not None and start_ts is not None:
+                        completed.append((pending_start_offset, fh.tell(), zone, start_ts))
                 pending_start_offset = None
+                pending_start_line = None
             offset = fh.tell()
             line = fh.readline()
         if pending_start_offset is not None:
-            return pending_start_offset, True
-        return offset, False
+            return pending_start_offset, True, completed
+        return offset, False, completed
 
     def _truncated(self, fh) -> bool:
         try:

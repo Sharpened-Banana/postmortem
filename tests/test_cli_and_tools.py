@@ -311,6 +311,130 @@ class TestAvoidableDataCLI:
         assert "Bigheals-Area52" in out
 
 
+class TestRecorderRotationAndCatchUp:
+    """Following WoW across session logs, and picking up keys that
+    finished before the watch began.
+
+    Real loss (2026-09-02): WoW restarted mid-session and began a new
+    WoWCombatLog-<stamp>.txt while the app kept tailing the old one; a
+    timed Blinding Vale +7 in the new file was never seen. Separately, a
+    completed key already sitting in the log at open time was skipped by
+    the old "resume at EOF" start."""
+
+    @staticmethod
+    def _filler(b, t):
+        TestRecorderRunBoundaries._filler(b, t)
+
+    def test_switches_to_a_newer_log_mid_watch(self, tmp_path):
+        import os
+        import threading
+        import time as _time
+
+        logs = tmp_path / "Logs"; logs.mkdir()
+        old = logs / "WoWCombatLog-090226_050445.txt"
+        b = LogBuilder()
+        b.start(0, zone="Temple of Sethraliss", instance=1877, cm=250, lvl=7)  # never ends
+        self._filler(b, 5)
+        old.write_text(b.text(), encoding="utf-8")
+        past = _time.time() - 120
+        os.utime(old, (past, past))
+
+        completed, abandoned, switched = [], [], []
+        rec = Recorder(
+            log_path=old, out_dir=tmp_path / "runs", from_start=True,
+            rotation_check_s=0.0, poll_interval=0.05,
+            on_run_complete=completed.append, on_run_abandoned=abandoned.append,
+            on_log_switched=switched.append, echo=lambda s: None,
+        )
+        t = threading.Thread(target=lambda: rec.watch(stop_after_runs=1), daemon=True)
+        t.start()
+        _time.sleep(0.3)  # let it open `old` and go idle at EOF
+
+        # WoW restarts: a newer session log appears with a full key in it
+        new = logs / "WoWCombatLog-090226_085516.txt"
+        nb = LogBuilder()
+        nb.start(0, zone="The Blinding Vale", instance=2859, cm=584, lvl=7)
+        self._filler(nb, 5)
+        nb.end(100, success=1, lvl=7, ms=971306, instance=2859)
+        new.write_text(nb.text(), encoding="utf-8")
+
+        t.join(timeout=5)
+        rec.request_stop()
+        assert not t.is_alive(), "watch never completed the run from the new log"
+        assert [p.name for p in switched] == ["WoWCombatLog-090226_085516.txt"]
+        assert [r.zone for r in abandoned] == ["Temple of Sethraliss"]
+        assert [r.zone for r in completed] == ["The Blinding Vale"]
+        assert completed[0].completed and completed[0].keystone_level == 7
+
+    def test_catches_up_on_a_key_that_finished_before_the_watch_began(self, tmp_path):
+        log = tmp_path / "WoWCombatLog.txt"
+        b = LogBuilder()
+        b.start(0, zone="The Blinding Vale", instance=2859, cm=584, lvl=7)
+        self._filler(b, 5)
+        b.end(100, success=1, lvl=7, ms=971306, instance=2859)
+        log.write_text(b.text(), encoding="utf-8")
+
+        asked, completed = [], []
+        rec = Recorder(
+            log_path=log, out_dir=tmp_path / "runs",  # from_start=False: the real default
+            already_processed=lambda zone, ts: asked.append((zone, ts)) or False,
+            on_run_complete=completed.append, echo=lambda s: None,
+        )
+        runs = rec.watch(stop_after_runs=1)
+        assert [r.zone for r in completed] == ["The Blinding Vale"]
+        assert runs == completed
+        (zone, ts) = asked[0]
+        assert zone == "The Blinding Vale" and isinstance(ts, float) and ts > 0
+        # the replayed slice is a normal recording: its own START..END
+        text = completed[0].path.read_text(encoding="utf-8")
+        assert text.count("CHALLENGE_MODE_START") == 1 and "CHALLENGE_MODE_END" in text
+
+    def test_does_not_replay_a_key_the_history_already_has(self, tmp_path):
+        import threading
+        import time as _time
+
+        log = tmp_path / "WoWCombatLog.txt"
+        b = LogBuilder()
+        b.start(0, zone="The Blinding Vale", instance=2859, cm=584, lvl=7)
+        b.end(100, success=1, lvl=7, ms=971306, instance=2859)
+        log.write_text(b.text(), encoding="utf-8")
+
+        completed = []
+        rec = Recorder(
+            log_path=log, out_dir=tmp_path / "runs", poll_interval=0.05,
+            already_processed=lambda zone, ts: True,
+            on_run_complete=completed.append, echo=lambda s: None,
+        )
+        t = threading.Thread(target=rec.watch, daemon=True)
+        t.start()
+        _time.sleep(0.4)
+        rec.request_stop()
+        t.join(timeout=3)
+        assert completed == []
+        assert not list((tmp_path / "runs").glob("*.txt"))
+
+    def test_cli_default_has_no_catch_up(self, tmp_path):
+        # No already_processed (the CLI): the old behavior -- only tail
+        # what's new -- is unchanged.
+        import threading
+        import time as _time
+
+        log = tmp_path / "WoWCombatLog.txt"
+        b = LogBuilder()
+        b.start(0)
+        b.end(100)
+        log.write_text(b.text(), encoding="utf-8")
+        completed = []
+        rec = Recorder(log_path=log, out_dir=tmp_path / "runs", poll_interval=0.05,
+                       on_run_complete=completed.append, echo=lambda s: None)
+        t = threading.Thread(target=rec.watch, daemon=True)
+        t.start()
+        _time.sleep(0.3)
+        rec.request_stop()
+        t.join(timeout=3)
+        assert completed == []
+
+
 class TestRecorderRunBoundaries:
     """Run-boundary handling in the *live* recorder.
 
