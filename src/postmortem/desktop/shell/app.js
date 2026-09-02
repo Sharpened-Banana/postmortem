@@ -134,6 +134,7 @@ function defaultSettings() {
     history_db_path: null,
     site_url: null,
     wow_log_path: null,
+    watch_auto_start: false,
   };
 }
 
@@ -727,6 +728,7 @@ function initSettings() {
   set.wowLogPath = document.getElementById("set-wow-log-path");
   set.wowLogPickBtn = document.getElementById("set-wow-log-pick-btn");
   set.wowLogFolderPickBtn = document.getElementById("set-wow-log-folder-pick-btn");
+  set.watchAutoStart = document.getElementById("set-watch-auto-start");
   set.saveBtn = document.getElementById("set-save-btn");
   set.errorBanner = document.getElementById("set-error-banner");
   set.successBanner = document.getElementById("set-success-banner");
@@ -762,6 +764,7 @@ async function applySettingsToForm() {
   set.historyDbPath.value = s.history_db_path || "";
   set.siteUrl.value = s.site_url || "";
   set.wowLogPath.value = s.wow_log_path || "";
+  set.watchAutoStart.checked = !!s.watch_auto_start;
   updateExtractButtonState();
 
   // Both fields already work with zero setup (see api.py's
@@ -849,6 +852,7 @@ async function onSaveSettings() {
     history_db_path: set.historyDbPath.value.trim() || null,
     site_url: set.siteUrl.value.trim() || null,
     wow_log_path: set.wowLogPath.value.trim() || null,
+    watch_auto_start: set.watchAutoStart.checked,
   };
 
   try {
@@ -1038,6 +1042,27 @@ async function boot() {
 
   checkForUpdate(); // fire-and-forget -- never blocks getting into the app
   showVersionLine(); // same -- purely informational, must never block boot
+  maybeAutoStartWatch(); // fire-and-forget -- see below
+}
+
+async function maybeAutoStartWatch() {
+  // With watch_auto_start on, begin Watch Live the moment the app opens
+  // (using the saved log path + site URL), so a session needs zero clicks
+  // to get the "finish a key -> analyzed + uploaded" loop running. Reuses
+  // onStartWatch's exact path -- applySettingsToWatch already populated
+  // wt.logPath and ran updateWatchGate, so if the gate left the start
+  // button enabled (a site URL and log path are both configured), the
+  // prerequisites are met. Silent + best-effort: never blocks boot, and a
+  // failure just leaves Watch Live idle for the user to start by hand.
+  const s = state.settings || defaultSettings();
+  if (!s.watch_auto_start) return;
+  if (state.watching) return; // already running somehow -- don't double-start
+  if (wt.startBtn.disabled) return; // gate not met (no site URL / log path)
+  try {
+    await onStartWatch();
+  } catch (e) {
+    // best-effort -- Watch Live stays idle, ready to start manually
+  }
 }
 
 window.addEventListener("pywebviewready", boot);
