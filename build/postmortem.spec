@@ -66,12 +66,19 @@ else:
 # on a real Windows machine despite that clean build, a well-documented
 # unresolved-upstream pywebview/pythonnet/PyInstaller interaction (see
 # r0x0r/pywebview#1215, pyinstaller/pyinstaller#6572). These hiddenimports
-# are cheap, harmless insurance on top of the hooks -- not a confirmed fix,
-# since the leading suspect for that specific crash is actually
-# environmental (running straight out of a still-zipped/"Mark of the Web"
-# download rather than a properly extracted folder) rather than a
-# packaging gap. Real Windows testing is what actually confirms either
-# way -- this can't be verified from a macOS build machine.
+# are cheap, harmless insurance on top of the hooks. UPDATE (2026-09-01,
+# same day): re-tested from a properly, fully extracted zip (not run
+# in-place from inside the archive) and the crash reproduced identically
+# -- ruling out the "Mark of the Web"/still-zipped theory floated below.
+# The actual cause: pythonnet's default CLR auto-detection was picking
+# clr_loader's legacy ".NET Framework" (netfx) hoster, which failed to
+# bind Python.Runtime.dll's exported entry point on that machine. Fixed
+# in postmortem.desktop.app.main() by explicitly forcing the modern
+# CoreCLR hoster (`pythonnet.load("coreclr")`) before pywebview's lazy
+# `import clr` -- see that module's own comment. Still unverified on a
+# clean Windows machine as of this build (needs a .NET 6+ runtime
+# present) -- this can't be confirmed from a macOS build machine either
+# way.
 hiddenimports = []
 if sys.platform == "win32":
     hiddenimports = ["clr", "clr_loader", "pythonnet"]
