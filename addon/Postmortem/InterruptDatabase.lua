@@ -147,8 +147,20 @@ challengeModeFrame:RegisterEvent("CHALLENGE_MODE_START")
 challengeModeFrame:RegisterEvent("CHALLENGE_MODE_COMPLETED")
 challengeModeFrame:RegisterEvent("CHALLENGE_MODE_RESET")
 
+-- TEMPORARILY DISABLED (2026-09-02): a real WoW client update flags
+-- UnitCastingInfo()/UnitChannelInfo()'s notInterruptible return as a
+-- "secret" value -- RecordCast()'s `not notInterruptible` (line 53)
+-- throws "attempt to negate ... a secret boolean value" and, worse,
+-- that taint doesn't stay inside a pcall: it propagated into this same
+-- file's later UnregisterEvent() calls too, throwing
+-- ADDON_ACTION_FORBIDDEN and likely leaving the high-frequency cast
+-- events stuck registered across keys. Confirmed live in-game (BugSack:
+-- 2659 hits in one session). Not touching the secret value at all is
+-- the safe stopgap until there's a verified, currently-correct pattern
+-- for reading it -- re-enable by restoring the RegisterCastEvents()
+-- call below once that's confirmed.
 function MA:InterruptDB_OnChallengeModeStart()
-  RegisterCastEvents()
+  -- RegisterCastEvents() -- disabled, see comment above
 end
 
 function MA:InterruptDB_OnChallengeModeEnd()
