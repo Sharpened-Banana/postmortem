@@ -23,6 +23,16 @@ class TestUploadForm:
         assert "<form" in resp.text
         assert 'enctype="multipart/form-data"' in resp.text
 
+    def test_form_shows_a_wait_message_on_submit(self, client):
+        # A large log's upload+analysis can take several minutes with no
+        # visible change on screen (a plain multipart POST, not XHR/fetch)
+        # -- a real report (2026-09-02) described that as "crashes the
+        # webpage". This doesn't change the upload mechanism, just makes
+        # the wait visible instead of looking dead.
+        resp = client.get("/upload")
+        assert "upload-wait-note" in resp.text
+        assert "submit" in resp.text
+
 
 class TestLogUpload:
     def test_successful_upload_lists_the_run(self, client, raw_log_text):

@@ -1245,7 +1245,40 @@ ul.runs li { background:var(--panel); border:1px solid var(--line);
 .ok { color:var(--good); }
 .bad { color:var(--bad); }
 .warn { color:var(--warn); }
+#upload-wait-note { margin-top:12px; }
 """
+
+# Plain (non-f) string, unlike _UPLOAD_FORM_BODY below -- the JS's own
+# {}'s would otherwise collide with f-string interpolation syntax.
+_UPLOAD_WAIT_SCRIPT = """<script>
+// This is a plain multipart form POST (no XHR/fetch) so the browser
+// streams the file straight from disk without ever holding it in JS
+// memory -- efficient and simple, but it also means the tab shows no
+// feedback at all while a large upload + full analysis is in flight,
+// which can genuinely take several minutes on a slow connection or a
+// long session log. With nothing on screen changing, that reads as a
+// dead/crashed page rather than "still working" -- a real report
+// (2026-09-02: "400mb upload crashes the webpage"). This doesn't touch
+// the upload mechanism itself (still a native streamed POST, still no
+// server-side change needed) -- it just makes the wait visible.
+(function () {
+  var form = document.querySelector('form[action="/upload"]');
+  if (!form) return;
+  form.addEventListener("submit", function () {
+    var btn = form.querySelector("button[type=submit]");
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "Uploading & analyzing…";
+    }
+    var note = document.createElement("p");
+    note.id = "upload-wait-note";
+    note.className = "lead";
+    note.textContent = "Large logs can take several minutes to upload and " +
+      "analyze -- this page isn't frozen, please don't close this tab.";
+    form.insertAdjacentElement("afterend", note);
+  });
+})();
+</script>"""
 
 _UPLOAD_FORM_BODY = f"""
 <style>{_UPLOAD_CSS}</style>
@@ -1264,6 +1297,7 @@ Not sure where to find that file? <a href="/guide">step-by-step guide</a>.</p>
   </div>
   <button type="submit">Analyze &amp; upload</button>
 </form>
+{_UPLOAD_WAIT_SCRIPT}
 <p class="lead">Usually at
 <code>World of Warcraft/_retail_/Logs/WoWCombatLog.txt</code>
 (Mac: inside the WoW app's install folder; Windows: same relative path
