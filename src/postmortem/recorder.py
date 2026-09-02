@@ -47,6 +47,54 @@ _START_RE = re.compile(r"  CHALLENGE_MODE_START,")
 _END_RE = re.compile(r"  CHALLENGE_MODE_END,")
 _DEATH_RE = re.compile(r"  UNIT_DIED,")
 
+# CHALLENGE_MODE_START,"<zone>",<instance_id>,<challenge_map_id>,<keystone_level>,[<affixes>]
+_START_FIELDS_RE = re.compile(
+    r'CHALLENGE_MODE_START,"([^"]*)",([^,]*),([^,]*),([^,]*)'
+)
+# CHALLENGE_MODE_END,<instance_id>,<timed 0|1>,<level>,<totalTimeMs>,...
+_END_FIELDS_RE = re.compile(r"CHALLENGE_MODE_END,([^,]*),([^,]*),([^,]*),([^,\s]*)")
+
+
+def _to_int(text: Optional[str]) -> Optional[int]:
+    if text is None:
+        return None
+    try:
+        return int(text.strip())
+    except (ValueError, AttributeError):
+        return None
+
+
+def _parse_start_key(line: str) -> tuple[Optional[int], Optional[int]]:
+    """``(challenge_map_id, keystone_level)`` for a CHALLENGE_MODE_START
+    line -- the pair segment_runs() uses to tell a mid-key ``/reload``
+    (the same key re-logging its own start) apart from a genuinely
+    different key starting."""
+    m = _START_FIELDS_RE.search(line)
+    if not m:
+        return None, None
+    return _to_int(m.group(3)), _to_int(m.group(4))
+
+
+def _is_phantom_end(line: str) -> bool:
+    """Whether a CHALLENGE_MODE_END line is WoW's all-zeroed *phantom*
+    end rather than a real one.
+
+    Some client versions fire ``...END,<id>,0,0,0,0.000000,0.000000``
+    immediately before every real CHALLENGE_MODE_START -- totalTimeMs
+    (field 4) == 0 is its unambiguous signature, since a run that
+    reaches a real end always ran for nonzero time. See segment_runs()'s
+    own comment for the real-log confirmation behind this. A phantom on
+    an open run means that run is being abandoned, NOT completed, so it
+    must not close the run as a (false) success.
+
+    Anything unparseable is treated as a real end -- conservative, and
+    matches the behavior this had before phantoms were handled here.
+    """
+    m = _END_FIELDS_RE.search(line)
+    if not m:
+        return False
+    return _to_int(m.group(4)) == 0
+
 
 @dataclass
 class RecordedRun:
@@ -58,6 +106,10 @@ class RecordedRun:
     player_deaths: int = 0
     completed: bool = False
     obs_output_path: Optional[str] = None  # from OBS's StopRecord, if native OBS was used
+    # Kept only so _feed() can tell a mid-key /reload (same key re-logging
+    # its start) apart from a different key starting -- see its own
+    # comment, and segment_runs()'s matching same_key check.
+    challenge_map_id: Optional[int] = None
 
 
 @dataclass
@@ -220,6 +272,42 @@ class Recorder:
                 self._start_run(line)
             return None
 
+        if _START_RE.search(line):
+            # A CHALLENGE_MODE_START arriving while a run is already open.
+            # Told apart exactly the way segment_runs() tells it apart:
+            #
+            #   same key (same challenge_map_id AND keystone_level)
+            #     -- a mid-key /reload re-logging its own start; keep
+            #        accumulating into the run already being recorded.
+            #   different key
+            #     -- the open run never wrote a CHALLENGE_MODE_END
+            #        (abandoned, vote-to-abandon, a crash, the log cut
+            #        off). Close it as incomplete and start recording the
+            #        new key.
+            #
+            # Before this, neither case was handled at all: a new key's
+            # events were appended to the PREVIOUS run's slice file, the
+            # new key never got a recording of its own, and its END later
+            # closed -- and auto-analyzed/uploaded -- the wrong run under
+            # the wrong dungeon's name. Confirmed against a real slice
+            # (2026-09-02): a 132MB file named for a Kings' Rest key held
+            # that key's start and a later Altar of Fangs key's start,
+            # still growing, with neither ever uploading correctly.
+            map_id, level = _parse_start_key(line)
+            same_key = (
+                map_id is not None
+                and map_id == self._current.challenge_map_id
+                and level == self._current.keystone_level
+            )
+            if same_key:
+                self._out_fh.write(line)
+                self._current.line_count += 1
+                return None
+            self._close_run(completed=False)
+            self._current = None
+            self._start_run(line)
+            return None
+
         self._out_fh.write(line)
         self._current.line_count += 1
 
@@ -232,6 +320,15 @@ class Recorder:
                     self._obs_call(self._obs.save_replay_buffer, "SaveReplayBuffer")
 
         if _END_RE.search(line):
+            if _is_phantom_end(line):
+                # WoW's all-zeroed phantom end (see _is_phantom_end) means
+                # this run is being abandoned, not completed. Closing it
+                # as completed=True here would report a bogus success and,
+                # in the desktop app, auto-analyze and auto-upload a run
+                # that never actually finished.
+                self._close_run(completed=False)
+                self._current = None
+                return None
             self._close_run(completed=True)
             run = self._current
             self._current = None
@@ -241,14 +338,13 @@ class Recorder:
         return None
 
     def _start_run(self, line: str) -> None:
-        m = re.search(r'CHALLENGE_MODE_START,"([^"]*)",([^,]*),([^,]*),([^,]*)', line)
+        m = _START_FIELDS_RE.search(line)
         zone = m.group(1) if m else "unknown"
         level = None
+        map_id = None
         if m:
-            try:
-                level = int(m.group(4))
-            except ValueError:
-                level = None
+            level = _to_int(m.group(4))
+            map_id = _to_int(m.group(3))
         stamp = time.strftime("%Y%m%d-%H%M%S")
         safe_zone = re.sub(r"[^A-Za-z0-9]+", "", zone) or "run"
         path = self.out_dir / f"{stamp}_{safe_zone}_{level or 'x'}.txt"
@@ -256,7 +352,7 @@ class Recorder:
         self._out_fh.write(line)
         self._current = RecordedRun(
             path=path, zone=zone, keystone_level=level, started_at=time.time(),
-            line_count=1,
+            line_count=1, challenge_map_id=map_id,
         )
         self.echo(f"▶ recording: {zone} +{level or '?'} -> {path}")
         self._run_hook(self.on_start_cmd, "on-run-start")
