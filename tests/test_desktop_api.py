@@ -447,6 +447,79 @@ class TestUploadReport:
 # -- live watch mode ---------------------------------------------------------
 
 
+class TestDefaultRoutes:
+    """Per-dungeon default routes: paste an MDT string once, and any run
+    in that dungeon -- Watch Live or one-off -- gets route adherence
+    without pasting again. The string self-identifies its dungeon; name
+    and challenge-map id are filled in from the packaged dungeon data."""
+
+    def test_add_decodes_and_fills_in_dungeon_identity(self, api, route_string, isolated_config_dir):
+        result = api.add_default_route(route_string)
+        assert result["ok"], result
+        (entry,) = result["default_routes"]
+        assert entry["dungeon_idx"] == 160
+        assert entry["dungeon_name"] == "Murder Row"      # from packaged dungeon data
+        assert entry["challenge_map_id"] == 587
+        assert entry["route"] == route_string.strip()
+        # persisted, not just returned
+        assert api.get_settings()["default_routes"] == [entry]
+
+    def test_re_adding_the_same_dungeon_replaces_not_duplicates(self, api, route_string, isolated_config_dir):
+        api.add_default_route(route_string)
+        result = api.add_default_route("  " + route_string + "\n")
+        assert len(result["default_routes"]) == 1
+
+    def test_remove(self, api, route_string, isolated_config_dir):
+        api.add_default_route(route_string)
+        result = api.remove_default_route(160)
+        assert result == {"ok": True, "default_routes": []}
+        assert api.remove_default_route(160)["ok"]  # idempotent
+
+    def test_undecodable_string_is_a_clean_error(self, api, isolated_config_dir):
+        result = api.add_default_route("this is not an MDT string")
+        assert result["ok"] is False and "decode" in result["error"]
+        assert api.add_default_route("   ")["ok"] is False
+
+    def test_watch_live_applies_the_default_route_per_run(
+        self, api, route_string, tmp_path, monkeypatch, isolated_config_dir,
+    ):
+        # The whole point: no route pasted anywhere for this watch, yet a
+        # Murder Row run comes out with a route-adherence comparison.
+        import json
+        import time as _time
+        from conftest import build_run_log
+
+        captured = []
+        monkeypatch.setattr(api, "_emit_watch_event", captured.append)
+        monkeypatch.setattr(
+            "postmortem.upload.upload_report",
+            lambda report, url, **kwargs: {"ok": True, "run_id": 1, "url": "/runs/1"},
+        )
+        assert api.add_default_route(route_string)["ok"]
+
+        log = tmp_path / "WoWCombatLog.txt"
+        log.write_text("", encoding="utf-8")
+        out_dir = tmp_path / "watch-runs"
+        api.start_watch({
+            "log_path": str(log), "site_url": "https://example.test",
+            "out_dir": str(out_dir),   # no "route" here on purpose
+        })
+        _time.sleep(0.2)
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write(build_run_log().text())
+        deadline = _time.time() + 5
+        while not any(e["type"] == "uploaded" for e in captured) and _time.time() < deadline:
+            _time.sleep(0.05)
+        api.stop_watch()
+        assert any(e["type"] == "uploaded" for e in captured), captured
+
+        # the run's report JSON, not its `.chapters.json` sidecar
+        (report_path,) = [p for p in out_dir.glob("*.json") if not p.name.endswith(".chapters.json")]
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        assert "comparison" in report
+        assert "adherence_pct" in report["comparison"]
+
+
 class TestWatchMode:
     """start_watch()/stop_watch(): watches a growing combat log on a
     background thread and auto-analyzes + auto-uploads each completed

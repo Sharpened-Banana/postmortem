@@ -394,6 +394,16 @@ textarea {
   font-size: 12px;
 }
 
+.routes-list { list-style: none; padding: 0; margin: 8px 0 10px; }
+.routes-list li {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; margin-bottom: 6px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+}
+.routes-list li .name { flex: 1; min-width: 0; }
+.routes-list li .dim { color: var(--dim); font-size: 12px; }
+.routes-list[hidden] { display: none; }
+
 .checkbox-row {
   display: flex;
   align-items: center;
