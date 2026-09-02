@@ -4,7 +4,7 @@ import json
 import textwrap
 from pathlib import Path
 
-from conftest import build_run_log
+from conftest import LogBuilder, build_run_log
 
 from postmortem.cli import _pick_run, main
 from postmortem.combatlog.parser import parse_file
@@ -309,6 +309,128 @@ class TestAvoidableDataCLI:
         out = capsys.readouterr().out
         assert "AVOIDABLE DAMAGE" in out
         assert "Bigheals-Area52" in out
+
+
+class TestRecorderRunBoundaries:
+    """Run-boundary handling in the *live* recorder.
+
+    segment_runs() (the offline path) has always split runs correctly;
+    Recorder._feed() reimplements boundary detection for live tailing and
+    used to handle neither of these cases -- confirmed against a real
+    watch-runs slice (2026-09-02): a 132MB file named for a Kings' Rest
+    key held that key's CHALLENGE_MODE_START *and* a later Altar of
+    Fangs key's, still growing, with neither run ever uploading.
+    """
+
+    @staticmethod
+    def _filler(b, t):
+        b.raw(t, 'SPELL_DAMAGE,Player-1-0001,"Tank-Realm",0x511,0x0,'
+                 'Creature-0-1-1-1-2-1,"Mob",0xa48,0x0,133,"Fireball",0x4,'
+                 'Creature-0-1-1-1-2-1,0000000000000000,100,100,0,0,0,0,0,0,'
+                 '0,0,0,0,0.0,0.0,0,0.0,0,500,500,0,0,nil,nil,nil')
+
+    def _record(self, tmp_path, builder, stop_after_runs=None):
+        log = tmp_path / "WoWCombatLog.txt"
+        log.write_text(builder.text(), encoding="utf-8")
+        completed = []
+        rec = Recorder(
+            log_path=log, out_dir=tmp_path / "runs", from_start=True,
+            on_run_complete=completed.append, echo=lambda s: None,
+        )
+        return rec.watch(stop_after_runs=stop_after_runs), completed
+
+    def test_a_different_key_closes_the_previous_unfinished_run(self, tmp_path):
+        b = LogBuilder()
+        b.start(0, zone="Kings' Rest", instance=1762, cm=249, lvl=7)
+        self._filler(b, 5)
+        # A second, genuinely different key -- the first never wrote an END
+        # (abandoned). It must not swallow this key's events.
+        b.start(100, zone="Altar of Fangs", instance=2993, cm=588, lvl=7)
+        self._filler(b, 105)
+        b.end(200, success=1, lvl=7, ms=200000, instance=2993)
+
+        runs, completed = self._record(tmp_path, b, stop_after_runs=1)
+
+        # Only the *completed* second key is handed to on_run_complete --
+        # an abandoned run has no end point to analyze.
+        assert [r.zone for r in completed] == ["Altar of Fangs"]
+        finished = completed[0]
+        assert finished.completed
+        assert finished.keystone_level == 7
+
+        # Each key got its own slice, and the second key's slice starts at
+        # its own CHALLENGE_MODE_START -- not partway through the first's.
+        second = finished.path.read_text(encoding="utf-8")
+        assert second.count("CHALLENGE_MODE_START") == 1
+        assert "Altar of Fangs" in second
+        assert "Kings' Rest" not in second
+
+        slices = sorted((tmp_path / "runs").glob("*.txt"))
+        assert len(slices) == 2
+        first = next(p for p in slices if p != finished.path).read_text(encoding="utf-8")
+        assert "Kings' Rest" in first
+        assert "Altar of Fangs" not in first
+
+    def test_same_key_start_is_a_reload_and_keeps_one_run(self, tmp_path):
+        # A mid-key /reload re-logs CHALLENGE_MODE_START for the SAME key.
+        # That's one run, not two -- matching segment_runs()'s same_key path.
+        b = LogBuilder()
+        b.start(0, zone="Murder Row", instance=2830, cm=587, lvl=10)
+        self._filler(b, 5)
+        b.start(50, zone="Murder Row", instance=2830, cm=587, lvl=10)
+        self._filler(b, 55)
+        b.end(200, success=1, lvl=10, ms=200000, instance=2830)
+
+        runs, completed = self._record(tmp_path, b, stop_after_runs=1)
+
+        assert len(completed) == 1
+        run = completed[0]
+        assert run.zone == "Murder Row"
+        assert run.completed
+        assert len(list((tmp_path / "runs").glob("*.txt"))) == 1
+        # Both starts live in the one slice, so the run stays continuous.
+        assert run.path.read_text(encoding="utf-8").count("CHALLENGE_MODE_START") == 2
+
+    def test_phantom_end_does_not_report_a_completed_run(self, tmp_path):
+        # WoW's all-zeroed phantom end (totalTimeMs == 0) means abandoned,
+        # not finished -- closing it as completed would auto-analyze and
+        # auto-upload a run that never actually ended. segment_runs()
+        # already keys on exactly this; the live recorder didn't.
+        #
+        # Fed line-by-line rather than through watch(): nothing here ever
+        # completes a run, and watch() without stop_after_runs tails
+        # forever by design.
+        b = LogBuilder()
+        b.start(0, zone="Murder Row", instance=2830, cm=587, lvl=10)
+        self._filler(b, 5)
+        b.end(50, success=0, lvl=0, ms=0, instance=2830)
+
+        out_dir = tmp_path / "runs"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        completed = []
+        rec = Recorder(
+            log_path=tmp_path / "WoWCombatLog.txt", out_dir=out_dir,
+            on_run_complete=completed.append, echo=lambda s: None,
+        )
+        returned = [rec._feed(ln) for ln in b.text().splitlines(keepends=True)]
+
+        assert completed == []                 # nothing auto-analyzed/uploaded
+        assert all(r is None for r in returned)
+        assert rec._current is None            # the run was closed, not left open
+
+    def test_a_real_end_after_a_phantom_still_completes_the_next_run(self, tmp_path):
+        b = LogBuilder()
+        b.start(0, zone="Murder Row", instance=2830, cm=587, lvl=10)
+        b.end(50, success=0, lvl=0, ms=0, instance=2830)  # phantom: abandoned
+        b.start(60, zone="Murder Row", instance=2830, cm=587, lvl=10)
+        self._filler(b, 65)
+        b.end(300, success=1, lvl=10, ms=240000, instance=2830)
+
+        runs, completed = self._record(tmp_path, b, stop_after_runs=1)
+
+        assert len(completed) == 1
+        assert completed[0].completed
+        assert completed[0].zone == "Murder Row"
 
 
 class TestRecorder:
