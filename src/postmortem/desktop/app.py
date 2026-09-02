@@ -24,6 +24,7 @@ still loading/painting.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import webview
@@ -62,6 +63,29 @@ def main() -> None:
     style.css/app.js alongside it) -- no ``http_server=True`` or manual
     URI conversion needed.
     """
+    if sys.platform == "win32":
+        # pywebview hard-requires pythonnet on Windows (it hosts its
+        # window via .NET WinForms regardless of render engine -- see
+        # build/postmortem.spec's own note on this). Left to its default
+        # auto-detection, pythonnet picked the legacy .NET Framework
+        # hoster (clr_loader's "netfx" backend) here, which failed with
+        # "Failed to resolve Python.Runtime.Loader.Initialize" on a real
+        # Windows machine even from a clean, fully-extracted build
+        # (confirmed 2026-09-01 -- ruled out the earlier "still-zipped
+        # download" theory). Forcing the modern CoreCLR hoster instead
+        # avoids that specific netfx binding failure. Must happen before
+        # anything imports ``clr`` -- pywebview's own
+        # ``platforms/winforms.py`` does that lazily inside
+        # ``webview.start()`` below, so this just needs to run first.
+        # Requires a .NET 6+ runtime installed on the machine; if none is
+        # found this raises here with a clear message instead of the
+        # cryptic netfx failure -- if that turns out to be the case on a
+        # real machine, the next step is dropping pythonnet entirely for
+        # pywebview's Qt6/PySide6 Windows backend instead.
+        import pythonnet
+
+        pythonnet.load("coreclr")
+
     webview.create_window(
         APP_TITLE,
         url=str(SHELL_INDEX),
