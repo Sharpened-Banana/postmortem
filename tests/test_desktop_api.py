@@ -520,6 +520,67 @@ class TestDefaultRoutes:
         assert "adherence_pct" in report["comparison"]
 
 
+class TestKeystoneGuruSync:
+    """sync_keystone_guru_routes(): the network client is monkeypatched;
+    this covers the bridge's own behavior -- one default per dungeon,
+    skips reported with reasons, and clean errors."""
+
+    def _patch(self, monkeypatch, routes, exports):
+        import postmortem.keystoneguru as kg
+        monkeypatch.setattr(kg, "list_public_routes", lambda user_id: routes)
+
+        def fetch(key):
+            v = exports[key]
+            if isinstance(v, Exception):
+                raise v
+            return v
+        monkeypatch.setattr(kg, "fetch_mdt_string", fetch)
+
+    def test_adds_one_route_per_dungeon_and_reports_skips(
+        self, api, route_string, monkeypatch, isolated_config_dir,
+    ):
+        import postmortem.keystoneguru as kg
+        routes = [
+            {"public_key": "k1", "title": "MR main", "dungeon_slug": "murder-row",
+             "dungeon_name": "Murder Row", "mdt_supported": True, "published": True},
+            {"public_key": "k2", "title": "MR alt", "dungeon_slug": "murder-row",
+             "dungeon_name": "Murder Row", "mdt_supported": True, "published": True},
+            {"public_key": "k3", "title": "Broken", "dungeon_slug": "altar-of-fangs",
+             "dungeon_name": "Altar Of Fangs", "mdt_supported": True, "published": True},
+            {"public_key": "k4", "title": "No MDT", "dungeon_slug": "some-raid",
+             "dungeon_name": "Some Raid", "mdt_supported": False, "published": True},
+        ]
+        self._patch(monkeypatch, routes, {
+            "k1": route_string,                          # decodes: Murder Row (idx 160)
+            "k2": route_string,                          # same dungeon -> skipped
+            "k3": kg.KeystoneGuruError("no MDT string"),  # export failed -> skipped
+        })
+        result = api.sync_keystone_guru_routes("https://keystone.guru/profile/64246")
+        assert result["ok"], result
+        assert [a["route"] for a in result["added"]] == ["Murder Row — MR main"]
+        reasons = {s["route"]: s["reason"] for s in result["skipped"]}
+        assert reasons["Murder Row — MR alt"].startswith("already have")
+        assert reasons["Altar Of Fangs — Broken"] == "no MDT string"
+        assert reasons["Some Raid — No MDT"].startswith("dungeon not supported")
+        # persisted as a normal default route, resolvable by challenge-map id
+        (entry,) = result["default_routes"]
+        assert (entry["dungeon_idx"], entry["challenge_map_id"]) == (160, 587)
+        assert api.get_settings()["default_routes"] == [entry]
+
+    def test_bad_profile_is_a_clean_error(self, api, isolated_config_dir):
+        result = api.sync_keystone_guru_routes("not a profile")
+        assert result["ok"] is False and "profile URL" in result["error"]
+
+    def test_unreachable_site_is_a_clean_error(self, api, monkeypatch, isolated_config_dir):
+        import postmortem.keystoneguru as kg
+
+        def boom(user_id):
+            raise kg.KeystoneGuruError("could not reach Keystone.guru: offline")
+        monkeypatch.setattr(kg, "list_public_routes", boom)
+        result = api.sync_keystone_guru_routes("64246")
+        assert result == {"ok": False, "error": "could not reach Keystone.guru: offline"}
+
+
 class TestWatchMode:
     """start_watch()/stop_watch(): watches a growing combat log on a
     background thread and auto-analyzes + auto-uploads each completed

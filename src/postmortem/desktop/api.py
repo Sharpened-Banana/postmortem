@@ -648,6 +648,61 @@ class DesktopAPI:
             return {"ok": False, "error": f"could not save settings: {exc}"}
         return {"ok": True, "default_routes": routes}
 
+    def sync_keystone_guru_routes(self, profile: str) -> dict:
+        """Pull every published route on a Keystone.guru profile into the
+        per-dungeon defaults (see keystoneguru.py for the two public
+        endpoints this uses -- no API key, no login).
+
+        One default per dungeon: the first listed route for a dungeon is
+        taken, later ones for the same dungeon are reported as skipped so
+        the user can see what was and wasn't used. A single route that
+        fails to export/decode is skipped with its reason, never fatal.
+
+        Returns ``{"ok": True, "added": [...], "skipped": [...],
+        "default_routes": [...]}`` or ``{"ok": False, "error": ...}``
+        for a bad profile / unreachable site. Never raises.
+        """
+        from .. import keystoneguru as kg
+
+        try:
+            user_id = kg.parse_profile_id(profile)
+            routes = kg.list_public_routes(user_id)
+        except kg.KeystoneGuruError as exc:
+            return {"ok": False, "error": str(exc)}
+        except Exception as exc:  # never raise across the bridge
+            return {"ok": False, "error": f"Keystone.guru sync failed: {exc}"}
+
+        added: list[dict] = []
+        skipped: list[dict] = []
+        seen_dungeons: set[str] = set()
+        for r in routes:
+            label = f"{r.get('dungeon_name') or r.get('dungeon_slug') or '?'} — {r.get('title') or r['public_key']}"
+            if not r.get("mdt_supported", True):
+                skipped.append({"route": label, "reason": "dungeon not supported by MDT"})
+                continue
+            slug = r.get("dungeon_slug") or r["public_key"]
+            if slug in seen_dungeons:
+                skipped.append({"route": label, "reason": "already have a route for this dungeon"})
+                continue
+            try:
+                text = kg.fetch_mdt_string(r["public_key"])
+            except kg.KeystoneGuruError as exc:
+                skipped.append({"route": label, "reason": str(exc)})
+                continue
+            result = self.add_default_route(text)
+            if result.get("ok"):
+                seen_dungeons.add(slug)
+                added.append({"route": label})
+            else:
+                skipped.append({"route": label, "reason": result.get("error", "could not add")})
+
+        return {
+            "ok": True,
+            "added": added,
+            "skipped": skipped,
+            "default_routes": _config.load_settings().get("default_routes") or [],
+        }
+
     def _default_route_for(self, challenge_map_id, zone_name, store) -> Optional[Route]:
         """The saved default route for a run, decoded -- or None. Any
         problem (no match, a string that no longer decodes) just means

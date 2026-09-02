@@ -115,6 +115,33 @@ class TestCBOR:
 
 
 class TestMDTString:
+    # A real Keystone.guru "Export to MDT" string (public route 0RhVlYt,
+    # Altar of Fangs, captured 2026-09-02). Keystone.guru encodes every
+    # string as a CBOR *byte* string where MDT uses *text* strings, so
+    # this decoded to b'value'/b'currentDungeonIdx' keys and was rejected
+    # as "preset has no 'value' table" -- a real report from a user
+    # pasting exactly this kind of string into Settings.
+    KEYSTONE_GURU_EXPORT = (
+        "!~MDT2~TZLLbtpAGIXze8bjwVcIINHLInmAohhaUpYokDQhKmnTVuoqAjwmbge78iUlXcUGIlXqU6Q0aTd9um"
+        "ZfO0oQi1mMzvnOmX9mbva8wSc2DIPpVcu9bVnzTqPxsrq9+8xsmNVtuO0dvj9+t8H7Qbgx8IJg88FlbtWqz1PX"
+        "dr3ahNvDO9eXiPMNc2mp1+4sNbNZfSGsWhqbB5Zj284w4uF5qf2Vsc9rnbM+j9jvN8PI95kbtiN3xDx335pUFv"
+        "sB4+kJHc+96N7LR2kM7IWMjR13tNb1HTvs2XbAwuCik1UEP64hBjIXCRVA+k4kmsMgiEiOQZnmC+udocc9f9e26"
+        "8y2f0EskGkOYSkpK8q0VC7ey5nYZAuIEUlURbpcL+iGpq6wdZbWYJJoupQUS3IiIGVWeVR5XHlSebrMaKYpV3oM"
+        "S84e1NlCuMzrhgBIjQElgFYaM3EmYomosYBivFLXZDfCVFMVI2NkRY1ROQGhkK4V3LYXaKZqupGLQZuDgLC4jGh"
+        "mzeJlKqZ3QGNBm8mKbizhDF+QJG9os/ViIS8vy/tmVn8NCRG1pFSmMS7GkF8ZKSOPmMvG560gcEbuOH2j4BrmE"
+        "qVUQn8AI4qJjBWiUg3rxADyF8R0eoxBxIRQlCMKVolGdGzgPKFXAsVUntGUV6dpRu/+3Y+jAWdnjEM7ZJOwx7gT"
+        "fov8kz4P+/6JuTO2nJ+vbZ+xU49bB57jMuvfq4c97A/YKHJ4+mNgJ3Ks7tbb0w/8YziZdPf+Aw=="
+    )
+
+    def test_keystone_guru_export_decodes_like_an_mdt_one(self):
+        from postmortem.mdt.route import Route
+        preset = decode_mdt_string(self.KEYSTONE_GURU_EXPORT)
+        assert "value" in preset and all(isinstance(k, str) for k in preset)
+        route = Route.from_preset(preset)
+        assert route.dungeon_idx == 164            # Altar of Fangs
+        assert route.name == "elitzur_altar_1"
+        assert len(route.pulls) == 12
+
     def test_mdt2_round_trip(self, route_string):
         preset = decode_mdt_string(route_string)
         route = Route.from_preset(preset)
