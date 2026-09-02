@@ -327,6 +327,27 @@ def ingest(
         return store.ingest(report, source_path=source_path, html_path=html_path)
 
 
+def has_run(db_path: str | Path, zone: Optional[str], start_ts: Optional[float]) -> bool:
+    """Whether a run with this ``(zone, start_ts)`` -- the same identity
+    ``ingest`` de-duplicates on -- is already in the history.
+
+    Used by the desktop's Watch Live catch-up (recorder.Recorder
+    ``already_processed``): a completed key found sitting in the current
+    log at watch start is only replayed through analysis/upload if it
+    isn't here yet. Tolerant of a missing database (nothing is processed
+    yet, so: False).
+    """
+    try:
+        with Store(db_path) as store:
+            cur = store._conn.execute(
+                "SELECT 1 FROM runs WHERE zone IS ? AND start_ts IS ? LIMIT 1",
+                (zone, start_ts),
+            )
+            return cur.fetchone() is not None
+    except Exception:
+        return False
+
+
 def query_runs(db_path: str | Path, *, zone: Optional[str] = None) -> list[dict[str, Any]]:
     """Convenience wrapper: open ``db_path``, read back rows, close."""
     with Store(db_path) as store:

@@ -592,6 +592,13 @@ window.onWatchEvent = function (event) {
         `No combat log yet at <code>${esc(event.log_path)}</code> — `
         + "it'll appear automatically once you start a Mythic+ key.");
       break;
+    case "log_switched":
+      // WoW restarted and began a new session log; the watch followed it
+      // (a real, timed key was lost to a mid-watch rotation before this
+      // existed, 2026-09-02).
+      setWatchStatus(true, `Watching ${event.log_path}`);
+      addWatchLogEntry("info", `WoW started a new combat log — now watching <code>${esc(event.log_path)}</code>`);
+      break;
     case "run_started":
       // The first thing a player sees after starting a key -- without
       // this the tab showed nothing at all until the key ended, which

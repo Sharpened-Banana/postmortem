@@ -47,6 +47,7 @@ from ..combatlog.segmenter import segment_runs
 from ..mdt.decode import MDTDecodeError, decode_mdt_string
 from ..mdt.extract import write_dungeon_data
 from ..mdt.route import Route
+from ..history.store import has_run as _has_run
 from ..recorder import Recorder
 from ..report.html import render_html
 from ..report.index import collect_reports, render_index
@@ -399,6 +400,10 @@ class DesktopAPI:
     #        (addon_dir derivable + exists); silently absent otherwise.
     #   {"type": "uploaded", "url": str}
     #     -- the full URL (site_url + the site's own path) of the report.
+    #   {"type": "log_switched", "log_path": str}
+    #     -- WoW restarted and began a new session log; the watch followed
+    #        it automatically (any key left open in the old log is
+    #        reported as run_abandoned first).
     #   {"type": "run_started", "zone": str, "level": int|None}
     #     -- a key's CHALLENGE_MODE_START was just seen; recording it.
     #   {"type": "run_abandoned", "zone": str, "level": int|None}
@@ -529,6 +534,18 @@ class DesktopAPI:
             on_run_start=lambda run: self._emit_watch_event({
                 "type": "run_started", "zone": run.zone, "level": run.keystone_level,
             }),
+            # Follow WoW to a new session log mid-watch (a real timed key
+            # was lost to a rotation before this, 2026-09-02) and tell the
+            # UI which file is being watched now.
+            on_log_switched=lambda path: self._emit_watch_event({
+                "type": "log_switched", "log_path": str(path),
+            }),
+            # Catch-up: a key that finished before this watch started (or
+            # while the app was closed) is replayed through the normal
+            # analyze+upload pipeline unless the run history already has
+            # it -- so "every finished key gets uploaded" holds across app
+            # restarts too, and nothing is ever uploaded twice.
+            already_processed=lambda zone, ts: _has_run(history_db_path, zone, ts),
             on_run_abandoned=lambda run: self._emit_watch_event({
                 "type": "run_abandoned", "zone": run.zone, "level": run.keystone_level,
             }),
