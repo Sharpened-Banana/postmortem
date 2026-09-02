@@ -75,6 +75,30 @@ def load_or_create_token() -> str:
     return token
 
 
+def site_base_url(url: str) -> str:
+    """The site's origin from any URL a user is likely to paste as the
+    "site URL": the home page, the ``/upload`` page, a ``/runs`` listing,
+    or the ``/api/runs`` endpoint itself.
+
+    Real bug (2026-09-02): Settings held ``https://<site>/upload`` -- the
+    upload *page*, the natural thing to copy from the browser -- and
+    every Watch Live upload went to ``<site>/upload/api/runs`` -> 404,
+    quietly. A timed key was analyzed, written to history, and never
+    reached the site. Any of those page paths now normalizes to the
+    origin; a deliberately nested deployment (``https://host/postmortem``)
+    still works, since only known page suffixes are stripped.
+    """
+    base = url.strip().rstrip("/")
+    for _ in range(4):  # e.g. ".../upload/" or ".../api/runs" -> strip in turn
+        for suffix in ("/api/runs", "/api", "/upload", "/runs", "/about", "/guide"):
+            if base.lower().endswith(suffix):
+                base = base[: -len(suffix)].rstrip("/")
+                break
+        else:
+            break
+    return base
+
+
 def upload_report(
     report: dict[str, Any],
     url: str,
@@ -104,7 +128,7 @@ def upload_report(
     if token is None:
         token = load_or_create_token()
 
-    endpoint = f"{url.rstrip('/')}/api/runs"
+    endpoint = f"{site_base_url(url)}/api/runs"
     # Never ship embedded dungeon map art to the site: it's Blizzard's
     # art read from the user's own MDT install for their own local report
     # (see mapart.py). Stripped here, at the one choke point every upload
