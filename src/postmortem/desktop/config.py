@@ -35,6 +35,7 @@ from typing import Any, Optional
 # directory too -- e.g. for the upload token in upload.py. Re-exported
 # here so nothing that already imports them from this module breaks.
 from ..appdirs import APP_DIR_NAME, config_dir
+from ..bundled import bundled_dungeon_data_path
 
 SETTINGS_FILENAME = "desktop_settings.json"
 
@@ -55,6 +56,17 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # default: opting in is a deliberate choice, since it begins tailing a
     # file and uploading runs the moment the app opens.
     "watch_auto_start": False,
+    # Per-dungeon default MDT routes, applied automatically to any run
+    # (Watch Live or one-off analysis) that doesn't get an explicit route
+    # -- so route adherence shows up on every key without pasting a
+    # string each session. A list of
+    #   {"dungeon_idx": int, "dungeon_name": str|None,
+    #    "challenge_map_id": int|None, "route": "<MDT export string>"}
+    # -- the MDT string itself carries dungeon_idx, so a pasted route
+    # self-identifies; the other two are looked up from dungeon data at
+    # save time so matching a run needs no data file later. See
+    # resolve_default_route.
+    "default_routes": [],
 }
 
 
@@ -171,6 +183,69 @@ def resolve_avoidable_data_path(settings: dict[str, Any]) -> Optional[Path]:
         return Path(configured)
     default = config_dir() / AVOIDABLE_FILENAME
     return default if default.is_file() else None
+
+
+def resolve_dungeon_data_path(settings: dict[str, Any]) -> Optional[Path]:
+    """The MDT dungeon/enemy data to analyze with: an explicit
+    ``dungeon_data_path`` setting when set, else a ``dungeon_data.json``
+    dropped into the app's own data folder, else the copy shipped inside
+    the package (see postmortem/bundled.py), else None.
+
+    Until 2026-09-02 the desktop had no fallback at all -- a Watch Live
+    run analyzed with no dungeon data unless the user had run
+    extract-data themselves, so forces progress and route adherence were
+    simply absent by default even though the public site had been
+    bundling this exact file all along.
+    """
+    configured = settings.get("dungeon_data_path")
+    if configured:
+        return Path(configured)
+    local = config_dir() / "dungeon_data.json"
+    if local.is_file():
+        return local
+    bundled = bundled_dungeon_data_path()
+    return bundled if bundled.is_file() else None
+
+
+def resolve_default_route(
+    settings: dict[str, Any],
+    *,
+    challenge_map_id: Optional[int],
+    zone_name: Optional[str],
+    dungeon_idx: Optional[int] = None,
+) -> Optional[str]:
+    """The saved default MDT route string for a run, or None.
+
+    Matched in order of how certain the signal is: the run's
+    challenge-map id (what CHALLENGE_MODE_START logs -- exact), then MDT
+    dungeon index (when a caller already resolved one via dungeon data),
+    then the zone name (case-insensitive -- a last resort for entries
+    saved before any dungeon data was available to fill the ids in).
+    """
+    routes = settings.get("default_routes") or []
+    if not isinstance(routes, list):
+        return None
+
+    def _pick(pred) -> Optional[str]:
+        for entry in routes:
+            if isinstance(entry, dict) and entry.get("route") and pred(entry):
+                return str(entry["route"])
+        return None
+
+    if challenge_map_id is not None:
+        hit = _pick(lambda e: e.get("challenge_map_id") == challenge_map_id)
+        if hit:
+            return hit
+    if dungeon_idx is not None:
+        hit = _pick(lambda e: e.get("dungeon_idx") == dungeon_idx)
+        if hit:
+            return hit
+    if zone_name:
+        want = zone_name.strip().lower()
+        hit = _pick(lambda e: (e.get("dungeon_name") or "").strip().lower() == want)
+        if hit:
+            return hit
+    return None
 
 
 def save_settings(settings: dict[str, Any]) -> None:

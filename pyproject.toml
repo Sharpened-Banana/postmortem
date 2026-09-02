@@ -32,5 +32,11 @@ desktop = ["pywebview>=6.0", "certifi"]
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# Ship the MDT dungeon/enemy extract inside the package (see
+# postmortem/bundled.py) -- both the public site and the desktop app fall
+# back to it, so it has to travel with `pip install .`.
+[tool.setuptools.package-data]
+postmortem = ["data/*.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests", "site/tests"]
