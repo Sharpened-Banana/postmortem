@@ -454,18 +454,18 @@ async function onPickWatchLog() {
 }
 
 async function onPickWatchLogFolder() {
-  // "WoWCombatLog.txt" is the fixed name WoW always uses for the log
-  // it's actively writing this session (an archived previous session's
-  // log gets a timestamp appended instead, e.g.
-  // "WoWCombatLog083126_225023.txt") -- so this resolves to the right
-  // path even before that file exists, which is exactly the point:
-  // pick_log_file()'s "open file" dialog can't select something that
-  // isn't there yet, but Recorder.watch() already knows how to wait for
-  // it to appear.
+  // Not all WoW installs reuse one stable "WoWCombatLog.txt" for the log
+  // actively being written this session -- some always append a session
+  // timestamp instead (e.g. "WoWCombatLog-083126_225023.txt"), so we
+  // can't just guess the plain name and rely on Recorder.watch()'s
+  // "wait for it to appear" fallback. resolve_wow_log_path() picks the
+  // most recently modified WoWCombatLog*.txt already in the folder (the
+  // one actually being written to right now), falling back to the plain
+  // name only when nothing's been logged yet this session.
   hideBanner(wt.errorBanner);
   try {
     const folder = await api().pick_folder("Choose your WoW Logs folder");
-    if (folder) wt.logPath.value = joinPath(folder, "WoWCombatLog.txt");
+    if (folder) wt.logPath.value = await api().resolve_wow_log_path(folder);
   } catch (e) {
     showBanner(wt.errorBanner, "Could not open the folder picker: " + describeError(e));
   } finally {
@@ -832,11 +832,11 @@ async function onPickSettingsWowLog() {
 }
 
 async function onPickSettingsWowLogFolder() {
-  // See onPickWatchLogFolder's comment -- same "point at the Logs
-  // folder, not a file that may not exist yet" resolution.
+  // See onPickWatchLogFolder's comment -- same "find the log actually
+  // being written to, don't guess a plain filename" resolution.
   try {
     const folder = await api().pick_folder("Choose your WoW Logs folder");
-    if (folder) set.wowLogPath.value = joinPath(folder, "WoWCombatLog.txt");
+    if (folder) set.wowLogPath.value = await api().resolve_wow_log_path(folder);
   } catch (e) {
     showBanner(set.errorBanner, "Could not open the folder picker: " + describeError(e));
   }

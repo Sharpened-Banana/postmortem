@@ -404,6 +404,16 @@ class DesktopAPI:
         log_path = params.get("log_path")
         if not log_path:
             return {"ok": False, "error": "log_path is required"}
+        # Re-resolve against the *current* newest log in that folder
+        # rather than trusting the exact filename as saved: a path picked
+        # (or auto-started) in an earlier WoW session can point at a
+        # filename that will never be written to again on installs that
+        # timestamp every session's log instead of reusing a stable
+        # "WoWCombatLog.txt" -- see config.resolve_watch_log_path. This
+        # is what makes watch_auto_start actually zero-click session over
+        # session on those installs instead of silently waiting forever
+        # on a stale path (confirmed real 2026-09-01).
+        log_path = str(_config.resolve_watch_log_path(Path(log_path).parent))
 
         settings = _config.load_settings()
         site_url = params.get("site_url") or settings.get("site_url")
@@ -491,6 +501,15 @@ class DesktopAPI:
         self._watch_thread = None
         self._emit_watch_event({"type": "stopped"})
         return {"ok": True}
+
+    def resolve_wow_log_path(self, folder: str) -> str:
+        """The log file to watch inside a WoW ``Logs`` folder the user
+        just picked: see ``config.resolve_watch_log_path`` for why this
+        can't just be ``folder + "WoWCombatLog.txt"`` (some WoW installs
+        never write that plain filename at all). Never raises -- an
+        unreadable/nonexistent folder just falls back to that plain-name
+        guess, same as before this existed."""
+        return str(_config.resolve_watch_log_path(folder))
 
     def _handle_watched_run(self, run, route, store, avoidable, site_url,
                             history_db_path, addon_dir=None) -> None:
