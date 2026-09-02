@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 # APP_DIR_NAME/config_dir moved to postmortem.appdirs so the plain
 # CLI (no `desktop` extra installed) can resolve the same per-user config
@@ -146,6 +146,31 @@ def resolve_history_db_path(settings: dict[str, Any]) -> Path:
     if configured:
         return Path(configured)
     return config_dir() / "history.db"
+
+
+AVOIDABLE_FILENAME = "avoidable_spells.json"
+
+
+def resolve_avoidable_data_path(settings: dict[str, Any]) -> Optional[Path]:
+    """The avoidable-damage spell file to load: the ``avoidable_data_path``
+    setting when set, otherwise ``<config dir>/avoidable_spells.json`` if
+    one has been dropped there, otherwise None (no tagging -- same as
+    before this existed).
+
+    Avoidable damage is only ever as good as the spell list behind it,
+    and this project deliberately doesn't ship one (see
+    analysis/avoidable.py). Until now, though, the only way to use a list
+    at all was to point Settings at it -- so a real user with the field
+    left blank saw "0 avoidable" on every run and reasonably read that as
+    the feature being missing (2026-09-02). Picking up a file from the
+    app's own data folder makes "drop the list in, it just works" the
+    zero-configuration path, matching resolve_history_db_path.
+    """
+    configured = settings.get("avoidable_data_path")
+    if configured:
+        return Path(configured)
+    default = config_dir() / AVOIDABLE_FILENAME
+    return default if default.is_file() else None
 
 
 def save_settings(settings: dict[str, Any]) -> None:

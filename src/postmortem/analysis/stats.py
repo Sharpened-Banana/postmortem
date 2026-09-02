@@ -355,9 +355,20 @@ def compute_stats(
 
         if name == "COMBATANT_INFO" and params:
             guid = params[0]
+            # currentSpecID is the last plain number before the talent
+            # block. Locate the block by its opening bracket rather than
+            # counting stat fields: the real 2026-era layout carries one
+            # more numeric field than the documented one (spec sits at
+            # index 24, not 23), and the block opens with "[(" -- so the
+            # old "first param starting with '('" landed on the *second*
+            # talent tuple and read to_int("1)") -> no spec for anyone.
+            # Confirmed against a real log (2026-09-02) where every one of
+            # 21 players parsed as spec=None; keying on the first "[" or
+            # "(" param gets all 21 right, in both the bracketed and the
+            # older bare-paren layouts.
             spec_id = None
             for i, p in enumerate(params):
-                if p.startswith("(") and i > 1:
+                if i > 1 and p[:1] in ("[", "("):
                     spec_id = to_int(params[i - 1]) or None
                     break
             player = get_player(guid)
@@ -443,15 +454,22 @@ def compute_stats(
         if damage is not None and name != "SWING_DAMAGE_LANDED":
             source_player = resolve_source(src_guid, src_name, src_flags)
             if source_player is not None and is_hostile_npc(dst_flags):
-                source_player.damage_done += damage.amount
+                # amount + absorbed: damage that landed on an enemy's
+                # absorb shield still counts as dealt -- that's how every
+                # in-game meter (Details!) and WarcraftLogs total "damage
+                # done", and leaving it out was one of the reasons this
+                # sat consistently below the meter in a real comparison
+                # (2026-09-02).
+                dealt = damage.amount + damage.absorbed
+                source_player.damage_done += dealt
                 source_player.damage_overkill += damage.overkill
                 if boss_npc_ids and parse_guid(dst_guid).npc_id in boss_npc_ids:
-                    source_player.damage_to_bosses += damage.amount
+                    source_player.damage_to_bosses += dealt
                 sp = spell_info(event)
                 key = (sp.spell_id, sp.spell_name) if sp else (0, "Melee")
-                source_player.damage_by_spell[key] += damage.amount
+                source_player.damage_by_spell[key] += dealt
                 if pull_idx is not None:
-                    source_player.damage_by_pull[pull_idx] += damage.amount
+                    source_player.damage_by_pull[pull_idx] += dealt
             if is_hostile_npc(src_flags) \
                     and (is_group_player(dst_flags) or is_group_owned(dst_flags)):
                 sp = spell_info(event)
@@ -614,6 +632,15 @@ def compute_stats(
                 continue
             source_player = resolve_source(src_guid, src_name, src_flags)
             if source_player is None or source_player.guid == PET_BUCKET:
+                continue
+            # Only the player's OWN casts count toward casts/CPM. resolve_
+            # source() also maps a pet's cast to its owner (right for
+            # damage, where a pet's hits are the owner's), but a cast
+            # count is about the player's hands: a Demonology warlock's
+            # Wild Imps each spam Fel Firebolt, and folding those in put
+            # two real warlocks at 373 and 384 CPM against a whole group
+            # sitting at 35-66 (2026-09-02, ~9,900 "casts" in 25 minutes).
+            if src_guid != source_player.guid:
                 continue
             source_player.casts[(sp.spell_id, sp.spell_name)] += 1
             source_player.casts_total += 1

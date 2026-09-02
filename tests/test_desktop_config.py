@@ -94,6 +94,27 @@ class TestTolerantOfBadState:
         assert config.load_settings() == config.DEFAULT_SETTINGS
 
 
+class TestResolveAvoidableDataPath:
+    """A file dropped into the app's own data folder is picked up with
+    zero configuration; an explicit setting still wins; nothing there
+    means no tagging, same as before."""
+
+    def test_explicit_setting_wins(self, isolated_config_dir):
+        isolated_config_dir.mkdir(parents=True)
+        (isolated_config_dir / config.AVOIDABLE_FILENAME).write_text("{}", encoding="utf-8")
+        got = config.resolve_avoidable_data_path({"avoidable_data_path": "/explicit/list.json"})
+        assert got == config.Path("/explicit/list.json")
+
+    def test_default_file_in_config_dir_is_picked_up(self, isolated_config_dir):
+        isolated_config_dir.mkdir(parents=True)
+        default = isolated_config_dir / config.AVOIDABLE_FILENAME
+        default.write_text("{}", encoding="utf-8")
+        assert config.resolve_avoidable_data_path({"avoidable_data_path": None}) == default
+
+    def test_none_when_nothing_configured_or_present(self, isolated_config_dir):
+        assert config.resolve_avoidable_data_path({"avoidable_data_path": None}) is None
+
+
 class TestResolveWatchLogPath:
     """Some WoW installs never write a stable "WoWCombatLog.txt" -- every
     session's log gets a timestamp appended instead (confirmed real
