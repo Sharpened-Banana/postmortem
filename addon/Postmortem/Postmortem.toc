@@ -18,3 +18,5 @@ InfoWindow.lua
 Interrupts.lua
 RouteImport.lua
 MinimapButton.lua
+PostmortemResults.lua
+Results.lua

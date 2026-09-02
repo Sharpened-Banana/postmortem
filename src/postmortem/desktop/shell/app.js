@@ -600,6 +600,10 @@ window.onWatchEvent = function (event) {
       addWatchLogEntry("info", `Analyzed: ${esc(watchRunLabel(event.zone, event.level))} (${verdict}) — uploading…`);
       break;
     }
+    case "results_written":
+      addWatchLogEntry("info",
+        `In-game stats ready for ${esc(watchRunLabel(event.zone, event.level))} — <code>/reload</code> in WoW to view`);
+      break;
     case "uploaded":
       addWatchLogEntry("ok", `Uploaded — ${esc(event.url)}`);
       break;

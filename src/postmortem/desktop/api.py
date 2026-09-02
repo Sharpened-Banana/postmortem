@@ -360,6 +360,11 @@ class DesktopAPI:
     #     -- a key just ended; analysis is starting.
     #   {"type": "analyzed", "zone": str, "level": int|None, "timed": bool|None}
     #     -- analysis finished; upload is starting.
+    #   {"type": "results_written", "zone": str, "level": int|None}
+    #     -- the crunched stats were written into the installed addon's
+    #        folder (PostmortemResults.lua); the player can /reload in WoW
+    #        to see them in-game. Only emitted when the addon is installed
+    #        (addon_dir derivable + exists); silently absent otherwise.
     #   {"type": "uploaded", "url": str}
     #     -- the full URL (site_url + the site's own path) of the report.
     #   {"type": "run_failed", "error": str}
@@ -416,6 +421,12 @@ class DesktopAPI:
 
         out_dir = params.get("out_dir") or str(_config.resolve_output_dir(settings, "watch-runs"))
         history_db_path = _config.resolve_history_db_path(settings)
+        # The installed Postmortem addon folder, derived from the same log
+        # path being watched (see addon_results.addon_dir_from_log_path) --
+        # None when the addon isn't installed / the layout doesn't match,
+        # in which case the in-game writeback is simply skipped.
+        from ..addon_results import addon_dir_from_log_path
+        addon_dir = addon_dir_from_log_path(log_path)
 
         def on_run_complete(run: Any) -> None:
             # Runs on the watch thread itself (Recorder calls this
@@ -427,7 +438,9 @@ class DesktopAPI:
             # watch stopped) -- the UI needs to tell "still watching,
             # one run had a problem" apart from "not watching anymore".
             try:
-                self._handle_watched_run(run, route, store, avoidable, site_url, history_db_path)
+                self._handle_watched_run(
+                    run, route, store, avoidable, site_url, history_db_path, addon_dir,
+                )
             except Exception as exc:
                 self._emit_watch_event({"type": "run_failed", "error": str(exc)})
 
@@ -479,7 +492,8 @@ class DesktopAPI:
         self._emit_watch_event({"type": "stopped"})
         return {"ok": True}
 
-    def _handle_watched_run(self, run, route, store, avoidable, site_url, history_db_path) -> None:
+    def _handle_watched_run(self, run, route, store, avoidable, site_url,
+                            history_db_path, addon_dir=None) -> None:
         """One completed run, from Recorder's ``on_run_complete``:
         analyze it and upload it automatically, pushing progress to the
         UI as each step happens. Reuses ``cli.py``'s own
@@ -526,6 +540,23 @@ class DesktopAPI:
             )
         except Exception:
             pass
+
+        # Best-effort in-game writeback: drop the crunched headline stats
+        # into the addon folder as PostmortemResults.lua, which the addon
+        # reads on the player's next /reload (see addon_results). Skipped
+        # cleanly when the addon isn't installed (addon_dir is None), and
+        # a write failure never blocks the upload below.
+        if addon_dir is not None:
+            try:
+                from ..addon_results import write_addon_results
+                write_addon_results(report, addon_dir)
+                self._emit_watch_event({
+                    "type": "results_written",
+                    "zone": report["run"].get("zone"),
+                    "level": report["run"].get("keystone_level"),
+                })
+            except Exception:
+                pass
 
         from .. import upload as _upload
         result = _upload.upload_report(report, site_url)
