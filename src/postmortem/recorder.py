@@ -348,6 +348,18 @@ class Recorder:
         stamp = time.strftime("%Y%m%d-%H%M%S")
         safe_zone = re.sub(r"[^A-Za-z0-9]+", "", zone) or "run"
         path = self.out_dir / f"{stamp}_{safe_zone}_{level or 'x'}.txt"
+        # The name is only unique to the second, and two runs of the same
+        # dungeon at the same level really can start within one second of
+        # each other here: not while tailing live (keys are minutes apart),
+        # but whenever the reader is catching up on already-buffered log --
+        # a watch resumed mid-session, or the stretch that piled up while a
+        # long analysis blocked the read loop. Opening "w" then silently
+        # overwrote the earlier run's slice. Seen in a real log (2026-09-02)
+        # that holds two separate Altar of Fangs +7 keys.
+        suffix = 2
+        while path.exists():
+            path = self.out_dir / f"{stamp}_{safe_zone}_{level or 'x'}_{suffix}.txt"
+            suffix += 1
         self._out_fh = open(path, "w", encoding="utf-8")
         self._out_fh.write(line)
         self._current = RecordedRun(
