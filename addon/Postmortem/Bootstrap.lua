@@ -44,6 +44,10 @@ local defaults = {
     infoPopupSeen = false,
     minimapIcon = { hide = false, showInCompartment = true },
     infoWindowPosition = { point = "CENTER", relativePoint = "CENTER", x = 0, y = 0 },
+    -- Results.lua's in-game crunched-stats window (fed by the desktop
+    -- app's PostmortemResults.lua writeback); saved on drag, same as the
+    -- overlay/info windows above.
+    resultsWindowPosition = { point = "CENTER", relativePoint = "CENTER", x = 0, y = 0 },
   },
 }
 
