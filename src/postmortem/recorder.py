@@ -119,6 +119,15 @@ class Recorder:
     from_start: bool = False
     poll_interval: float = 0.5
     on_run_complete: Optional[Callable[[RecordedRun], None]] = None
+    # Fired the moment a key's CHALLENGE_MODE_START is seen / the moment an
+    # open run is closed *without* a real end (a different key started, or
+    # WoW's phantom end). on_run_complete alone left a live UI silent for
+    # the whole 20-30 minutes of a key -- nothing at all between "Watching
+    # <path>" and "complete", which reads as "not working" (real report,
+    # 2026-09-02). Both best-effort; a raising callback never stops the
+    # recording itself.
+    on_run_start: Optional[Callable[[RecordedRun], None]] = None
+    on_run_abandoned: Optional[Callable[[RecordedRun], None]] = None
     on_start_cmd: Optional[str] = None  # shell hook (e.g. start OBS recording)
     on_end_cmd: Optional[str] = None    # shell hook (e.g. stop OBS recording)
     obs_url: Optional[str] = None       # e.g. ws://127.0.0.1:4455 -- native OBS control
@@ -304,6 +313,7 @@ class Recorder:
                 self._current.line_count += 1
                 return None
             self._close_run(completed=False)
+            self._notify(self.on_run_abandoned, self._current)
             self._current = None
             self._start_run(line)
             return None
@@ -327,6 +337,7 @@ class Recorder:
                 # in the desktop app, auto-analyze and auto-upload a run
                 # that never actually finished.
                 self._close_run(completed=False)
+                self._notify(self.on_run_abandoned, self._current)
                 self._current = None
                 return None
             self._close_run(completed=True)
@@ -367,6 +378,7 @@ class Recorder:
             line_count=1, challenge_map_id=map_id,
         )
         self.echo(f"▶ recording: {zone} +{level or '?'} -> {path}")
+        self._notify(self.on_run_start, self._current)
         self._run_hook(self.on_start_cmd, "on-run-start")
 
         self._obs = self._connect_obs() if self._obs_wanted() else None
@@ -422,6 +434,18 @@ class Recorder:
         except Exception as exc:
             self.echo(f"  warning: obs connect failed: {exc}")
             return None
+
+    def _notify(self, callback: Optional[Callable[[RecordedRun], None]],
+                run: Optional[RecordedRun]) -> None:
+        """Invoke an optional run-lifecycle callback (on_run_start /
+        on_run_abandoned) best-effort: a raising callback is reported as a
+        warning and never interrupts the recording itself."""
+        if callback is None or run is None:
+            return
+        try:
+            callback(run)
+        except Exception as exc:
+            self.echo(f"  warning: run callback failed: {exc}")
 
     def _obs_call(self, fn: Callable[[], object], label: str):
         """Run one OBS request, turning any failure into a warning."""

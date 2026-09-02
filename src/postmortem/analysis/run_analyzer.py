@@ -12,7 +12,7 @@ from .compare import compare_route
 from .interruptibility import InterruptibilityData
 from .mapping import build_map_report
 from .pulls import detect_pulls
-from .stats import compute_stats
+from .stats import PET_BUCKET, compute_stats
 
 
 def _relativize(
@@ -306,6 +306,14 @@ def analyze_run(
         },
         "players": [
             p.summary() for p in stats.players.values()
+            # The shared "Pets & Guardians" bucket only exists for pets
+            # whose owner never got resolved. resolve_source() creates it
+            # on the first event from any unowned pet -- including a bare
+            # cast or a killing blow that then contributes nothing -- so
+            # it showed up as a sixth "player" with all-zero numbers in a
+            # real report (2026-09-02). Only emit it when it actually
+            # holds something.
+            if p.guid != PET_BUCKET or p.damage_done or p.healing_done
         ],
         "pulls": stats.pull_stats,
         "deaths": [
@@ -414,12 +422,24 @@ def analyze_run(
         p["t_start"] = round(p["start_ts"] - start, 1)
         p["t_end"] = round(p["end_ts"] - start, 1)
 
+    # Rate denominators. Headline dps/hps/cpm are over *combat-active*
+    # time (the sum of pull durations -- the same "active time" every
+    # in-game meter and WarcraftLogs divide by), NOT wall-clock time. A
+    # 25-minute key easily has 5-10% of its wall clock spent running
+    # between packs; dividing by wall time made every number sit
+    # consistently below the in-game meter -- a real report (2026-09-02:
+    # "always 10-20k behind"). The wall-clock figures are kept alongside
+    # as dps_wall/hps_wall for anyone who wants "over the whole key".
+    # Falls back to wall time only when no pulls were detected at all.
     wall = segment.wall_duration
+    active = stats.total_combat_s if stats.total_combat_s > 0 else wall
+    report["run"]["active_duration_s"] = round(active, 1)
     if wall > 0:
         for player in report["players"]:
-            player["dps"] = round(player["damage_done"] / wall, 1)
-            player["hps"] = round(
-                (player["healing_done"] + player["absorbs_granted"]) / wall, 1
-            )
-            player["cpm"] = round(player["casts_total"] * 60.0 / wall, 1)
+            healing = player["healing_done"] + player["absorbs_granted"]
+            player["dps"] = round(player["damage_done"] / active, 1)
+            player["hps"] = round(healing / active, 1)
+            player["cpm"] = round(player["casts_total"] * 60.0 / active, 1)
+            player["dps_wall"] = round(player["damage_done"] / wall, 1)
+            player["hps_wall"] = round(healing / wall, 1)
     return report

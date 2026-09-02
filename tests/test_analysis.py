@@ -588,6 +588,110 @@ class TestEnemyCastSummary:
         assert result["kick_efficiency_pct"] == 42.9
 
 
+class TestRealFormatAccuracy:
+    """Fixes driven by comparing a real 2026-09 log against the in-game
+    meter: spec detection had silently failed for every player, pet casts
+    were inflating CPM, and absorbed damage wasn't counted as dealt."""
+
+    @staticmethod
+    def _analyze(b):
+        from postmortem.analysis.run_analyzer import analyze_run
+        from postmortem.combatlog.parser import parse_file
+        from postmortem.combatlog.segmenter import segment_runs
+        import tempfile, os
+        fd, path = tempfile.mkstemp(suffix=".txt")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(b.text())
+        try:
+            (seg,) = list(segment_runs(parse_file(path)))
+            return analyze_run(seg)
+        finally:
+            os.unlink(path)
+
+    @staticmethod
+    def _real_combatant_info(guid: str, spec_id: int) -> str:
+        # Verbatim shape of a real 2026-era COMBATANT_INFO: 25 numeric
+        # fields (one more than the documented layout) and a talent block
+        # that opens with "[(" -- the exact combination the old parser
+        # misread (it looked for the first "(" param and landed inside the
+        # second talent tuple).
+        stats = ",".join(["1000"] * 23)
+        return (f"COMBATANT_INFO,{guid},1,{stats},{spec_id},"
+                f"[(90928,112838,1),(90929,112839,1)],(0,0,0),"
+                f"[(1,2,3)],[4,5],0,0,0,0")
+
+    def _base(self):
+        b = LogBuilder()
+        b.start(0)
+        return b
+
+    def test_spec_is_read_from_the_real_2026_combatant_info_layout(self):
+        b = self._base()
+        b.raw(0.5, self._real_combatant_info(DPS1[0], 1480))   # Devourer DH
+        b.raw(0.5, self._real_combatant_info(TANK[0], 66))     # Prot Pal
+        b.combatant(0.5, HEALER)  # older bare-paren layout must still work
+        b.player_damage(10, DPS1, LogBuilder.npc_guid(FELWYRM, "0001"), "Felwyrm",
+                        133, "Fireball", 1000)
+        b.end(100)
+        # keyed by guid: tank/healer only appear via COMBATANT_INFO here,
+        # which carries no name
+        players = {p["guid"]: p for p in self._analyze(b)["players"]}
+        assert (players[DPS1[0]]["class"], players[DPS1[0]]["spec"],
+                players[DPS1[0]]["role"]) == ("Demon Hunter", "Devourer", "dps")
+        assert players[TANK[0]]["spec"] == "Protection"
+        assert players[HEALER[0]]["spec"] == "Restoration"
+
+    def test_pet_casts_do_not_count_toward_the_owners_cpm(self):
+        b = self._base()
+        pet = "Pet-0-1465-2830-12345-416-0000ABCD"
+        pet_flags = 0x1112  # party-affiliated, player-controlled pet
+        mob = LogBuilder.npc_guid(FELWYRM, "0001")
+        # SPELL_SUMMON teaches ownership: this pet belongs to DPS1
+        b.raw(1, f'SPELL_SUMMON,{DPS1[0]},"{DPS1[1]}",{DPS1[2]:#06x},0x0,'
+                 f'{pet},"Imp",{pet_flags:#06x},0x0,688,"Summon Imp",0x20')
+        b.cast(5, DPS1, 133, "Fireball")
+        adv = LogBuilder._advanced(pet)
+        for t in (6, 7, 8, 9):
+            b.raw(t, f'SPELL_CAST_SUCCESS,{pet},"Imp",{pet_flags:#06x},0x0,'
+                     f'{mob},"Felwyrm",{HOSTILE:#06x},0x0,3110,"Firebolt",0x4,{adv}')
+        # ...but the pet's DAMAGE still lands on the owner's total
+        b.spell_damage(10, pet, "Imp", pet_flags, mob, "Felwyrm", HOSTILE,
+                       3110, "Firebolt", 7000)
+        b.player_damage(11, DPS1, mob, "Felwyrm", 133, "Fireball", 1000)
+        b.end(100)
+        players = {p["name"]: p for p in self._analyze(b)["players"]}
+        zap = players["Zappyboi-Area52"]
+        assert zap["casts_total"] == 1          # the Fireball, not 4 Firebolts
+        assert zap["damage_done"] == 8000       # 7000 imp + 1000 own
+        assert "Pets & Guardians" not in players
+
+    def test_absorbed_damage_counts_as_dealt(self):
+        b = self._base()
+        mob = LogBuilder.npc_guid(FELWYRM, "0001")
+        adv = LogBuilder._advanced(mob)
+        # amount=1000 landed, absorbed=500 by the mob's shield -> 1500 dealt
+        b.raw(10, f'SPELL_DAMAGE,{DPS1[0]},"{DPS1[1]}",{DPS1[2]:#06x},0x0,'
+                  f'{mob},"Felwyrm",{HOSTILE:#06x},0x0,133,"Fireball",0x4,{adv},'
+                  f'1000,1500,0,0x4,0,0,500,nil,nil,nil,nil')
+        b.end(100)
+        players = {p["name"]: p for p in self._analyze(b)["players"]}
+        assert players["Zappyboi-Area52"]["damage_done"] == 1500
+
+    def test_an_unowned_pet_that_only_casts_does_not_appear_as_a_player(self):
+        b = self._base()
+        stray = "Creature-0-1465-2830-12345-99999-0000BEEF"
+        pet_flags = 0x1112
+        b.player_damage(5, DPS1, LogBuilder.npc_guid(FELWYRM, "0001"), "Felwyrm",
+                        133, "Fireball", 1000)
+        # a party pet with no known owner casts but never deals damage
+        adv = LogBuilder._advanced(stray)
+        b.raw(6, f'SPELL_CAST_SUCCESS,{stray},"Stray",{pet_flags:#06x},0x0,'
+                 f'0000000000000000,nil,0x80000000,0x0,1,"Growl",0x1,{adv}')
+        b.end(100)
+        names = [p["name"] for p in self._analyze(b)["players"]]
+        assert "Pets & Guardians" not in names
+
+
 class TestAnalyzeRun:
     def test_full_report(self, run_segment, route, dungeon_data_file):
         store = DungeonDataStore.load(dungeon_data_file)
@@ -631,7 +735,19 @@ class TestAnalyzeRun:
         assert payload["deaths"][0]["damage_last_5s"] == 400000
         assert payload["encounters"][0]["kill"] is True
         players = {p["name"]: p for p in payload["players"]}
-        assert players["Zappyboi-Area52"]["cpm"] == pytest.approx(1.7, abs=0.1)
+        # Rates are over combat-*active* time (sum of pull durations --
+        # what in-game meters divide by), not wall time: this fixture's
+        # pulls cover about half its wall clock, so active-time CPM is
+        # ~2x the old wall-time 1.7. The wall-clock figures survive as
+        # dps_wall/hps_wall.
+        zap = players["Zappyboi-Area52"]
+        assert payload["run"]["active_duration_s"] < payload["run"]["wall_duration_s"]
+        assert zap["cpm"] == pytest.approx(3.4, abs=0.1)
+        assert zap["dps"] > zap["dps_wall"] > 0
+        assert zap["dps_wall"] == pytest.approx(
+            zap["damage_done"] / payload["run"]["wall_duration_s"], rel=1e-3)
+        assert zap["dps"] == pytest.approx(
+            zap["damage_done"] / payload["run"]["active_duration_s"], rel=1e-3)
         assert players["Zappyboi-Area52"]["killing_blows"] == 4
         lust = [b for b in players["Zappyboi-Area52"]["buff_uptimes"]
                 if b["name"] == "Bloodlust"]
