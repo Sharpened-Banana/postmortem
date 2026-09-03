@@ -22,6 +22,12 @@ class EnemyClone:
     y: float
     sublevel: Optional[int] = None
     group: Optional[int] = None
+    # MDT's key for this clone in ``enemy.clones`` -- the number a route
+    # preset's pull uses to name it. Clone lists have holes (a deleted clone
+    # leaves its key unused), so this is NOT always this clone's 1-based
+    # position in the list; None only for data extracted before the key was
+    # recorded, where position is the best available guess.
+    idx: Optional[int] = None
 
 
 @dataclass
@@ -99,6 +105,7 @@ class DungeonData:
                     y=c.get("y", 0.0),
                     sublevel=c.get("sublevel"),
                     group=c.get("g"),
+                    idx=int(c["idx"]) if isinstance(c.get("idx"), int) else None,
                 )
                 for c in e.get("clones", [])
             ]
