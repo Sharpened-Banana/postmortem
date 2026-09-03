@@ -239,6 +239,25 @@ def _seed_anchors(
     return seeds
 
 
+def _all_encounters(pulls: list[ActualPull], data: DungeonData) -> list[tuple[int, Point]]:
+    """Every real engagement with a known world position, for any npc_id
+    that has at least one planned clone -- INCLUDING repeats (unlike
+    ``_seed_anchors``/``_icp_refine``'s baseline, which keep only the
+    first occurrence per npc_id). Feeds ``_trim_outliers``' RANSAC step a
+    richer candidate pool for rescuing a failing fit: see that function's
+    ``extra_encounters`` docstring for why repeats matter."""
+    encounters: list[tuple[int, Point]] = []
+    for pull in pulls:
+        for unit in pull.units:
+            if unit.npc_id is None or unit.first_pos is None:
+                continue
+            enemy = data.enemy_by_npc_id(unit.npc_id)
+            if enemy is None or not enemy.clones:
+                continue
+            encounters.append((unit.npc_id, unit.first_pos))
+    return encounters
+
+
 def _icp_refine(
     transform: Transform,
     residual: float,
@@ -314,6 +333,7 @@ def _trim_outliers(
     residual: float,
     correspondences: dict[int, tuple[Point, int]],
     data: DungeonData,
+    extra_encounters: Optional[list[tuple[int, Point]]] = None,
 ) -> tuple[Transform, float, dict[int, tuple[Point, int]]]:
     """If the fit's residual exceeds MAX_RESIDUAL, find the largest
     consistent (inlier) subset of the anchors via RANSAC and refit from
@@ -337,9 +357,30 @@ def _trim_outliers(
     contaminated set. Instead it builds many small-subset candidate
     transforms (_RANSAC_SAMPLE_SIZE points each -- small enough that a
     genuinely clean subset almost certainly exists even when several
-    anchors are bad), scores each by how many of *all* the anchors it
-    explains within _RANSAC_INLIER_DIST, and keeps the winning candidate's
-    inlier set for a final refit.
+    anchors are bad), scores each by how many *distinct npc_ids* (tie-
+    broken by raw point count) it explains within _RANSAC_INLIER_DIST, and
+    keeps the winning candidate's inlier set for a final refit.
+
+    ``extra_encounters`` -- every real (npc_id, world_pos) engagement
+    across the whole run, INCLUDING repeats of npc_ids already present in
+    ``correspondences`` (unlike ``correspondences`` itself, which -- via
+    ``_icp_refine`` -- keeps only each npc_id's first engagement). Real
+    production case (2026-09-03): a wave-spawning add pulled in three
+    different rooms only has ONE MDT-marked clone, so only one of those
+    three real engagements can be geometrically correct -- but which one
+    isn't knowable in advance. Folding every repeat in as an extra
+    candidate point lets RANSAC discover which engagement (if any) is the
+    right one, instead of being stuck with whichever single occurrence
+    ``_icp_refine`` happened to see first. Only pulled in here, once the
+    baseline fit already needs rescuing (residual over MAX_RESIDUAL) --
+    an already-good baseline is never second-guessed by noisier repeat
+    data, so this can only help, matching this function's existing
+    contract. Candidates are scored by *distinct npc_id* count first
+    (what MIN_ANCHORS_AFTER_TRIM actually gates on), not raw inlier
+    count -- confirmed necessary empirically: scoring by raw count alone
+    let a real run's winning candidate be ~70 points from just 2 heavily
+    repeated npc_ids, a numerically tight but practically unverifiable
+    "landmark of one" that MIN_ANCHORS_AFTER_TRIM exists to reject.
 
     This is a well-justified correction for a real, verified failure mode,
     not a threshold loosened to paper over bad data -- MAX_RESIDUAL itself
@@ -353,12 +394,30 @@ def _trim_outliers(
         return transform, residual, correspondences
 
     items: list[tuple[int, Point, Point]] = []
+    seen: set[tuple[int, Point]] = set()
     for npc_id, (world_pos, clone_idx) in correspondences.items():
         enemy = data.enemy_by_npc_id(npc_id)
         if enemy is None or clone_idx >= len(enemy.clones):
             continue
         clone = enemy.clones[clone_idx]
         items.append((npc_id, world_pos, (clone.x, clone.y)))
+        seen.add((npc_id, world_pos))
+
+    for npc_id, world_pos in (extra_encounters or ()):
+        if npc_id not in correspondences or (npc_id, world_pos) in seen:
+            continue
+        enemy = data.enemy_by_npc_id(npc_id)
+        if enemy is None or not enemy.clones:
+            continue
+        cx, cy = transform.apply(*world_pos)
+        best_idx = min(
+            range(len(enemy.clones)),
+            key=lambda i: (enemy.clones[i].x - cx) ** 2 + (enemy.clones[i].y - cy) ** 2,
+        )
+        clone = enemy.clones[best_idx]
+        items.append((npc_id, world_pos, (clone.x, clone.y)))
+        seen.add((npc_id, world_pos))
+
     n = len(items)
     if n < _RANSAC_SAMPLE_SIZE:
         return transform, residual, correspondences
@@ -374,6 +433,7 @@ def _trim_outliers(
 
     inlier_dist_sq = _RANSAC_INLIER_DIST ** 2
     best_inliers: Optional[list[int]] = None
+    best_key: Optional[tuple[int, int]] = None
     for combo in index_combos:
         sample_pairs = [(items[i][1], items[i][2]) for i in combo]
         candidate = fit_transform(sample_pairs)
@@ -381,14 +441,21 @@ def _trim_outliers(
             continue
         cand_transform, _ = candidate
         inliers = []
-        for i, (_npc_id, world_pos, canvas_pos) in enumerate(items):
+        npc_ids_seen: set[int] = set()
+        for i, (npc_id, world_pos, canvas_pos) in enumerate(items):
             px, py = cand_transform.apply(*world_pos)
             if (px - canvas_pos[0]) ** 2 + (py - canvas_pos[1]) ** 2 <= inlier_dist_sq:
                 inliers.append(i)
-        if best_inliers is None or len(inliers) > len(best_inliers):
+                npc_ids_seen.add(npc_id)
+        key = (len(npc_ids_seen), len(inliers))
+        if best_key is None or key > best_key:
+            best_key = key
             best_inliers = inliers
 
-    if best_inliers is None or len(best_inliers) < MIN_ANCHORS_AFTER_TRIM:
+    if best_inliers is None:
+        return transform, residual, correspondences
+    distinct_inlier_npcs = {items[i][0] for i in best_inliers}
+    if len(distinct_inlier_npcs) < MIN_ANCHORS_AFTER_TRIM:
         return transform, residual, correspondences
 
     final_pairs = [(items[i][1], items[i][2]) for i in best_inliers]
@@ -396,9 +463,15 @@ def _trim_outliers(
     if fit is None:
         return transform, residual, correspondences
     new_transform, new_residual = fit
-    new_correspondences = {
-        items[i][0]: (items[i][1], correspondences[items[i][0]][1]) for i in best_inliers
-    }
+    # One representative correspondence per distinct npc_id in the
+    # accepted inlier set -- anchor_count (see calibrate()) reports
+    # distinct landmarks, not raw repeat-encounter points, so only one
+    # entry per npc_id is kept here too.
+    new_correspondences: dict[int, tuple[Point, int]] = {}
+    for i in best_inliers:
+        npc_id, world_pos, _canvas_pos = items[i]
+        if npc_id not in new_correspondences:
+            new_correspondences[npc_id] = (world_pos, correspondences.get(npc_id, (None, 0))[1])
     return new_transform, new_residual, new_correspondences
 
 
@@ -432,7 +505,7 @@ def calibrate(pulls: list[ActualPull], data: DungeonData) -> CalibrationResult:
         transform, residual, pulls, data, seed_correspondences
     )
     transform, residual, correspondences = _trim_outliers(
-        transform, residual, correspondences, data
+        transform, residual, correspondences, data, _all_encounters(pulls, data)
     )
     anchor_count = len(correspondences)
 
