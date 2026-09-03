@@ -41,10 +41,12 @@ class _FakeResponse(io.BytesIO):
 def _fake_urlopen(routes_by_url):
     """urlopen stand-in: answers from a {url-substring: payload} table."""
     calls = []
+    contexts = []
 
-    def urlopen(request, timeout=None):
+    def urlopen(request, timeout=None, context=None):
         url = request.full_url if hasattr(request, "full_url") else str(request)
         calls.append(url)
+        contexts.append(context)
         # the site's own XHR header must be sent, or it answers HTML
         assert request.get_header("X-requested-with") == "XMLHttpRequest"
         for needle, payload in routes_by_url.items():
@@ -55,6 +57,7 @@ def _fake_urlopen(routes_by_url):
         raise AssertionError(f"unexpected url {url}")
 
     urlopen.calls = calls
+    urlopen.contexts = contexts
     return urlopen
 
 
@@ -72,7 +75,7 @@ class TestListPublicRoutes:
         page2 = {"data": [_row("ccc", "Route C", "the-blinding-vale", mdt=False)],
                  "recordsTotal": 3, "recordsFiltered": 3}
 
-        def urlopen(request, timeout=None):
+        def urlopen(request, timeout=None, context=None):
             url = request.full_url
             assert "user_id=64246" in url and "columns%5B0%5D%5Bdata%5D=title" in url
             return _FakeResponse(json.dumps(page2 if "start=2" in url else page1).encode())
@@ -92,9 +95,19 @@ class TestListPublicRoutes:
 
 class TestFetchMdtString:
     def test_returns_the_export_string(self, monkeypatch):
-        monkeypatch.setattr(urllib.request, "urlopen",
-                            _fake_urlopen({"/ajax/0RhVlYt/mdtExport": {"mdt_string": " !~MDT2~abc ", "warnings": []}}))
+        urlopen = _fake_urlopen({"/ajax/0RhVlYt/mdtExport": {"mdt_string": " !~MDT2~abc ", "warnings": []}})
+        monkeypatch.setattr(urllib.request, "urlopen", urlopen)
         assert kg.fetch_mdt_string("0RhVlYt") == "!~MDT2~abc"
+
+    def test_passes_a_certifi_backed_ssl_context_to_urlopen(self, monkeypatch):
+        # Same class of bug as upload.py's (2026-09-03): without an
+        # explicit context, a packaged desktop build can't verify
+        # keystone.guru's certificate at all.
+        import ssl
+        urlopen = _fake_urlopen({"/ajax/0RhVlYt/mdtExport": {"mdt_string": "!~MDT2~abc", "warnings": []}})
+        monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+        kg.fetch_mdt_string("0RhVlYt")
+        assert isinstance(urlopen.contexts[0], ssl.SSLContext)
 
     def test_key_is_sanitized_and_missing_string_is_an_error(self, monkeypatch):
         # "0RhVlYt/../x" is stripped to the alphanumerics "0RhVlYtx" -- no

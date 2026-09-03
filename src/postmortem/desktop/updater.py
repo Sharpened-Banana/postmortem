@@ -35,7 +35,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import ssl
 import stat
 import subprocess
 import sys
@@ -49,6 +48,7 @@ from typing import Callable, Optional
 from urllib.parse import urlsplit
 
 from ._version import VERSION
+from ..net import https_context
 
 # A PyInstaller-frozen build has no CA certificate bundle of its own --
 # confirmed as the real cause of a real report (2026-09-01: "no update
@@ -58,21 +58,12 @@ from ._version import VERSION
 # ssl.SSLCertVerificationError, wrapped as a urllib.error.URLError,
 # which _default_fetcher's own except clause (by design, to never let a
 # network hiccup crash the update check) was silently swallowing every
-# single time. ``certifi`` ships its own CA bundle as a real file
-# (certifi.where()), which is what actually needs bundling -- passing
-# it explicitly here, rather than relying on the interpreter's own
-# guess at a system cert path, is what makes this work the same whether
-# frozen or not. Only imported here (desktop/updater.py is desktop-only
-# code, never imported by the plain CLI or the site) -- tolerant of it
-# being missing anyway (falls back to the interpreter's own default
-# verification behavior) rather than a hard ImportError, since a
-# missing optional dependency shouldn't be worse than the bug this
-# fixes.
-try:
-    import certifi
-    _SSL_CONTEXT: Optional[ssl.SSLContext] = ssl.create_default_context(cafile=certifi.where())
-except ImportError:
-    _SSL_CONTEXT = None
+# single time. ``https_context()`` (net.py) builds a context from
+# certifi's own CA bundle file when available and falls back to None
+# (the interpreter's own default verification behavior) otherwise --
+# same fix later reused for upload.py/raiderio.py/keystoneguru.py, which
+# hit the identical bug on "Upload to site" (2026-09-03).
+_SSL_CONTEXT = https_context()
 
 REPO = "Sharpened-Banana/postmortem"
 _RELEASES_LATEST_URL = f"https://api.github.com/repos/{REPO}/releases/latest"

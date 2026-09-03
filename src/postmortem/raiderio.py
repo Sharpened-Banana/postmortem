@@ -22,6 +22,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator, Optional
 
+from .net import https_context
+
 API_URL = "https://raider.io/api/v1/characters/profile"
 # mythic_plus_recent_runs (WP-C3) is requested alongside the existing
 # fields purely additively -- one more comma-separated value in the same
@@ -47,7 +49,7 @@ def realm_slug(realm: str) -> str:
 
 def _default_fetcher(url: str) -> Optional[dict]:
     try:
-        with urllib.request.urlopen(url, timeout=6) as resp:
+        with urllib.request.urlopen(url, timeout=6, context=https_context()) as resp:
             return json.load(resp)
     except (urllib.error.URLError, OSError, ValueError):
         return None

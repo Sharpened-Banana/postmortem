@@ -24,6 +24,7 @@ from typing import Any, Optional
 
 from . import __version__
 from . import appdirs
+from .net import https_context
 
 #: Identifies this tool to the server. Kept in sync with pyproject.toml's
 #: ``version`` by reusing the package's own ``__version__`` (both are
@@ -146,7 +147,7 @@ def upload_report(
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as resp:
+        with urllib.request.urlopen(request, timeout=timeout, context=https_context()) as resp:
             body = resp.read()
         return json.loads(body.decode("utf-8"))
     except urllib.error.HTTPError as exc:
