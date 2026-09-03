@@ -254,26 +254,42 @@ def _icp_refine(
 
     ``correspondences`` maps npc_id -> (world_pos, clone_index) and is both
     the seed and the running accumulator/output.
+
+    Each npc_id's world position is resolved once, up front, to its first
+    engagement across the whole run -- same "first occurrence only" choice
+    as ``_seed_anchors``. Real bug (2026-09-03): re-deriving it from a
+    fresh scan of ``pulls`` on every iteration let a *later* re-engagement
+    of the same npc_id silently overwrite an already-good correspondence
+    (dict assignment keeps whichever pull's unit was iterated last, not
+    the first) -- confirmed on a real production run where a wave-spawning
+    add pulled in three different rooms had its accurate seed-anchor
+    position clobbered by its third, unrelated engagement, dragging the
+    fit's residual from ~80 to ~150.
     """
+    world_pos_by_npc: dict[int, Point] = {}
+    for pull in pulls:
+        for unit in pull.units:
+            if unit.npc_id is None or unit.first_pos is None or unit.npc_id in world_pos_by_npc:
+                continue
+            enemy = data.enemy_by_npc_id(unit.npc_id)
+            if enemy is None or not enemy.clones:
+                continue
+            world_pos_by_npc[unit.npc_id] = unit.first_pos
+
     for _ in range(MAX_ICP_ITERS):
         changed = False
         updated = dict(correspondences)
-        for pull in pulls:
-            for unit in pull.units:
-                if unit.npc_id is None or unit.first_pos is None:
-                    continue
-                enemy = data.enemy_by_npc_id(unit.npc_id)
-                if enemy is None or not enemy.clones:
-                    continue
-                cx, cy = transform.apply(*unit.first_pos)
-                best_idx = min(
-                    range(len(enemy.clones)),
-                    key=lambda i: (enemy.clones[i].x - cx) ** 2 + (enemy.clones[i].y - cy) ** 2,
-                )
-                prev = updated.get(unit.npc_id)
-                if prev is None or prev[1] != best_idx:
-                    changed = True
-                updated[unit.npc_id] = (unit.first_pos, best_idx)
+        for npc_id, world_pos in world_pos_by_npc.items():
+            enemy = data.enemy_by_npc_id(npc_id)
+            cx, cy = transform.apply(*world_pos)
+            best_idx = min(
+                range(len(enemy.clones)),
+                key=lambda i: (enemy.clones[i].x - cx) ** 2 + (enemy.clones[i].y - cy) ** 2,
+            )
+            prev = updated.get(npc_id)
+            if prev is None or prev[1] != best_idx:
+                changed = True
+            updated[npc_id] = (world_pos, best_idx)
 
         pairs: list[tuple[Point, Point]] = []
         for npc_id, (world_pos, clone_idx) in updated.items():
