@@ -32,6 +32,8 @@ import urllib.parse
 import urllib.request
 from typing import Any, Optional
 
+from .net import https_context
+
 BASE_URL = "https://keystone.guru"
 _PAGE_SIZE = 25
 _TIMEOUT_S = 15
@@ -73,7 +75,7 @@ def parse_profile_id(text: str) -> int:
 def _get_json(url: str) -> Any:
     request = urllib.request.Request(url, headers=_HEADERS, method="GET")
     try:
-        with urllib.request.urlopen(request, timeout=_TIMEOUT_S) as resp:
+        with urllib.request.urlopen(request, timeout=_TIMEOUT_S, context=https_context()) as resp:
             body = resp.read()
     except urllib.error.HTTPError as exc:
         raise KeystoneGuruError(f"Keystone.guru answered HTTP {exc.code} for {url}") from None
