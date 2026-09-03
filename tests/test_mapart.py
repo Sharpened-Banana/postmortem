@@ -138,7 +138,7 @@ class TestRendering:
             def __exit__(self, *a): return False
             def getcode(self): return 200
 
-        def fake_urlopen(request, timeout=None):
+        def fake_urlopen(request, timeout=None, context=None):
             sent["body"] = json.loads(request.data.decode("utf-8"))
             return _Resp(b'{"ok": true, "run_id": 1, "url": "/runs/1"}')
 

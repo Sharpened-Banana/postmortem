@@ -289,6 +289,33 @@ class TestRaiderIO:
         assert report["players"][1]["raiderio"] == {"error": "lookup failed"}
         assert report["raiderio"]["enriched_players"] == 1
 
+    def test_default_fetcher_passes_a_certifi_backed_ssl_context(self, monkeypatch):
+        # Same class of bug as upload.py's (2026-09-03): without an
+        # explicit context, a packaged desktop build can't verify
+        # raider.io's certificate at all.
+        import io
+        import ssl
+        import urllib.request
+
+        from postmortem import raiderio
+
+        seen = {}
+
+        class _FakeResponse(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        def fake_urlopen(url, timeout=None, context=None):
+            seen["context"] = context
+            return _FakeResponse(b'{"name": "Zappyboi"}')
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        raiderio._default_fetcher("https://raider.io/api/v1/characters/profile")
+        assert isinstance(seen["context"], ssl.SSLContext)
+
 
 class TestRunMatching:
     """WP-C3: matching a locally-analyzed run against a player's
