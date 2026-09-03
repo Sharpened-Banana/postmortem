@@ -10,7 +10,7 @@ from ..mdt.route import Route
 from .avoidable import AvoidableData
 from .compare import compare_route
 from .interruptibility import InterruptibilityData
-from .mapping import build_map_report
+from .mapping import build_map_report, collect_map_bounds
 from .pulls import detect_pulls
 from .stats import PET_BUCKET, compute_stats
 
@@ -408,6 +408,7 @@ def analyze_run(
         report["map"] = build_map_report(
             data, route, report.get("comparison"), pulls,
             stats.position_samples, player_names, stats.deaths, start,
+            map_bounds=collect_map_bounds(segment.events),
         )
 
     for key in ("pulls", "deaths", "interrupts", "dispels", "lust", "brez",

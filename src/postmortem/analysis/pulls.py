@@ -36,6 +36,11 @@ class UnitEngagement:
     last_ts: float
     died_at: Optional[float] = None
     first_pos: Optional[tuple[float, float]] = None
+    # The uiMapID the advanced block reported alongside first_pos -- which
+    # of the dungeon's Blizzard sub-maps that world position lives on. The
+    # route map's calibration is per sub-map (see mapping.calibrate_maps),
+    # so a position without its map is not usable as an anchor.
+    first_map_id: Optional[int] = None
 
     @property
     def killed(self) -> bool:
@@ -124,12 +129,24 @@ def collect_engagements(events: Iterable[Event]) -> dict[str, UnitEngagement]:
         if not g.is_npc:
             continue
 
+        # The advanced block describes ONE unit per line -- the source for
+        # most events -- so an enemy's own position is only on lines where
+        # it is that unit (its own casts/swings), not on the player's hit
+        # that usually opens an engagement. Taking the position only from
+        # the very first interaction left most units (including bosses,
+        # which are the best calibration anchors there are) with no
+        # position at all -- 6 of 8 Ruby Life Pools bosses had first_pos=None
+        # in a real run (2026-09-03). Keep the FIRST line that actually
+        # carries the enemy's own position instead, whenever it arrives.
+        adv = advanced_info(event)
+        pos = None
+        map_id = None
+        if adv is not None and adv.info_guid == enemy_guid and adv.pos_x:
+            pos = (adv.pos_x, adv.pos_y)
+            map_id = adv.ui_map_id or None
+
         eng = engagements.get(enemy_guid)
         if eng is None:
-            pos = None
-            adv = advanced_info(event)
-            if adv is not None and adv.info_guid == enemy_guid and adv.pos_x:
-                pos = (adv.pos_x, adv.pos_y)
             engagements[enemy_guid] = UnitEngagement(
                 guid=enemy_guid,
                 npc_id=g.npc_id,
@@ -137,8 +154,12 @@ def collect_engagements(events: Iterable[Event]) -> dict[str, UnitEngagement]:
                 first_ts=event.ts,
                 last_ts=event.ts,
                 first_pos=pos,
+                first_map_id=map_id,
             )
         else:
+            if eng.first_pos is None and pos is not None:
+                eng.first_pos = pos
+                eng.first_map_id = map_id
             if eng.died_at is None:
                 eng.last_ts = event.ts
     return engagements

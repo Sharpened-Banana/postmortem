@@ -23,15 +23,19 @@ from __future__ import annotations
 import itertools
 import math
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from ..combatlog.events import Event
 from ..mdt.dungeon_data import DungeonData
 from ..mdt.route import Route
 from .pulls import ActualPull
 from .stats import DeathRecord
 
 Point = tuple[float, float]
+
+#: MDT's planning canvas -- what every clone/POI coordinate is in.
+CANVAS_W, CANVAS_H = 840.0, 555.0
 
 # --- anchor/fit thresholds ---------------------------------------------
 #
@@ -226,6 +230,21 @@ def _seed_anchors(
     known first-seen world position. Only the first engagement of a given
     npc_id is kept -- a repeat engagement of the same single-clone npc_id
     doesn't add new geometric information, just risks re-weighting it."""
+    # A single planned clone only pins down a world position if a single
+    # such mob actually exists. MDT lists summoned/respawning adds once
+    # (Ruby Life Pools' Scorchlings and Infused Whelps: one clone each,
+    # engaged as a dozen distinct GUIDs spread across the whole dungeon in
+    # a real run, 2026-09-03), and pairing *any* of those with the one
+    # planned dot produced anchors hundreds of canvas units off -- enough
+    # to wreck the seed fit entirely (RMS 165 on Ruby Life Pools). More
+    # distinct GUIDs engaged than clones planned means the planned dot
+    # doesn't stand for "the" mob, so such npc_ids are not anchors.
+    guids_by_npc: dict[int, set[str]] = {}
+    for pull in pulls:
+        for unit in pull.units:
+            if unit.npc_id is not None:
+                guids_by_npc.setdefault(unit.npc_id, set()).add(unit.guid)
+
     seeds: dict[int, tuple[Point, Point]] = {}
     for pull in pulls:
         for unit in pull.units:
@@ -233,6 +252,8 @@ def _seed_anchors(
                 continue
             enemy = data.enemy_by_npc_id(unit.npc_id)
             if enemy is None or len(enemy.clones) != 1:
+                continue
+            if len(guids_by_npc.get(unit.npc_id, ())) > len(enemy.clones):
                 continue
             clone = enemy.clones[0]
             seeds[unit.npc_id] = (unit.first_pos, (clone.x, clone.y))
@@ -519,6 +540,305 @@ def calibrate(pulls: list[ActualPull], data: DungeonData) -> CalibrationResult:
                               anchor_count=anchor_count, residual=residual)
 
 
+# --- Per-sub-map calibration (the primary path) ---------------------------
+#
+# The similarity fit above assumes ONE rigid transform maps the whole
+# dungeon's world space onto MDT's canvas. That is false for every current
+# dungeon: Blizzard splits a dungeon into several uiMaps (Ruby Life Pools
+# is 2094 + 2095; Murder Row is 2433 + 2434 + 2435), each covering its own
+# world rectangle, and MDT's single-floor canvas is a hand-made COMPOSITE
+# of those sub-maps' art, each pasted at its own scale and offset. So the
+# world->canvas relation is piecewise: one scale + translation per uiMap,
+# with the sub-map's orientation (Blizzard maps are north-up) fixed.
+# Confirmed against real anchors (2026-09-03): a global similarity fit on
+# 8 boss positions in Ruby Life Pools had RMS 138; the per-uiMap fits
+# below had RMS 22 (2094, 5 anchors) and 8 (2095, 2 anchors), with the
+# free rotation coming out at -1 deg -- i.e. north-up is exactly right.
+#
+# The world rectangle each uiMap covers comes straight from the combat
+# log: ``MAP_CHANGE,<uiMapID>,"<name>",x0,x1,y0,y1`` is written whenever the
+# logging player's map changes (including at CHALLENGE_MODE_START), and
+# every advanced-block position carries the uiMapID it is on. Normalising
+# a world position into "map fraction" coordinates -- x across the map from
+# west to east, y down from north -- turns the unknown per-map transform
+# into a plain scale + translation, which 2 anchors already over-determine
+# (4 equations, 3 unknowns), so even a sub-map with only its two bosses
+# engaged yields a fit that can be VALIDATED, not just solved.
+
+# Per-anchor inlier distance (canvas units) for the pair-based robust
+# selection in _fit_map, and the RMS a sub-map's final fit must clear.
+# MDT's clone dots are hand-placed on stylised art, so 20-30 units of
+# irreducible noise is normal (see the real residuals above); 40 keeps
+# such anchors while rejecting the 100-400 unit errors a wrong pairing or
+# a mob engaged far from its planned spot produces.
+MAP_INLIER_DIST = 40.0
+MAP_MAX_RESIDUAL = 40.0
+# With exactly 2 anchors there is a single degree of validation left, so a
+# lone bad anchor can hide behind a modest RMS -- demand a tighter one.
+MAP_MAX_RESIDUAL_TWO_ANCHORS = 20.0
+MIN_MAP_ANCHORS = 2
+
+MapBounds = tuple[float, float, float, float]  # x0 (max), x1 (min), y0 (max), y1 (min)
+
+
+def collect_map_bounds(events: list[Event]) -> dict[int, MapBounds]:
+    """uiMapID -> world-coordinate bounds, from the run's MAP_CHANGE lines.
+    Degenerate (zero-area) rectangles are ignored."""
+    bounds: dict[int, MapBounds] = {}
+    for event in events:
+        if event.name != "MAP_CHANGE" or len(event.params) < 6:
+            continue
+        p = event.params
+        try:
+            ui_map_id = int(p[0].strip())
+            x0, x1, y0, y1 = (float(v) for v in p[2:6])
+        except ValueError:
+            continue
+        if ui_map_id in bounds or x0 == x1 or y0 == y1:
+            continue
+        bounds[ui_map_id] = (x0, x1, y0, y1)
+    return bounds
+
+
+def _map_normalized(bounds: MapBounds, wx: float, wy: float) -> Point:
+    """World position -> north-up map coordinates in canvas-sized units:
+    x grows eastward (world -y), y grows negative going south (world -x),
+    matching the canvas' own y-negative-downward convention."""
+    x0, x1, y0, y1 = bounds
+    return (CANVAS_W * (y0 - wy) / (y0 - y1), -CANVAS_H * (x0 - wx) / (x0 - x1))
+
+
+@dataclass
+class MapTransform:
+    """canvas = scale * normalized(world) + (tx, ty) for one uiMap."""
+
+    ui_map_id: int
+    bounds: MapBounds
+    scale: float
+    tx: float
+    ty: float
+    anchor_count: int = 0
+    residual: Optional[float] = None
+
+    def apply(self, wx: float, wy: float) -> Point:
+        ux, uy = _map_normalized(self.bounds, wx, wy)
+        return (self.scale * ux + self.tx, self.scale * uy + self.ty)
+
+
+@dataclass
+class MapCalibration:
+    ok: bool
+    transforms: dict[int, MapTransform] = field(default_factory=dict)
+    # uiMapID -> why it got no transform (shown so a missing path segment
+    # is explainable rather than mysterious).
+    skipped: dict[int, str] = field(default_factory=dict)
+    reason: Optional[str] = None
+
+    def summary(self) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "ok": self.ok,
+            "method": "per_uimap",
+            "anchor_count": sum(t.anchor_count for t in self.transforms.values()),
+        }
+        residuals = [t.residual for t in self.transforms.values() if t.residual is not None]
+        if residuals:
+            out["residual"] = round(max(residuals), 2)
+        if self.reason is not None:
+            out["reason"] = self.reason
+        if self.transforms:
+            out["maps"] = {
+                str(t.ui_map_id): {
+                    "anchor_count": t.anchor_count,
+                    "residual": round(t.residual, 2) if t.residual is not None else None,
+                    "scale": round(t.scale, 4),
+                    "translation": {"x": round(t.tx, 2), "y": round(t.ty, 2)},
+                }
+                for t in self.transforms.values()
+            }
+        if self.skipped:
+            out["uncalibrated_maps"] = {str(k): v for k, v in self.skipped.items()}
+        return out
+
+
+def _fit_scale_translation(pairs: list[tuple[Point, Point]]) -> Optional[tuple[float, float, float, float]]:
+    """Least-squares ``canvas = s * u + t`` over (u, canvas) pairs; returns
+    (s, tx, ty, rms) or None when the u points have no spread."""
+    n = len(pairs)
+    if n < 2:
+        return None
+    ux = sum(u[0] for u, _ in pairs) / n
+    uy = sum(u[1] for u, _ in pairs) / n
+    cx = sum(c[0] for _, c in pairs) / n
+    cy = sum(c[1] for _, c in pairs) / n
+    den = sum((u[0] - ux) ** 2 + (u[1] - uy) ** 2 for u, _ in pairs)
+    if den <= 1e-9:
+        return None
+    num = sum((u[0] - ux) * (c[0] - cx) + (u[1] - uy) * (c[1] - cy) for u, c in pairs)
+    s = num / den
+    tx, ty = cx - s * ux, cy - s * uy
+    rms = math.sqrt(sum((s * u[0] + tx - c[0]) ** 2 + (s * u[1] + ty - c[1]) ** 2
+                        for u, c in pairs) / n)
+    return s, tx, ty, rms
+
+
+def _fit_map(anchors: list[tuple[Point, Point]]) -> Optional[tuple[float, float, float, float, int]]:
+    """Robust scale+translation for one sub-map from (normalized_world,
+    canvas) anchors: every 2-anchor subset proposes a fit, the proposal
+    with the most inliers (ties: lowest RMS) is refit on its inliers, and
+    the result is accepted only with a positive scale (a negative one is a
+    point reflection, never a real map placement) and an RMS under the
+    gate. Returns (s, tx, ty, rms, inlier_count) or None.
+
+    Pair-based rather than least-squares-then-trim for the same reason as
+    _trim_outliers: with 3-5 anchors and one or two 100+ unit outliers, a
+    fit over all of them is dragged so far that the good anchors look
+    like the outliers (real case: Murder Row's main map, 5 anchors, where
+    a boss's companion pet and one patrolling mob were 130-360 units off
+    and the all-anchor fit had RMS 201; the best pair's 3 inliers fit to
+    RMS 13)."""
+    if len(anchors) < MIN_MAP_ANCHORS:
+        return None
+    best: Optional[tuple[int, float, list[tuple[Point, Point]]]] = None
+    for a, b in itertools.combinations(range(len(anchors)), 2):
+        proposal = _fit_scale_translation([anchors[a], anchors[b]])
+        if proposal is None or proposal[0] <= 0:
+            continue
+        s, tx, ty, _ = proposal
+        inliers = [
+            (u, c) for u, c in anchors
+            if math.dist((s * u[0] + tx, s * u[1] + ty), c) <= MAP_INLIER_DIST
+        ]
+        if len(inliers) < MIN_MAP_ANCHORS:
+            continue
+        refit = _fit_scale_translation(inliers)
+        if refit is None or refit[0] <= 0:
+            continue
+        key = (len(inliers), -refit[3])
+        if best is None or key > (best[0], -best[1]):
+            best = (len(inliers), refit[3], inliers)
+    if best is None:
+        return None
+    n_inliers, _, inliers = best
+    s, tx, ty, rms = _fit_scale_translation(inliers)  # type: ignore[misc]
+    gate = MAP_MAX_RESIDUAL_TWO_ANCHORS if n_inliers == 2 else MAP_MAX_RESIDUAL
+    if rms > gate:
+        return None
+    return s, tx, ty, rms, n_inliers
+
+
+def _guid_counts(pulls: list[ActualPull]) -> dict[int, int]:
+    """npc_id -> how many distinct units of it were engaged this run."""
+    guids: dict[int, set[str]] = {}
+    for pull in pulls:
+        for unit in pull.units:
+            if unit.npc_id is not None:
+                guids.setdefault(unit.npc_id, set()).add(unit.guid)
+    return {npc_id: len(g) for npc_id, g in guids.items()}
+
+
+def _seed_anchors_by_map(
+    pulls: list[ActualPull], data: DungeonData
+) -> dict[Optional[int], list[tuple[Point, Point]]]:
+    """uiMapID -> [(world_pos, canvas_pos)] for the same unambiguous
+    single-clone anchors as ``_seed_anchors`` (one per npc_id, first
+    engagement, never a summoned/respawning mob), grouped by the sub-map
+    the mob's position was reported on. ``None`` collects anchors whose
+    position came without a uiMapID."""
+    guid_counts = _guid_counts(pulls)
+    seen: set[int] = set()
+    out: dict[Optional[int], list[tuple[Point, Point]]] = {}
+    for pull in pulls:
+        for unit in pull.units:
+            if unit.npc_id is None or unit.first_pos is None or unit.npc_id in seen:
+                continue
+            enemy = data.enemy_by_npc_id(unit.npc_id)
+            if enemy is None or len(enemy.clones) != 1:
+                continue
+            if guid_counts.get(unit.npc_id, 0) > len(enemy.clones):
+                continue
+            seen.add(unit.npc_id)
+            clone = enemy.clones[0]
+            out.setdefault(unit.first_map_id, []).append((unit.first_pos, (clone.x, clone.y)))
+    return out
+
+
+# How long after CHALLENGE_MODE_START a player's first position still
+# counts as "standing at the entrance". The group is rooted in place for
+# the ~10s countdown and pulls straight from the door, so the earliest
+# sample inside this window is within a few yards of the entrance POI.
+ENTRANCE_WINDOW_S = 20.0
+
+
+def entrance_anchor(
+    data: DungeonData, position_samples: dict[str, list[list[float]]]
+) -> Optional[tuple[Point, Point, int]]:
+    """``(world_pos, canvas_pos, ui_map_id)`` pairing MDT's dungeonEntrance
+    POI with the earliest player position of the run, or None when either
+    side is missing/ambiguous. Every run has this anchor regardless of
+    which mobs were engaged, which is what lets a sub-map with a single
+    boss on it (Altar of Fangs' main map, real case) still calibrate."""
+    entrances = [p for pois in data.pois.values() for p in pois if p.type == "dungeonEntrance"]
+    if len(entrances) != 1:
+        return None
+    earliest: Optional[list[float]] = None
+    for samples in position_samples.values():
+        for s in samples:
+            if len(s) > 3 and s[3] and s[0] <= ENTRANCE_WINDOW_S:
+                if earliest is None or s[0] < earliest[0]:
+                    earliest = s
+    if earliest is None:
+        return None
+    poi = entrances[0]
+    return ((earliest[1], earliest[2]), (poi.x, poi.y), int(earliest[3]))
+
+
+def calibrate_maps(
+    pulls: list[ActualPull],
+    data: DungeonData,
+    map_bounds: dict[int, MapBounds],
+    extra_anchors: Optional[list[tuple[Point, Point, int]]] = None,
+) -> MapCalibration:
+    """Fit one MapTransform per uiMap that has MAP_CHANGE bounds and at
+    least MIN_MAP_ANCHORS usable anchors. ``ok`` when at least one sub-map
+    calibrates; sub-maps that don't are listed in ``skipped`` and their
+    positions simply aren't drawn (a partial overlay of correct paths beats
+    a complete overlay of wrong ones). ``extra_anchors`` are additional
+    ``(world_pos, canvas_pos, ui_map_id)`` correspondences from outside the
+    engaged-mob pool (see ``entrance_anchor``)."""
+    if not any(u.first_pos is not None for pull in pulls for u in pull.units):
+        return MapCalibration(ok=False, reason="no position data (advanced combat logging required)")
+
+    anchors_by_map = _seed_anchors_by_map(pulls, data)
+    for world, canvas, ui_map_id in extra_anchors or []:
+        anchors_by_map.setdefault(ui_map_id, []).append((world, canvas))
+    result = MapCalibration(ok=False)
+    for ui_map_id, anchors in anchors_by_map.items():
+        if ui_map_id is None:
+            continue
+        bounds = map_bounds.get(ui_map_id)
+        if bounds is None:
+            result.skipped[ui_map_id] = "no MAP_CHANGE bounds logged for this map"
+            continue
+        if len(anchors) < MIN_MAP_ANCHORS:
+            result.skipped[ui_map_id] = f"insufficient anchors ({len(anchors)})"
+            continue
+        normalized = [(_map_normalized(bounds, *w), c) for w, c in anchors]
+        fit = _fit_map(normalized)
+        if fit is None:
+            result.skipped[ui_map_id] = f"no consistent fit from {len(anchors)} anchors"
+            continue
+        s, tx, ty, rms, n = fit
+        result.transforms[ui_map_id] = MapTransform(
+            ui_map_id=ui_map_id, bounds=bounds, scale=s, tx=tx, ty=ty,
+            anchor_count=n, residual=rms,
+        )
+    if result.transforms:
+        result.ok = True
+    else:
+        result.reason = "insufficient anchors"
+    return result
+
+
 # --- Part 1: planned-map geometry (zero coordinate risk) -----------------
 
 
@@ -565,7 +885,12 @@ def plan_geometry(
         for i, clone in enumerate(enemy.clones, start=1):
             xs.append(clone.x)
             ys.append(clone.y)
-            plan_pull = plan_pull_of.get((enemy.enemy_idx, i))
+            # Routes name clones by MDT's own key (EnemyClone.idx), which
+            # diverges from list position past a deleted clone's hole --
+            # see mdt/extract._lua_int_items. Position is only the fallback
+            # for data extracted before that key was recorded.
+            clone_key = clone.idx if clone.idx is not None else i
+            plan_pull = plan_pull_of.get((enemy.enemy_idx, clone_key))
             enemies.append({
                 "npc_id": enemy.npc_id,
                 "name": enemy.name,
@@ -596,11 +921,11 @@ def plan_geometry(
         # No dungeon geometry at all (shouldn't normally happen -- data is
         # only present when there's at least dungeon metadata) -- fall back
         # to MDT's own hardcoded canvas as a reasonable default extent.
-        min_x, max_x, min_y, max_y = 0.0, 840.0, -555.0, 0.0
+        min_x, max_x, min_y, max_y = 0.0, CANVAS_W, -CANVAS_H, 0.0
     pad = max(20.0, 0.05 * max(max_x - min_x, max_y - min_y, 1.0))
 
     return {
-        "canvas": {"width": 840, "height": 555},
+        "canvas": {"width": int(CANVAS_W), "height": int(CANVAS_H)},
         "bounds": {
             "min_x": round(min_x - pad, 1), "max_x": round(max_x + pad, 1),
             "min_y": round(min_y - pad, 1), "max_y": round(max_y + pad, 1),
@@ -627,38 +952,83 @@ def build_map_report(
     player_names: dict[str, str],
     deaths: list[DeathRecord],
     run_start_ts: float,
+    map_bounds: Optional[dict[int, MapBounds]] = None,
 ) -> dict[str, Any]:
     """Assemble the full ``map`` report block: Part 1's planned-map geometry
     (always present) plus, when calibration succeeds, the fit parameters,
     each player's transformed (canvas-space) path, and canvas-space death
     markers. When calibration doesn't succeed, geometry is still returned
     plan-only, with ``calibration.reason`` explaining why there's no
-    player-path overlay."""
+    player-path overlay.
+
+    With ``map_bounds`` (the run's MAP_CHANGE rectangles, see
+    ``collect_map_bounds``) calibration is per sub-map -- the only model
+    that actually matches MDT's composite canvases -- and each position
+    sample is transformed by the fit for the uiMap it was recorded on
+    (``samples[i][3]``); samples on a sub-map without a fit are left out.
+    Without it, the legacy single-similarity fit is used."""
     geometry = plan_geometry(data, route, comparison)
-    calibration = calibrate(pulls, data)
-    geometry["calibration"] = calibration.summary()
+
+    # transform_for(sample) -> the transform to draw that sample with, or
+    # None to leave it out. Which one depends on the calibration mode.
+    if map_bounds:
+        entrance = entrance_anchor(data, position_samples)
+        map_cal = calibrate_maps(
+            pulls, data, map_bounds, extra_anchors=[entrance] if entrance else None,
+        )
+        geometry["calibration"] = map_cal.summary()
+
+        def transform_for(sample: list[float]):
+            ui_map_id = int(sample[3]) if len(sample) > 3 and sample[3] else None
+            return map_cal.transforms.get(ui_map_id)
+    else:
+        calibration = calibrate(pulls, data)
+        geometry["calibration"] = calibration.summary()
+
+        def transform_for(sample: list[float]):
+            return calibration.transform
 
     players_out: list[dict[str, Any]] = []
     deaths_out: list[dict[str, Any]] = []
-    if calibration.ok and calibration.transform is not None:
-        transform = calibration.transform
+    if geometry["calibration"].get("ok"):
         for guid, samples in position_samples.items():
             name = player_names.get(guid)
             if not name or not samples:
                 continue
-            path = []
+            # ``path`` is every drawable sample; ``segments`` is the same
+            # points split wherever a sample was left out (a sub-map with
+            # no fit) so the renderer doesn't bridge the hole with a
+            # straight line across the map -- which is exactly what a
+            # single polyline did on a real Murder Row report whose third
+            # sub-map had too few anchors.
+            path: list[list[float]] = []
+            segments: list[list[list[float]]] = []
+            current: list[list[float]] = []
             for s in samples:
+                transform = transform_for(s)
+                if transform is None:
+                    if current:
+                        segments.append(current)
+                        current = []
+                    continue
                 cx, cy = transform.apply(s[1], s[2])
-                path.append([s[0], round(cx, 1), round(cy, 1)])
-            players_out.append({"name": name, "guid": guid, "path": path})
+                point = [s[0], round(cx, 1), round(cy, 1)]
+                path.append(point)
+                current.append(point)
+            if current:
+                segments.append(current)
+            if path:
+                players_out.append({"name": name, "guid": guid, "path": path,
+                                    "segments": segments})
 
         for death in deaths:
-            samples = position_samples.get(death.player_guid) or []
+            samples = [s for s in (position_samples.get(death.player_guid) or [])
+                       if transform_for(s) is not None]
             t_rel = round(death.ts - run_start_ts, 1)
             nearest = _nearest_sample(samples, t_rel)
             if nearest is None:
                 continue
-            cx, cy = transform.apply(nearest[1], nearest[2])
+            cx, cy = transform_for(nearest).apply(nearest[1], nearest[2])
             deaths_out.append({
                 "player": player_names.get(death.player_guid) or death.player_name,
                 "t": t_rel, "x": round(cx, 1), "y": round(cy, 1),

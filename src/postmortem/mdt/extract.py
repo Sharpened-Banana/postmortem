@@ -275,17 +275,30 @@ def _find_assignment(text: str, pattern: str) -> Optional[int]:
     return m.end() if m else None
 
 
-def _lua_array(table: Any) -> list[Any]:
+def _lua_int_items(table: Any) -> list[tuple[int, Any]]:
+    """Every integer-keyed ``(key, value)`` of a parsed Lua table, in key
+    order -- gaps included.
+
+    MDT's clone lists are NOT contiguous arrays: when a clone is deleted
+    from the data its key is simply gone (``[1] .. [4], [6] .. [9]`` is
+    real, from Ruby Life Pools' Deepstone Earthshaper), and route presets
+    keep referring to the surviving clones by those original keys. The
+    previous "walk 1, 2, 3 ... until a key is missing" reading stopped
+    dead at the first hole and silently dropped every clone after it --
+    confirmed 2026-09-03 against the installed addon: 61 enemies across
+    13 dungeon files lost 507 clones that way (Ruby Life Pools' Earthbound
+    Guardian: 1 of 14 kept). Downstream that made the route map's
+    calibration anchor on mobs that were "unique" only because their
+    siblings had been thrown away, and shifted every post-gap clone's
+    positional index off from the key MDT's routes use.
+    """
     if not isinstance(table, dict):
         return []
-    out = []
-    idx = 1
-    while idx in table:
-        out.append(table[idx])
-        idx += 1
-    if not out:  # non-contiguous: fall back to sorted int keys
-        out = [table[k] for k in sorted(k for k in table if isinstance(k, int))]
-    return out
+    return [(k, table[k]) for k in sorted(k for k in table if isinstance(k, int))]
+
+
+def _lua_array(table: Any) -> list[Any]:
+    return [v for _, v in _lua_int_items(table)]
 
 
 def extract_dungeon_file(path: Path) -> Optional[dict[str, Any]]:
@@ -332,9 +345,14 @@ def extract_dungeon_file(path: Path) -> Optional[dict[str, Any]]:
             if not isinstance(e, dict) or "id" not in e:
                 continue
             clones = []
-            for clone in _lua_array(e.get("clones")):
+            for clone_idx, clone in _lua_int_items(e.get("clones")):
                 if isinstance(clone, dict):
                     clones.append({
+                        # MDT's own key for this clone -- what a route
+                        # preset's pull refers to. Not the same as this
+                        # list's position once a key is missing (see
+                        # _lua_int_items).
+                        "idx": clone_idx,
                         "x": clone.get("x"),
                         "y": clone.get("y"),
                         "g": clone.get("g"),
