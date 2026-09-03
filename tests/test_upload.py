@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import io
 import json
+import ssl
 import urllib.error
 
 import pytest
@@ -91,7 +92,7 @@ class TestUploadReport:
     def test_success_returns_parsed_response(self, monkeypatch):
         response_body = {"ok": True, "run_id": 42, "url": "/runs/42"}
 
-        def fake_urlopen(request, timeout=None):
+        def fake_urlopen(request, timeout=None, context=None):
             assert request.get_header("X-upload-token") == "tok-123"
             assert request.get_header("Content-type") == "application/json"
             return _FakeHTTPResponse(json.dumps(response_body).encode("utf-8"))
@@ -104,7 +105,7 @@ class TestUploadReport:
     def test_strips_trailing_slash_and_appends_api_runs(self, monkeypatch):
         seen = {}
 
-        def fake_urlopen(request, timeout=None):
+        def fake_urlopen(request, timeout=None, context=None):
             seen["url"] = request.full_url
             return _FakeHTTPResponse(json.dumps({"ok": True, "url": "/runs/1"}).encode())
 
@@ -115,7 +116,7 @@ class TestUploadReport:
     def test_default_token_loads_or_creates_one(self, monkeypatch, isolated_config_dir):
         seen = {}
 
-        def fake_urlopen(request, timeout=None):
+        def fake_urlopen(request, timeout=None, context=None):
             seen["token"] = request.get_header("X-upload-token")
             return _FakeHTTPResponse(json.dumps({"ok": True, "url": "/runs/1"}).encode())
 
@@ -127,7 +128,7 @@ class TestUploadReport:
     def test_http_error_with_json_body_returns_parsed_body(self, monkeypatch):
         error_body = {"ok": False, "error": "duplicate run"}
 
-        def fake_urlopen(request, timeout=None):
+        def fake_urlopen(request, timeout=None, context=None):
             raise urllib.error.HTTPError(
                 request.full_url, 409, "Conflict", hdrs=None,
                 fp=io.BytesIO(json.dumps(error_body).encode("utf-8")),
@@ -138,7 +139,7 @@ class TestUploadReport:
         assert result == error_body
 
     def test_http_error_with_non_json_body_falls_back(self, monkeypatch):
-        def fake_urlopen(request, timeout=None):
+        def fake_urlopen(request, timeout=None, context=None):
             raise urllib.error.HTTPError(
                 request.full_url, 500, "Internal Server Error", hdrs=None,
                 fp=io.BytesIO(b"<html>oops</html>"),
@@ -149,7 +150,7 @@ class TestUploadReport:
         assert result == {"ok": False, "error": "HTTP 500: Internal Server Error"}
 
     def test_url_error_returns_fallback_dict(self, monkeypatch):
-        def fake_urlopen(request, timeout=None):
+        def fake_urlopen(request, timeout=None, context=None):
             raise urllib.error.URLError("nodename nor servname provided")
 
         monkeypatch.setattr(upload.urllib.request, "urlopen", fake_urlopen)
@@ -157,12 +158,26 @@ class TestUploadReport:
         assert result == {"ok": False,
                            "error": "nodename nor servname provided"}
 
+    def test_passes_a_certifi_backed_ssl_context_to_urlopen(self, monkeypatch):
+        # Real bug (2026-09-03): "Upload to site" hit
+        # CERTIFICATE_VERIFY_FAILED on a packaged desktop build because
+        # urlopen()'s default context couldn't find a CA trust store.
+        seen = {}
+
+        def fake_urlopen(request, timeout=None, context=None):
+            seen["context"] = context
+            return _FakeHTTPResponse(json.dumps({"ok": True, "url": "/runs/1"}).encode())
+
+        monkeypatch.setattr(upload.urllib.request, "urlopen", fake_urlopen)
+        upload.upload_report({}, "https://example.com", token="tok")
+        assert isinstance(seen["context"], ssl.SSLContext)
+
     def test_never_raises_on_any_of_the_above(self, monkeypatch):
         # Belt-and-suspenders: every branch above already asserts a
         # returned dict rather than a raised exception, but drive one
         # more failure mode (bad JSON in an otherwise-2xx response)
         # through the same "must return, never raise" contract.
-        def fake_urlopen(request, timeout=None):
+        def fake_urlopen(request, timeout=None, context=None):
             return _FakeHTTPResponse(b"not json")
 
         monkeypatch.setattr(upload.urllib.request, "urlopen", fake_urlopen)
@@ -197,7 +212,7 @@ class TestSiteBaseUrl:
     def test_upload_from_the_upload_page_url_hits_api_runs(self, monkeypatch):
         seen = {}
 
-        def fake_urlopen(request, timeout=None):
+        def fake_urlopen(request, timeout=None, context=None):
             seen["url"] = request.full_url
             return _FakeHTTPResponse(json.dumps({"ok": True, "url": "/runs/16"}).encode())
 
