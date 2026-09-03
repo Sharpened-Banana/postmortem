@@ -395,6 +395,50 @@ class TestOutlierTrimming:
         else:
             assert result.reason == "residual too high"
 
+    def test_enrichment_recovers_using_a_good_repeat_of_a_corrupted_anchor(self):
+        # New capability (2026-09-03): a real production dungeon has
+        # wave-spawning trash with only ONE MDT-marked clone that gets
+        # engaged in several different rooms across a run -- only one of
+        # those engagements can be geometrically correct, but
+        # _icp_refine's baseline (first-occurrence-only, by design -- see
+        # its own docstring) has no way to know which up front. Real run
+        # (Altar of Fangs +7, 2026-09-02): calibration failed outright
+        # (residual 147) even though several of those npc_ids' *later*
+        # engagements would have fit perfectly. _trim_outliers now also
+        # considers every OTHER real engagement of an already-known
+        # npc_id as an extra RANSAC candidate, so a later good engagement
+        # can rescue a calibration that would otherwise fail because the
+        # *first* engagement of too many npc_ids happened to be corrupted
+        # -- same scenario as test_too_many_bad_anchors_still_fails_safe,
+        # except each corrupted npc_id also gets a good second engagement.
+        dungeon = _dungeon_with_n_solo_clones(10)
+        good_pos = {
+            i: _world_for(50.0 + (i % 5) * 150.0, -50.0 - (i // 5) * 150.0)
+            for i in range(10)
+        }
+        pull1_units = [_unit(910000 + i, good_pos[i], f"{i:04d}") for i in range(10)]
+        corrupted = (1, 3, 5, 7, 9)
+        for i in corrupted:
+            wx, wy = good_pos[i]
+            pull1_units[i] = _unit(910000 + i, (wx + 500, wy - 500), f"{i:04d}-bad")
+        pull1 = ActualPull(index=1, units=pull1_units)
+
+        pull2 = ActualPull(index=2, units=[
+            _unit(910000 + i, good_pos[i], f"{i:04d}-good") for i in corrupted
+        ])
+
+        # Without the good second engagement, this exact corruption
+        # pattern is test_too_many_bad_anchors_still_fails_safe and must
+        # fail -- confirm that's still true (regression guard for this
+        # test's own premise) before checking that adding pull2 recovers it.
+        baseline = calibrate([pull1], dungeon)
+        assert baseline.ok is False
+
+        result = calibrate([pull1, pull2], dungeon)
+        assert result.ok is True
+        assert result.residual < MAX_RESIDUAL
+        assert result.anchor_count >= MIN_ANCHORS_AFTER_TRIM
+
 
 class TestPlanGeometry:
     def test_geometry_without_route(self):
