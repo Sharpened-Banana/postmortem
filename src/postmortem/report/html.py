@@ -41,6 +41,12 @@ th, td { text-align: left; padding: 5px 10px; border-bottom: 1px solid var(--lin
 th { color: var(--dim); font-weight: 600; font-size: 12px;
   text-transform: uppercase; letter-spacing: .05em; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+/* Long free-text cells (matched packs, deviations) wrap instead of forcing
+   the table thousands of pixels wide -- which starved the one wrapping
+   column next to them into a sliver hundreds of lines tall. */
+td.txt { white-space: normal; min-width: 240px; vertical-align: top; }
+td.txt .pk { display: block; }
+td.txt .pk b { color: var(--dim); font-weight: 600; margin-right: 4px; }
 .wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line);
   border-radius: 8px; padding: 6px 4px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -252,15 +258,15 @@ function comparison() {
     if (m.untracked.length) dev.push(`<span class="dim">adds: ${npcs(m.untracked)}</span>`);
     return `<tr><td class="num">${m.actual_pull}</td>
       <td class="num">${m.primary_plan_pull ?? '<span class="dev-off">—</span>'}</td>
-      <td>${Object.entries(m.matched).map(([k, v]) => `#${k}: ${npcs(v)}`).join("; ") || '<span class="dim">nothing matched</span>'}</td>
-      <td style="white-space:normal">${dev.join("<br>") || '<span class="ok">on plan</span>'}</td></tr>`;
+      <td class="txt">${Object.entries(m.matched).map(([k, v]) => `<span class="pk"><b>#${k}</b>${npcs(v)}</span>`).join("") || '<span class="dim">nothing matched</span>'}</td>
+      <td class="txt">${dev.join("<br>") || '<span class="ok">on plan</span>'}</td></tr>`;
   }).join("");
   let missed = "";
   const missedEntries = Object.entries(c.missed || {});
   if (missedEntries.length)
     missed = `<h2>Planned but never engaged</h2><div class="wrap"><table>
       <tr><th>Plan pull</th><th>Mobs</th></tr>
-      ${missedEntries.map(([k, v]) => `<tr><td class="num">${k}</td><td>${npcs(v)}</td></tr>`).join("")}
+      ${missedEntries.map(([k, v]) => `<tr><td class="num">${k}</td><td class="txt">${npcs(v)}</td></tr>`).join("")}
       </table></div>`;
   return `<h2>Route vs actual (${R.route ? esc(R.route.name) : ""})</h2>
     <div class="wrap"><table>
@@ -273,7 +279,7 @@ function routeOnly() {
   return `<div class="wrap"><table><tr><th class="num">Plan pull</th><th class="num">Forces</th><th>Mobs</th></tr>
     ${R.route.pulls.map(p => `<tr><td class="num">${p.pull}</td>
       <td class="num">${p.forces ?? ""}${p.forces_pct_cumulative != null ? ` <span class="dim">(${p.forces_pct_cumulative}%)</span>` : ""}</td>
-      <td>${npcs(p.enemies || [])}</td></tr>`).join("")}</table></div>`;
+      <td class="txt">${npcs(p.enemies || [])}</td></tr>`).join("")}</table></div>`;
 }
 
 function mapSection() {
@@ -315,12 +321,16 @@ function mapSection() {
   const calibrated = m.calibration && m.calibration.ok;
   let paths = "", deathMarks = "";
   if (calibrated) {
-    paths = (m.players||[]).map((p, i) => {
-      const pts = p.path.map(pt => `${pt[1]},${pt[2]}`).join(" ");
+    // One polyline per contiguous segment (p.segments; older reports only
+    // have the flat p.path) so a stretch with no drawable samples -- a
+    // sub-map that didn't calibrate -- is a gap, not a straight line
+    // across the dungeon.
+    paths = (m.players||[]).map((p, i) => (p.segments || [p.path]).map(seg => {
+      const pts = seg.map(pt => `${pt[1]},${pt[2]}`).join(" ");
       return `<polyline points="${pts}" fill="none" stroke="${playerColor(i)}"
         stroke-width="${(Math.max(w, h) * 0.004).toFixed(2)}" stroke-linejoin="round"
         opacity="0.8"><title>${esc(p.name)}'s path</title></polyline>`;
-    }).join("");
+    }).join("")).join("");
     const s = Math.max(w, h) * 0.014;
     deathMarks = (m.deaths||[]).map(d => `<g stroke="var(--bad)" stroke-width="${(s*0.35).toFixed(2)}">
         <line x1="${(d.x-s).toFixed(1)}" y1="${(d.y-s).toFixed(1)}" x2="${(d.x+s).toFixed(1)}" y2="${(d.y+s).toFixed(1)}" />
