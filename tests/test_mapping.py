@@ -248,6 +248,33 @@ class TestCalibrate:
         assert result.ok is False
         assert result.reason in ("degenerate anchor geometry", "insufficient anchors")
 
+    def test_icp_ignores_a_later_bad_reengagement_of_the_same_npc(self):
+        # Real bug (2026-09-03): _icp_refine's correspondence dict was
+        # keyed only by npc_id and rebuilt from a fresh scan of every pull
+        # on each refinement iteration, so a *second*, unrelated
+        # engagement of the same npc_id (e.g. a wave-spawning add pulled
+        # again far from its marked clone) silently overwrote an
+        # already-good, first-seen anchor -- dragging a real production
+        # run's residual from ~80 to ~150. NPC_SOLO_A's first engagement
+        # here matches its clone exactly; its second, in a later pull, is
+        # wildly off and must be ignored by the refinement.
+        dungeon = _dungeon_with_clones()
+        good_pos = _world_for(100.0, -100.0)
+        bad_pos = (good_pos[0] + 1000.0, good_pos[1] - 1000.0)
+        pull1 = ActualPull(index=1, units=[
+            _unit(NPC_SOLO_A, good_pos, "0001"),
+            _unit(NPC_SOLO_B, _world_for(300.0, -150.0), "0002"),
+            _unit(NPC_SOLO_C, _world_for(500.0, -350.0), "0003"),
+            _unit(NPC_SOLO_D, _world_for(200.0, -450.0), "0004"),
+        ])
+        pull2 = ActualPull(index=2, units=[
+            _unit(NPC_SOLO_A, bad_pos, "0005"),
+        ])
+        result = calibrate([pull1, pull2], dungeon)
+        assert result.ok is True
+        assert result.residual < 1.0
+        assert result.transform.scale == pytest.approx(_S, rel=1e-3)
+
     def test_noisy_anchors_with_low_residual_still_pass_within_threshold(self):
         dungeon = _dungeon_with_clones()
         # nudge one anchor's world position slightly off its "true" inverse
