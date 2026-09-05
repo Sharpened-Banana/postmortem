@@ -1,171 +1,203 @@
 {
  "spells": {
-  "388862": {
-   "name": "Surge",
+  "1294557": {
+   "name": "Piercing Hiss",
    "interruptible": true
   },
-  "388392": {
-   "name": "Monotonous Lecture",
+  "1222795": {
+   "name": "Envenom",
    "interruptible": true
   },
-  "1270294": {
-   "name": "Mystic Brand",
+  "1289416": {
+   "name": "Envenom",
    "interruptible": true
   },
-  "1279627": {
-   "name": "Arcane Bolt",
+  "1307567": {
+   "name": "Mass Envenom",
    "interruptible": true
   },
-  "468966": {
-   "name": "Polymorph",
+  "1310358": {
+   "name": "Toxic Atrophy",
    "interruptible": true
   },
-  "468962": {
-   "name": "Arcane Bolt",
+  "1310666": {
+   "name": "Toxic Atrophy",
    "interruptible": true
   },
-  "1254294": {
-   "name": "Pyroblast",
+  "1297696": {
+   "name": "Healing Breeze",
    "interruptible": true
   },
-  "1256015": {
-   "name": "Shadow Bolt",
+  "1238687": {
+   "name": "Feast of Misery",
    "interruptible": true
   },
-  "1264693": {
-   "name": "Terror Wave",
+  "1309919": {
+   "name": "Frigid Roar",
    "interruptible": true
   },
-  "1256008": {
+  "1297778": {
+   "name": "Arc Lightning",
+   "interruptible": true
+  },
+  "1305810": {
+   "name": "Arc Lightning",
+   "interruptible": true
+  },
+  "1246687": {
+   "name": "Lightning Bolt",
+   "interruptible": true
+  },
+  "1290205": {
+   "name": "Lightning Bolt",
+   "interruptible": true
+  },
+  "1291262": {
+   "name": "Lightning Bolt",
+   "interruptible": true
+  },
+  "1242860": {
+   "name": "Echoing Maul",
+   "interruptible": true
+  },
+  "269972": {
+   "name": "Hex Volley",
+   "interruptible": true
+  },
+  "270901": {
+   "name": "Unholy Mending",
+   "interruptible": true
+  },
+  "270920": {
+   "name": "Bind Soul",
+   "interruptible": true
+  },
+  "270492": {
    "name": "Hex",
    "interruptible": true
   },
-  "1263292": {
-   "name": "Shrink",
+  "267763": {
+   "name": "Wretched Discharge",
    "interruptible": true
   },
-  "1259255": {
-   "name": "Spirit Rend",
+  "269369": {
+   "name": "Deathly Roar",
    "interruptible": true
   },
-  "1264327": {
-   "name": "Shadowfrost Blast",
+  "1295125": {
+   "name": "Spectral Bolt",
    "interruptible": true
   },
-  "1257716": {
-   "name": "Reanimation",
+  "267273": {
+   "name": "Poison Nova",
    "interruptible": true
   },
-  "1285445": {
-   "name": "Arcane Explosion",
+  "371984": {
+   "name": "Frostbolt",
    "interruptible": true
   },
-  "1262510": {
-   "name": "Umbral Bolt",
+  "384194": {
+   "name": "Cinderbolt",
    "interruptible": true
   },
-  "1249801": {
-   "name": "Arcing Mana",
+  "1305955": {
+   "name": "Fiery Blast",
    "interruptible": true
   },
-  "1282722": {
-   "name": "Nullify",
+  "385310": {
+   "name": "Storm Bolt",
    "interruptible": true
   },
-  "1263892": {
-   "name": "Holy Bolt",
+  "392576": {
+   "name": "Thunder Blast",
    "interruptible": true
   },
-  "1257595": {
-   "name": "Divine Guile",
+  "373017": {
+   "name": "Blaze Volley",
    "interruptible": true
   },
-  "1271074": {
-   "name": "Icy Blast",
+  "381516": {
+   "name": "Interrupting Cloudburst",
    "interruptible": true
   },
-  "1271479": {
-   "name": "Netherburst",
+  "1301834": {
+   "name": "Light Bolt Volley",
    "interruptible": true
   },
-  "1258436": {
-   "name": "Icebolt",
+  "1235616": {
+   "name": "Light Bolt",
    "interruptible": true
   },
-  "1278893": {
-   "name": "Death Bolt",
+  "1238063": {
+   "name": "Light Bolt",
    "interruptible": true
   },
-  "1262941": {
-   "name": "Plague Bolt",
+  "1238294": {
+   "name": "Disorienting Screech",
    "interruptible": true
   },
-  "1262523": {
-   "name": "Summon Voidcaller",
+  "1238232": {
+   "name": "Seed Shot",
    "interruptible": true
   },
-  "1277339": {
-   "name": "Shadowmend",
+  "1247669": {
+   "name": "Lightspore Shot",
    "interruptible": true
   },
-  "1262526": {
-   "name": "Abyssal Enhancement",
+  "1298899": {
+   "name": "Demoralizing Shout",
    "interruptible": true
   },
-  "248831": {
-   "name": "Dread Screech",
+  "1228176": {
+   "name": "Lava Bolt",
    "interruptible": true
   },
-  "244750": {
-   "name": "Mind Blast",
+  "1299938": {
+   "name": "Shadowbolt Volley",
    "interruptible": true
   },
-  "1255377": {
-   "name": "Repel",
+  "1249621": {
+   "name": "Violent Sand",
    "interruptible": true
   },
-  "152953": {
-   "name": "Blinding Light",
+  "1310324": {
+   "name": "Mending Void",
    "interruptible": true
   },
-  "1254669": {
-   "name": "Solar Bolt",
+  "1216571": {
+   "name": "Fel Missiles",
    "interruptible": true
   },
-  "154396": {
-   "name": "Solar Blast",
+  "1201554": {
+   "name": "Seduction",
    "interruptible": true
   },
-  "1216135": {
-   "name": "Spirit Bolt",
+  "1258537": {
+   "name": "Summon Wyrms",
    "interruptible": true
   },
-  "1216819": {
-   "name": "Fungal Bolt",
+  "1264095": {
+   "name": "Mirror Images",
    "interruptible": true
   },
-  "473794": {
-   "name": "Poison Blades",
+  "1223204": {
+   "name": "Felfire Burst",
    "interruptible": true
   },
-  "473657": {
-   "name": "Shadow Bolt",
+  "1214922": {
+   "name": "Fel Rage",
    "interruptible": true
   },
-  "473668": {
-   "name": "Pulsing Shriek",
+  "1214980": {
+   "name": "Health Funnel",
    "interruptible": true
   },
-  "1251981": {
-   "name": "Chain Lightning",
-   "interruptible": true
-  },
-  "472724": {
-   "name": "Shadow Bolt",
+  "474375": {
+   "name": "Chaos Bolt",
    "interruptible": true
   }
  },
  "source": "method.gg",
- "season": "Midnight S1",
- "source_version": "2026-04-28"
+ "season": "Midnight (current pool)",
+ "source_version": "2026-09-05"
 }

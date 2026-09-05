@@ -1,0 +1,60 @@
+{
+ "source": "method.gg", "season": "Midnight (current pool)", "version": "2026-09-05",
+ "dungeons": [
+  {"name": "Altar of Fangs", "abilities": [
+   {"npc_name": "Primal Serpent", "spell_name": "Piercing Hiss", "category": "interrupt"},
+   {"npc_name": "High Evolutionist", "spell_name": "Envenom", "category": "interrupt"},
+   {"npc_name": "Ula'tek's Chosen", "spell_name": "Mass Envenom", "category": "interrupt"},
+   {"npc_name": "The Writhing Coil", "spell_name": "Toxic Atrophy", "category": "interrupt"}]},
+  {"name": "Den of Nalorakk", "abilities": [
+   {"npc_name": "Earthwhisper Tender", "spell_name": "Healing Breeze", "category": "interrupt"},
+   {"npc_name": "Spirit of Hunger", "spell_name": "Feast of Misery", "category": "interrupt"},
+   {"npc_name": "Frigid Mauler", "spell_name": "Frigid Roar", "category": "interrupt"},
+   {"npc_name": "Avatar of Determination", "spell_name": "Arc Lightning", "category": "interrupt"},
+   {"npc_name": "Stormbound Mystic", "spell_name": "Arc Lightning", "category": "interrupt"},
+   {"npc_name": "Loa Speaker Nanea", "spell_name": "Lightning Bolt", "category": "interrupt"},
+   {"npc_name": "Nalorakk", "spell_name": "Echoing Maul", "category": "interrupt"}]},
+  {"name": "Kings' Rest", "abilities": [
+   {"npc_name": "Risen Hexer", "spell_name": "Hex Volley", "category": "interrupt"},
+   {"npc_name": "Seneschal M'bara", "spell_name": "Unholy Mending", "category": "interrupt"},
+   {"npc_name": "Queen Wasi", "spell_name": "Bind Soul", "category": "interrupt"},
+   {"npc_name": "Phantom Hex Priest", "spell_name": "Hex", "category": "interrupt"},
+   {"npc_name": "Half-Finished Mummy", "spell_name": "Wretched Discharge", "category": "interrupt"},
+   {"npc_name": "Reban", "spell_name": "Deathly Roar", "category": "interrupt"},
+   {"npc_name": "Phantom Hex Priest", "spell_name": "Spectral Bolt", "category": "interrupt"},
+   {"npc_name": "Everyone", "spell_name": "Poison Nova", "category": "interrupt"}]},
+  {"name": "Ruby Life Pools", "abilities": [
+   {"npc_name": "Flashfrost Chillweaver", "spell_name": "Frostbolt", "category": "interrupt"},
+   {"npc_name": "Primalist Cinderweaver", "spell_name": "Cinderbolt", "category": "interrupt"},
+   {"npc_name": "Blazebound Destroyer", "spell_name": "Fiery Blast", "category": "interrupt"},
+   {"npc_name": "Ruinous Stormbringer", "spell_name": "Storm Bolt", "category": "interrupt"},
+   {"npc_name": "Tempest Channeler", "spell_name": "Thunder Blast", "category": "interrupt"},
+   {"npc_name": "Kokia Blazehoof", "spell_name": "Blaze Volley", "category": "interrupt"},
+   {"npc_name": "Erkhart Stormvein", "spell_name": "Interrupting Cloudburst", "category": "interrupt"}]},
+  {"name": "The Blinding Vale", "abilities": [
+   {"npc_name": "Radiant Spellsower", "spell_name": "Light Bolt Volley", "category": "interrupt"},
+   {"npc_name": "Radiant Spellsower", "spell_name": "Light Bolt", "category": "interrupt"},
+   {"npc_name": "Lightfeather Petalwing", "spell_name": "Disorienting Screech", "category": "interrupt"},
+   {"npc_name": "Leafy Grovecrawler", "spell_name": "Seed Shot", "category": "interrupt"},
+   {"npc_name": "Lightblossom Trinity", "spell_name": "Light Bolt", "category": "interrupt"},
+   {"npc_name": "Ziekket", "spell_name": "Lightspore Shot", "category": "interrupt"}]},
+  {"name": "Voidscar Arena", "abilities": [
+   {"npc_name": "Dominated Brawler", "spell_name": "Demoralizing Shout", "category": "interrupt"},
+   {"npc_name": "Enthralled Shaman", "spell_name": "Lava Bolt", "category": "interrupt"},
+   {"npc_name": "Voidtouched Magi", "spell_name": "Shadowbolt Volley", "category": "interrupt"},
+   {"npc_name": "Angry Krolusk", "spell_name": "Violent Sand", "category": "interrupt"},
+   {"npc_name": "Killvore Screamer", "spell_name": "Mass Shriek", "category": "interrupt"},
+   {"npc_name": "Voidminder", "spell_name": "Mending Void", "category": "interrupt"}]},
+  {"name": "Murder Row", "abilities": [
+   {"npc_name": "Felonious Mage", "spell_name": "Fel Missiles", "category": "interrupt"},
+   {"npc_name": "Seductive Sayaad", "spell_name": "Seduction", "category": "interrupt"},
+   {"npc_name": "Massive Felwyrm", "spell_name": "Summon Wyrms", "category": "interrupt"},
+   {"npc_name": "Kystia Manaheart", "spell_name": "Mirror Images", "category": "interrupt"},
+   {"npc_name": "Unleashed Imp", "spell_name": "Felfire Burst", "category": "interrupt"},
+   {"npc_name": "Wrathguard Flayer", "spell_name": "Fel Rage", "category": "interrupt"},
+   {"npc_name": "Fel Invoker", "spell_name": "Health Funnel", "category": "interrupt"},
+   {"npc_name": "Doomguard", "spell_name": "Doom Bolt", "category": "interrupt"},
+   {"npc_name": "Lithiel Cinderfury", "spell_name": "Chaos Bolt", "category": "interrupt"},
+   {"npc_name": "Wild Imp", "spell_name": "Felfire Burst", "category": "interrupt"}]}
+ ]
+}

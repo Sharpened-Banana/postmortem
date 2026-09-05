@@ -6,9 +6,22 @@ built from other people's work and carry their own license.
 ## `src/postmortem/data/interrupt_data.json`
 
 Built by `postmortem build-interrupt-data` (see `cli.py`) from
-[albvar/mplus-interrupts](https://github.com/albvar/mplus-interrupts),
-which is itself sourced from [Method.gg](https://www.method.gg/)'s dungeon
-guides and enriched against Wowhead's spell/NPC data.
+`src/postmortem/data/method_interrupts_source.json`, which records which
+enemy abilities [Method.gg](https://www.method.gg/)'s dungeon guides mark
+as requiring an interrupt, for the current Mythic+ dungeon pool. Only
+ability *names* are taken from those guides; the spell ids are resolved
+from real combat logs by `--resolve-from`, because guide-published ids
+routinely point at an ability's damage component rather than its
+interruptible cast (Fel Missiles is listed as 1216570, the damage; the
+cast that can actually be interrupted is 1216571). Anything whose name
+cannot be resolved against a real log is omitted rather than guessed.
+
+An earlier version of this file was built from
+[albvar/mplus-interrupts](https://github.com/albvar/mplus-interrupts)
+(MIT, notice retained below). That database covers a previous season's
+dungeon pool -- verified 2026-09-05 against 13 real runs, it matched zero
+of 264 observed casts -- so it is no longer the source, but its schema is
+what `build-interrupt-data` still reads.
 
 ```
 MIT License
