@@ -223,10 +223,21 @@ end
 -- Debug mode starts on PLAYER_LOGIN (not ADDON_LOADED): by then every
 -- module file has loaded and registered its frame, MDT's SavedVariables
 -- (the route source) are in, and the UI is ready to draw the overlay.
+--
+-- Deliberately does NOT call self:UnregisterEvent("PLAYER_LOGIN") here --
+-- Info.lua's firstLoadFrame hit this exact real, confirmed in-game error
+-- (BugSack: "[ADDON_ACTION_FORBIDDEN] AddOn 'Postmortem' tried to call
+-- the protected function 'Frame:UnregisterEvent()'") from unregistering
+-- inside a PLAYER_LOGIN handler specifically -- see that file's own
+-- comment on this, missed here on 2026-09-04 and reproduced live
+-- (BugSack, 2026-09-05). PLAYER_LOGIN only ever fires once per UI load
+-- and a fresh /reload recreates this whole frame from scratch anyway, so
+-- leaving the registration in place costs nothing and avoids the taint
+-- issue entirely rather than just working around it, same reasoning as
+-- Info.lua's firstLoadFrame.
 local loginFrame = CreateFrame("Frame")
 loginFrame:RegisterEvent("PLAYER_LOGIN")
-loginFrame:SetScript("OnEvent", function(self)
-  self:UnregisterEvent("PLAYER_LOGIN")
+loginFrame:SetScript("OnEvent", function()
   if MA:IsDebugMode() then
     C_Timer.After(2, function() MA:Debug_Start() end)
   end

@@ -22,7 +22,10 @@ from conftest import (
 
 from postmortem.analysis.avoidable import AvoidableData
 from postmortem.analysis.compare import compare_route
-from postmortem.analysis.interruptibility import InterruptibilityData
+from postmortem.analysis.interruptibility import (
+    KNOWN_UNINTERRUPTIBLE_SPELL_IDS,
+    InterruptibilityData,
+)
 from postmortem.analysis.pulls import ActualPull, UnitEngagement, detect_pulls
 from postmortem.analysis.run_analyzer import (
     _cc_summary,
@@ -593,6 +596,54 @@ class TestEnemyCastSummary:
         assert result["kick_efficiency_pct"] == 42.9
 
 
+class TestEnemyCastSummaryKnownUninterruptible:
+    """A weekly M+ affix mechanic (see KNOWN_UNINTERRUPTIBLE_SPELL_IDS) is
+    excluded unconditionally -- confirmed real, 2026-09-05: "Xal'atath's
+    Bargain: Devour" (465051) showed 0 kicked / 19-20 landed in two real
+    reports the same week, cluttering the table with something no kick
+    could ever have stopped."""
+
+    AFFIX_SPELL_ID = next(iter(KNOWN_UNINTERRUPTIBLE_SPELL_IDS))
+
+    def test_excluded_even_with_no_interrupt_data_at_all(self):
+        stats = RunStats(enemy_cast_outcomes={
+            self.AFFIX_SPELL_ID: {"name": "Affix Mechanic", "kicked": 0, "landed": 20, "expired": 0},
+            111: {"name": "Normal Cast", "kicked": 1, "landed": 1, "expired": 0},
+        })
+        result = _enemy_cast_summary(stats)
+        names = [s["name"] for s in result["spells"]]
+        assert names == ["Normal Cast"]
+
+    def test_excluded_even_if_interrupt_data_would_otherwise_confirm_it_true(self):
+        # The hardcoded exclusion wins regardless of what any loaded
+        # interrupt_data says -- this is a design fact, not a guess a
+        # community file could contradict.
+        stats = RunStats(enemy_cast_outcomes={
+            self.AFFIX_SPELL_ID: {"name": "Affix Mechanic", "kicked": 0, "landed": 20, "expired": 0},
+        })
+        interrupt_data = InterruptibilityData(spells={
+            self.AFFIX_SPELL_ID: {"name": "Affix Mechanic", "interruptible": True},
+        })
+        result = _enemy_cast_summary(stats, interrupt_data)
+        assert result["spells"] == []
+
+    def test_never_kicked_affix_cast_does_not_affect_efficiency(self):
+        """Confirmed against a real report (2026-09-05, Murder Row): this
+        spell was never counted toward kick_efficiency_pct even before
+        this exclusion existed (kicked=0 already skipped the old
+        heuristic's counting), so removing it from the table must not
+        change the percentage -- only visual clutter goes away."""
+        stats = RunStats(enemy_cast_outcomes={
+            self.AFFIX_SPELL_ID: {"name": "Affix Mechanic", "kicked": 0, "landed": 20, "expired": 0},
+            222: {"name": "Kicked Once", "kicked": 1, "landed": 1, "expired": 0},
+        })
+        without_affix = _enemy_cast_summary(RunStats(enemy_cast_outcomes={
+            222: {"name": "Kicked Once", "kicked": 1, "landed": 1, "expired": 0},
+        }))
+        with_affix = _enemy_cast_summary(stats)
+        assert with_affix["kick_efficiency_pct"] == without_affix["kick_efficiency_pct"] == 50.0
+
+
 class TestEnemyCastSummaryStealable:
     """The ``stealable`` flag (see stealable.py) is independent of
     interrupt_data/kick efficiency -- purely a display tag with no effect
@@ -776,6 +827,19 @@ class TestAnalyzeRun:
         kicks = payload["kick_value"]
         assert kicks["total_estimated_prevented_damage"] == 245000
         assert kicks["total_estimated_prevented_healing"] == 80000
+        # The two summary tiles (damage, enemy healing) must together
+        # equal the players table's combined "Kick prev. (dmg+heal)"
+        # column. Real report (2026-09-05): only the damage tile existed,
+        # so a run whose kicks mostly stopped enemy *healing* showed
+        # ~2.11m in the summary against ~7.94m added up across the player
+        # rows -- same underlying numbers, two different subsets, no way
+        # for a reader to reconcile them.
+        column_total = sum(
+            (p.get("kick_prevented_damage") or 0) + (p.get("kick_prevented_healing") or 0)
+            for p in payload["players"]
+        )
+        assert column_total == (kicks["total_estimated_prevented_damage"]
+                                + kicks["total_estimated_prevented_healing"])
         assert kicks["by_player"][0]["name"] == "Thicktank-Area52"
         obs = {(o["spell_id"], o["kind"]): o for o in kicks["spell_observations"]}
         assert obs[(1216538, "damage")]["avg_per_cast"] == 200000
@@ -862,6 +926,12 @@ class TestAnalyzeRun:
         html = render_html(report)
         assert "<html" in html and "Murder Row" in html
         assert "</script>" in html
+        # both kick-value tiles exist in the template, and the players
+        # column says which components it combines (see the reconciliation
+        # assertion in test_full_report)
+        assert "dmg prevented by kicks (est.)" in html
+        assert "enemy healing prevented by kicks (est.)" in html
+        assert "Kick prev. (dmg+heal)" in html
         # no --avoidable-data passed: no section in either renderer (the
         # HTML template's JS source always defines avoidableDamage(), but
         # without avoidable_damage data in the embedded JSON it renders "")
