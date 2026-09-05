@@ -257,6 +257,26 @@ def compute_stats(
     last_hp_pct: dict[str, float] = {}
     # enemy hard-casts in flight: caster guid -> (spell_id, spell_name, ts)
     open_enemy_casts: dict[str, tuple[int, str, float]] = {}
+    # Enemy CHANNELS in flight, same shape. A channel is not a hard cast:
+    # it logs SPELL_CAST_SUCCESS up front (at channel start, with no
+    # preceding SPELL_CAST_START) and can still be interrupted for its
+    # whole duration. Tracking only SPELL_CAST_START therefore missed
+    # every channel entirely -- confirmed real (2026-09-05): across 13
+    # runs, 57 of 730 landed interrupts (8%) were on channels that never
+    # appeared in the kick-efficiency table at all, including Fel
+    # Missiles (25 kicks) and the enemy healing channel Health Funnel
+    # (7 kicks), which also under-reported healing prevented.
+    #
+    # An instant cast reaches this same "CAST_SUCCESS with no open hard
+    # cast" path though, and instants can never be interrupted -- so a
+    # channel only ever reaches the report once it has actually been
+    # interrupted at least once (see the merge after the event loop).
+    # That keeps this from flooding the table with uninterruptible
+    # instants, which is the opposite of what it's for.
+    open_enemy_channels: dict[str, tuple[int, str, float]] = {}
+    channel_casts: Counter[int] = Counter()    # spell_id -> channels started
+    channel_kicked: Counter[int] = Counter()   # spell_id -> channels interrupted
+    channel_names: dict[int, str] = {}
     # buff uptime windows: (player_guid, spell_id) -> window start ts
     open_buffs: dict[tuple[str, int], float] = {}
     buff_totals: dict[tuple[str, int], dict[str, Any]] = {}
@@ -277,15 +297,19 @@ def compute_stats(
     run_start_ts = events[0].ts if events else 0.0
     run_end_ts = events[-1].ts if events else 0.0
 
-    def close_enemy_cast(caster_guid: str, outcome: str) -> None:
+    def close_enemy_cast(caster_guid: str, outcome: str) -> bool:
+        """Close an in-flight enemy HARD cast. Returns whether there was
+        one -- False lets the caller fall back to the channel bookkeeping
+        above (see open_enemy_channels)."""
         cast = open_enemy_casts.pop(caster_guid, None)
         if cast is None:
-            return
+            return False
         spell_id, spell_name, _ = cast
         entry = stats.enemy_cast_outcomes.setdefault(spell_id, {
             "name": spell_name, "kicked": 0, "landed": 0, "expired": 0,
         })
         entry[outcome] += 1
+        return True
 
     def close_cc(target_guid: str, spell_id: int, end_ts: float) -> None:
         window = open_cc.pop((target_guid, spell_id), None)
@@ -580,7 +604,13 @@ def compute_stats(
             source_player = resolve_source(src_guid, src_name, src_flags)
             if source_player is not None:
                 source_player.interrupts += 1
-                close_enemy_cast(dst_guid, "kicked")
+                if not close_enemy_cast(dst_guid, "kicked"):
+                    # not a hard cast -- a channel, then (see
+                    # open_enemy_channels); this is what proves the spell
+                    # is both a channel and interruptible.
+                    channel = open_enemy_channels.pop(dst_guid, None)
+                    if channel is not None:
+                        channel_kicked[channel[0]] += 1
                 extra = extra_spell_info(event)
                 stats.interrupt_events.append({
                     "ts": event.ts,
@@ -629,6 +659,15 @@ def compute_stats(
                 cast = open_enemy_casts.get(src_guid)
                 if cast is not None and cast[0] == sp.spell_id:
                     close_enemy_cast(src_guid, "landed")
+                else:
+                    # No hard cast in flight for this spell: either an
+                    # instant (never interruptible) or the START of a
+                    # channel (which is). Recorded either way; only the
+                    # ones actually interrupted are merged into the
+                    # report -- see open_enemy_channels.
+                    open_enemy_channels[src_guid] = (sp.spell_id, sp.spell_name, event.ts)
+                    channel_casts[sp.spell_id] += 1
+                    channel_names[sp.spell_id] = sp.spell_name
                 continue
             source_player = resolve_source(src_guid, src_name, src_flags)
             if source_player is None or source_player.guid == PET_BUCKET:
@@ -772,6 +811,20 @@ def compute_stats(
     for guid, entries in per_player.items():
         entries.sort(key=lambda e: -e["uptime_s"])
         stats.buff_uptimes[guid] = entries[:15]
+
+    # Merge interrupted channels into the enemy-cast outcomes (see
+    # open_enemy_channels). Only spells actually interrupted at least
+    # once qualify -- that is the evidence they were a channel and were
+    # interruptible, and it keeps every uninterruptible instant cast
+    # (which reaches the same bookkeeping) out of the report.
+    for spell_id, kicked in channel_kicked.items():
+        entry = stats.enemy_cast_outcomes.setdefault(spell_id, {
+            "name": channel_names.get(spell_id, f"spell:{spell_id}"),
+            "kicked": 0, "landed": 0, "expired": 0,
+        })
+        entry["kicked"] += kicked
+        # every channel of it that wasn't interrupted got through
+        entry["landed"] += max(0, channel_casts.get(spell_id, 0) - kicked)
 
     _estimate_kick_value(stats)
     _finish_pull_stats(stats, pulls, data)
