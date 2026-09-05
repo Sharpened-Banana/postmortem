@@ -258,6 +258,8 @@ function MA:RouteImport_OnTick()
   local planned = route.plannedPulls[route.currentPullIndex]
   route.lastPullSizeDelta = planned and (engagedCount - planned) or nil
 
+  MA:Debug("Route: pull %d done -- %d engaged vs %s planned; now on pull %d",
+    route.currentPullIndex, engagedCount, tostring(planned), route.currentPullIndex + 1)
   route.currentPullIndex = route.currentPullIndex + 1
   route.currentPullCloneCount = 0
   ResetEngagement()
@@ -271,6 +273,7 @@ end
 -- CHALLENGE_MODE_START/COMPLETED/RESET is this addon's existing pattern
 -- (CombatLogging.lua, Tracker.lua, Interrupts.lua all already do it).
 local eventFrame = CreateFrame("Frame")
+MA:RegisterKeyEventFrame(eventFrame)
 eventFrame:RegisterEvent("CHALLENGE_MODE_START")
 eventFrame:RegisterEvent("CHALLENGE_MODE_COMPLETED")
 eventFrame:RegisterEvent("CHALLENGE_MODE_RESET")
@@ -281,6 +284,12 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
     -- Lazy, on-demand call -- see GetMDTCurrentPreset()'s comment above for
     -- why this must not happen at file-load/ADDON_LOADED time.
     MA.state.route.plannedPulls = MA:RouteImport_GetPlannedPulls()
+    if MA.state.route.plannedPulls then
+      MA:Debug("Route: MDT's current route has %d pulls -- tracking pull progress", #MA.state.route.plannedPulls)
+    else
+      MA:Debug("Route: no MDT route found (MDT loaded: %s) -- pull row hidden",
+        tostring(MA:IsMDTPresent()))
+    end
     -- This frame is created after Tracker.lua's, so Tracker's own
     -- CHALLENGE_MODE_START handler (which calls MA:Tracker_OnTick() ->
     -- MA.Overlay_Refresh() immediately) may already have fired and rendered

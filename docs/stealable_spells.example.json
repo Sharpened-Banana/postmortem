@@ -1,0 +1,15 @@
+{
+  "_comment": "Example --stealable-data file. 'spells' tags spell ids as worth Spellstealing (or an equivalent utility purge/steal) in the enemy-casts table. UNLIKE avoidable_spells.example.json, the two ids below are PLACEHOLDERS, not real current-season spells -- research (2026-09-04) found no addon or dungeon guide maintains a curated per-dungeon stealable-buff list; every 'spellsteal helper' addon (Mage Nuggets, Big Debuffs) reads WoW's own live isStealable aura flag instead, and Patch 12.1.0's Secret Values changes are restricting exactly that kind of live aura scanning during Mythic+ (see analysis/stealable.py's module docstring). Replace the ids below with real spell ids you've confirmed worth stealing this season (from playing, from a WeakAura's 'stealable' trigger, or from a dungeon guide) -- we don't ship a real list ourselves.",
+  "spells": [
+    {
+      "id": 999901,
+      "name": "PLACEHOLDER -- replace with a real spell id",
+      "note": "example only -- see _comment"
+    },
+    {
+      "id": 999902,
+      "name": "PLACEHOLDER -- replace with a real spell id",
+      "note": "example only -- see _comment"
+    }
+  ]
+}

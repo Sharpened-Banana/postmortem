@@ -13,6 +13,7 @@ from .interruptibility import InterruptibilityData
 from .mapping import build_map_report, collect_map_bounds
 from .pulls import detect_pulls
 from .stats import PET_BUCKET, compute_stats
+from .stealable import StealableData
 
 
 def _relativize(
@@ -74,7 +75,9 @@ def _kick_value_summary(stats) -> dict[str, Any]:
 
 
 def _enemy_cast_summary(
-    stats, interrupt_data: Optional[InterruptibilityData] = None
+    stats,
+    interrupt_data: Optional[InterruptibilityData] = None,
+    stealable: Optional[StealableData] = None,
 ) -> dict[str, Any]:
     """Kick efficiency: for every enemy hard-cast, did it get through?
 
@@ -110,6 +113,12 @@ def _enemy_cast_summary(
             "got_through": entry["landed"],
             "expired": entry["expired"],
             "interruptible": known,
+            # Community-tagged (see stealable.py -- no live/extracted
+            # source exists for this, unlike interrupt_data above), so
+            # this is only ever True or False, never "unknown": a spell
+            # id absent from the loaded list is just untagged, not
+            # confirmed non-stealable.
+            "stealable": bool(stealable and stealable.is_stealable(spell_id)),
         })
         if known is True:
             # confirmed kickable: count it whether or not it was actually
@@ -278,6 +287,7 @@ def analyze_run(
     store: Optional[DungeonDataStore] = None,
     avoidable: Optional[AvoidableData] = None,
     interrupt_data: Optional[InterruptibilityData] = None,
+    stealable: Optional[StealableData] = None,
     pull_gap_seconds: float = 5.0,
     full_cast_timeline: bool = True,
     death_penalty_s: float = 15.0,
@@ -340,7 +350,7 @@ def analyze_run(
             "total_s": round(len(stats.deaths) * death_penalty_s, 1),
         },
         "encounters": [dict(e) for e in stats.encounters],
-        "enemy_casts": _enemy_cast_summary(stats, interrupt_data),
+        "enemy_casts": _enemy_cast_summary(stats, interrupt_data, stealable),
         "consumables": stats.consumable_events,
         "interrupts": stats.interrupt_events,
         "dispels": stats.dispel_events,

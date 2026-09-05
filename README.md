@@ -33,11 +33,11 @@ postmortem analyze "path/to/Logs/WoWCombatLog.txt" \
     --route route.txt --dungeon-data mdt_data.json \
     --format text,html,json --out reports/
 
-# optional: pull the addon's self-built interruptible/uninterruptible spell
-# database out of its SavedVariables, then pass it to `analyze` for exact
-# kick-efficiency accounting (see "Kick efficiency" below)
-postmortem extract-interrupts "WTF/Account/<ACCOUNT>/SavedVariables/Postmortem.lua" -o interrupt_data.json
-postmortem analyze ... --interrupt-data interrupt_data.json
+# interrupt-data is bundled with postmortem and used automatically by the
+# desktop app / Watch Live (see "Kick efficiency" below); nothing to do
+# for those. The CLI's own `analyze`/`record` still take an explicit
+# --interrupt-data file if you want to point at a different one:
+postmortem analyze ... --interrupt-data src/postmortem/data/interrupt_data.json
 
 # ...or record live while you play (saves each run to its own file and
 # auto-analyzes the moment the key ends; add --upload to also post each
@@ -160,6 +160,13 @@ does this in CI for both platforms on every tag push.
   file, format + example in `docs/avoidable_spells.example.json`) and
   breaks out each player's damage taken from just those spells, with hit
   counts; omit the flag and the report is unaffected.
+- **Spellsteal targets** — `analyze --stealable-data FILE` tags spell ids
+  worth Spellstealing (same community/user-maintained shape as avoidable
+  damage, format + example in `docs/stealable_spells.example.json` — we
+  don't ship a real list here either, and unlike interrupt data there's
+  no addon/database to build one from, see that file's own comment) and
+  highlights them in the enemy-casts table with a star and a colored
+  accent; omit the flag and the report is unaffected.
 - **Kick value** — each interrupt is priced: the estimated damage (or enemy
   healing) it prevented, based on the average amount per completed cast of
   that spell observed elsewhere in the same run — the up-front hit plus its
@@ -170,12 +177,16 @@ does this in CI for both platforms on every tag push.
   per-cast timeline is included in the JSON report.
 - **Kick efficiency** — every enemy hard-cast is tracked from
   `SPELL_CAST_START` to its outcome: kicked, got through, or died
-  mid-cast; per-spell table plus an overall efficiency percentage. With
-  `--interrupt-data` (the addon's self-built database, via
-  `extract-interrupts`), spells confirmed genuinely uninterruptible are
-  excluded outright instead of looking like missed kicks, and confirmed-
-  interruptible spells count toward efficiency even if never kicked this
-  run; without it, falls back to counting only spells kicked at least once.
+  mid-cast; per-spell table plus an overall efficiency percentage. A
+  bundled, community-sourced interruptibility database (see
+  `src/postmortem/data/interrupt_data.json`, refreshed each season with
+  `postmortem build-interrupt-data`; used automatically, no flag needed
+  outside the bare CLI) marks confirmed-interruptible spells so they
+  count toward efficiency even if never kicked this run, instead of
+  looking invisible; anything it has no data for falls back to counting
+  only spells kicked at least once. (The addon used to self-build this
+  live via `extract-interrupts`; that path is permanently dead as of
+  Patch 12.0.0 — see `docs/THIRD_PARTY_NOTICES.md`.)
 - **Boss attempts** — encounter table with kills, wipes and durations.
 - **Per-player extras** — killing blows, casts per minute, purges vs.
   dispels, boss-damage share, potions/healthstones used, approximate

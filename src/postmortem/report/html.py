@@ -20,7 +20,7 @@ _TEMPLATE = """<!DOCTYPE html>
 :root {
   --bg: #14161b; --panel: #1d2027; --panel2: #232733; --line: #313746;
   --text: #d8dbe2; --dim: #8a90a0; --accent: #d7a94c; --good: #58c47c;
-  --bad: #e06060; --warn: #e0a13c; --blue: #5c9ad0;
+  --bad: #e06060; --warn: #e0a13c; --blue: #5c9ad0; --steal: #b47fdb;
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text);
@@ -72,6 +72,12 @@ td.txt .pk b { color: var(--dim); font-weight: 600; margin-right: 4px; }
 .dev-early { color: var(--warn); } .dev-late { color: var(--blue); }
 .dev-off { color: var(--bad); } .ok { color: var(--good); }
 .dim { color: var(--dim); }
+/* Spellsteal-worthy casts (user-tagged, see --stealable-data): a left
+   accent bar on the row rather than recoloring the kick-rate text, so it
+   never collides with the ok/dev-early/dev-off kick-rate coloring
+   already on that same row. */
+tr.stealable { box-shadow: inset 3px 0 0 var(--steal); }
+tr.stealable td:first-child::after { content: " \2605"; color: var(--steal); }
 details { margin: 4px 0; }
 summary { cursor: pointer; }
 .legend { font-size: 12px; color: var(--dim); margin-top: 6px; }
@@ -389,6 +395,7 @@ function enemyCasts() {
   const spells = ((R.enemy_casts||{}).spells||[]).filter(s => s.got_through + s.kicked > 0);
   if (!spells.length) return "";
   spells.sort((a, b) => b.got_through - a.got_through);
+  const anyStealable = spells.some(s => s.stealable);
   return `<h2>Enemy casts — kicked vs got through</h2><div class="wrap"><table>
     <tr><th>Spell</th><th class="num">Got through</th><th class="num">Kicked</th>
     <th class="num">Died mid-cast</th><th>Kick rate</th></tr>
@@ -396,11 +403,13 @@ function enemyCasts() {
       const total = s.got_through + s.kicked;
       const pct = total ? Math.round(100 * s.kicked / total) : 0;
       const cls = pct >= 70 ? "ok" : pct >= 30 ? "dev-early" : "dev-off";
-      return `<tr><td>${esc(s.name)}</td>
+      return `<tr class="${s.stealable ? "stealable" : ""}"${s.stealable ? ' title="Worth Spellstealing"' : ""}>
+        <td>${esc(s.name)}</td>
         <td class="num${s.got_through ? " dev-off" : ""}">${s.got_through}</td>
         <td class="num">${s.kicked}</td><td class="num">${s.expired || ""}</td>
         <td><span class="${cls}">${pct}%</span></td></tr>`;
-    }).join("")}</table></div>`;
+    }).join("")}</table></div>${anyStealable
+      ? `<div class="legend"><i style="background:var(--steal)"></i>★ worth Spellstealing</div>` : ""}`;
 }
 
 function encounters() {

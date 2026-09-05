@@ -1,0 +1,171 @@
+{
+ "spells": {
+  "388862": {
+   "name": "Surge",
+   "interruptible": true
+  },
+  "388392": {
+   "name": "Monotonous Lecture",
+   "interruptible": true
+  },
+  "1270294": {
+   "name": "Mystic Brand",
+   "interruptible": true
+  },
+  "1279627": {
+   "name": "Arcane Bolt",
+   "interruptible": true
+  },
+  "468966": {
+   "name": "Polymorph",
+   "interruptible": true
+  },
+  "468962": {
+   "name": "Arcane Bolt",
+   "interruptible": true
+  },
+  "1254294": {
+   "name": "Pyroblast",
+   "interruptible": true
+  },
+  "1256015": {
+   "name": "Shadow Bolt",
+   "interruptible": true
+  },
+  "1264693": {
+   "name": "Terror Wave",
+   "interruptible": true
+  },
+  "1256008": {
+   "name": "Hex",
+   "interruptible": true
+  },
+  "1263292": {
+   "name": "Shrink",
+   "interruptible": true
+  },
+  "1259255": {
+   "name": "Spirit Rend",
+   "interruptible": true
+  },
+  "1264327": {
+   "name": "Shadowfrost Blast",
+   "interruptible": true
+  },
+  "1257716": {
+   "name": "Reanimation",
+   "interruptible": true
+  },
+  "1285445": {
+   "name": "Arcane Explosion",
+   "interruptible": true
+  },
+  "1262510": {
+   "name": "Umbral Bolt",
+   "interruptible": true
+  },
+  "1249801": {
+   "name": "Arcing Mana",
+   "interruptible": true
+  },
+  "1282722": {
+   "name": "Nullify",
+   "interruptible": true
+  },
+  "1263892": {
+   "name": "Holy Bolt",
+   "interruptible": true
+  },
+  "1257595": {
+   "name": "Divine Guile",
+   "interruptible": true
+  },
+  "1271074": {
+   "name": "Icy Blast",
+   "interruptible": true
+  },
+  "1271479": {
+   "name": "Netherburst",
+   "interruptible": true
+  },
+  "1258436": {
+   "name": "Icebolt",
+   "interruptible": true
+  },
+  "1278893": {
+   "name": "Death Bolt",
+   "interruptible": true
+  },
+  "1262941": {
+   "name": "Plague Bolt",
+   "interruptible": true
+  },
+  "1262523": {
+   "name": "Summon Voidcaller",
+   "interruptible": true
+  },
+  "1277339": {
+   "name": "Shadowmend",
+   "interruptible": true
+  },
+  "1262526": {
+   "name": "Abyssal Enhancement",
+   "interruptible": true
+  },
+  "248831": {
+   "name": "Dread Screech",
+   "interruptible": true
+  },
+  "244750": {
+   "name": "Mind Blast",
+   "interruptible": true
+  },
+  "1255377": {
+   "name": "Repel",
+   "interruptible": true
+  },
+  "152953": {
+   "name": "Blinding Light",
+   "interruptible": true
+  },
+  "1254669": {
+   "name": "Solar Bolt",
+   "interruptible": true
+  },
+  "154396": {
+   "name": "Solar Blast",
+   "interruptible": true
+  },
+  "1216135": {
+   "name": "Spirit Bolt",
+   "interruptible": true
+  },
+  "1216819": {
+   "name": "Fungal Bolt",
+   "interruptible": true
+  },
+  "473794": {
+   "name": "Poison Blades",
+   "interruptible": true
+  },
+  "473657": {
+   "name": "Shadow Bolt",
+   "interruptible": true
+  },
+  "473668": {
+   "name": "Pulsing Shriek",
+   "interruptible": true
+  },
+  "1251981": {
+   "name": "Chain Lightning",
+   "interruptible": true
+  },
+  "472724": {
+   "name": "Shadow Bolt",
+   "interruptible": true
+  }
+ },
+ "source": "method.gg",
+ "season": "Midnight S1",
+ "source_version": "2026-04-28"
+}

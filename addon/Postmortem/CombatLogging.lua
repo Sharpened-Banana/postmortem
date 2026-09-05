@@ -126,6 +126,8 @@ function MA:CombatLogging_OnChallengeModeStart()
   EnsureAdvancedLogging()
   self:CombatLogging_SetState(true, not hasSyncedState)
   hasSyncedState = true
+  MA:Debug("Combat logging: ON (LoggingCombat()=%s, advancedCombatLogging=%s); re-asserting every %ds",
+    tostring(self:CombatLogging_GetCurrentState()), tostring(GetCVar and GetCVar("advancedCombatLogging")), REASSERT_INTERVAL_S)
 
   -- Re-assert our desired state every REASSERT_INTERVAL_S for the rest of
   -- this key -- see that constant's own comment for why (another addon,
@@ -160,6 +162,7 @@ function MA:CombatLogging_OnChallengeModeEnd()
   -- grace window -- it's the guard against another addon cutting logging
   -- in that same window -- and stop both together once it's over.
   cancelPendingStop()
+  MA:Debug("Combat logging: was %s at key end; turning off in %ds", MA.state.combatLogWasOn and "ON" or "OFF", STOP_GRACE_S)
   pendingStop = C_Timer.NewTimer(STOP_GRACE_S, function()
     pendingStop = nil
     -- Ticker first: a tick landing between here and LoggingCombat(false)
@@ -175,6 +178,7 @@ end
 -- stop logging, so they share the same branch below.
 -- verified against MythicDungeonTools/Core/CombatLogging.lua
 local eventFrame = CreateFrame("Frame")
+MA:RegisterKeyEventFrame(eventFrame)
 eventFrame:RegisterEvent("CHALLENGE_MODE_START")
 eventFrame:RegisterEvent("CHALLENGE_MODE_COMPLETED")
 eventFrame:RegisterEvent("CHALLENGE_MODE_RESET")
