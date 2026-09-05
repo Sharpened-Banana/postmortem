@@ -99,6 +99,19 @@ class InterruptibilityData:
 
         return cls(spells=spells)
 
+    def merge(self, other: "InterruptibilityData") -> "InterruptibilityData":
+        """A new instance with ``other``'s answers winning any conflict.
+
+        Used to stack a weaker source under a stronger one: the bundled
+        community database (whose spell ids are only as good as a guide
+        scrape) underneath what this account's own logs have actually
+        proven (see interrupt_learning.py), so real observed evidence
+        always beats a third party's table.
+        """
+        merged = dict(self.spells)
+        merged.update(other.spells)
+        return InterruptibilityData(spells=merged)
+
     def get(self, spell_id: int) -> Optional[bool]:
         """Return the addon-observed interruptible flag for ``spell_id``.
 
