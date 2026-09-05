@@ -185,6 +185,22 @@ def resolve_avoidable_data_path(settings: dict[str, Any]) -> Optional[Path]:
     return default if default.is_file() else None
 
 
+LEARNED_INTERRUPTS_FILENAME = "learned_interrupts.json"
+
+
+def resolve_learned_interrupts_path(settings: dict[str, Any]) -> Path:
+    """Where this account's own learned interruptibility evidence lives
+    (see analysis/interrupt_learning.py). Always a real path -- unlike
+    the other resolvers this one never returns None, because the file is
+    written as well as read: it accumulates a little more every time a
+    run is analyzed, and a missing file just means nothing learned yet.
+    """
+    configured = settings.get("learned_interrupts_path")
+    if configured:
+        return Path(configured)
+    return config_dir() / LEARNED_INTERRUPTS_FILENAME
+
+
 STEALABLE_FILENAME = "stealable_spells.json"
 
 

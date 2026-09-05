@@ -76,6 +76,35 @@ def _load_interruptibility(path: Optional[str]) -> Optional[InterruptibilityData
         raise SystemExit(f"error: could not load interrupt data {path}: {exc}")
 
 
+def _load_effective_interrupt_data(
+    path: Optional[str], learned_path: Optional[str | Path] = None
+) -> Optional[InterruptibilityData]:
+    """The interruptibility answers to analyze with: a loaded file (the
+    bundled community database, or an explicit --interrupt-data) with
+    anything this account's own logs have proven layered on top.
+
+    Learned data wins on conflict -- it is real observed evidence from
+    these exact logs, while a community table's spell ids are only as
+    good as the scrape behind them (confirmed real, 2026-09-05: a guide
+    listed Fel Missiles as 1216570, the damage component, where the
+    interruptible cast is actually 1216571). Either source may be absent;
+    None means "no data at all", and callers fall back to their
+    heuristic exactly as before.
+    """
+    from .analysis.interrupt_learning import InterruptObservations
+
+    base = _load_interruptibility(path)
+    if not learned_path:
+        return base
+    learned = InterruptObservations.load(learned_path).to_interrupt_data()
+    if not learned["spells"]:
+        return base
+    learned_data = InterruptibilityData(spells={
+        int(sid): dict(entry) for sid, entry in learned["spells"].items()
+    })
+    return learned_data if base is None else base.merge(learned_data)
+
+
 def _load_stealable(path: Optional[str]) -> Optional[StealableData]:
     """Load --stealable-data. Like --avoidable-data, an explicitly-passed
     path that fails to load is a clear CLI error (SystemExit). Omitting
@@ -381,6 +410,40 @@ def cmd_build_interrupt_data(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_learn_interrupts(args: argparse.Namespace) -> int:
+    """Fold one or more combat logs into an accumulated interruptibility
+    file learned from real play (see analysis/interrupt_learning.py).
+
+    Exists so an existing pile of logs can seed the file in one go
+    instead of only learning from runs analyzed after the feature
+    landed. Re-running over the same log is safe in the sense that it
+    only ever adds evidence -- but it does double-count that log's
+    observations, so point it at each log once.
+    """
+    from .analysis.interrupt_learning import InterruptObservations, observe_events
+
+    acc = InterruptObservations.load(args.output)
+    before = len(acc.spells)
+    for path in args.logs:
+        try:
+            for segment in segment_runs(parse_file(path)):
+                acc.merge(observe_events(segment.events))
+        except OSError as exc:
+            print(f"warning: skipping {path}: {exc}", file=sys.stderr)
+            continue
+        print(f"  read {path}")
+    acc.save(args.output)
+
+    data = acc.to_interrupt_data(min_attempts=args.min_attempts)["spells"]
+    yes = sum(1 for v in data.values() if v["interruptible"])
+    no = len(data) - yes
+    print(f"learned from {len(args.logs)} log(s) -> {args.output}")
+    print(f"  {len(acc.spells)} spells observed ({len(acc.spells) - before} new)")
+    print(f"  {yes} confirmed interruptible, {no} confirmed NOT interruptible "
+          f"(>= {args.min_attempts} failed attempts, never once interrupted)")
+    return 0
+
+
 def cmd_runs(args: argparse.Namespace) -> int:
     # Consumed one segment at a time (no list(...)): each RunSegment's
     # events are only needed for summary() and are eligible for GC as soon
@@ -580,7 +643,7 @@ def cmd_index(args: argparse.Namespace) -> int:
 
 def _write_recorded_reports(
     run, route, store, pull_gap_seconds: float = 5.0, avoidable=None,
-    interrupt_data=None, stealable=None, enrich=None,
+    interrupt_data=None, stealable=None, learned_path=None, enrich=None,
 ) -> Optional[dict]:
     """Analyze one recorded run's log slice and write its JSON/HTML/text
     reports, plus the chapters sidecars (``<run>.chapters.json`` /
@@ -618,6 +681,16 @@ def _write_recorded_reports(
     segments = list(segment_runs(parse_file(run.path)))
     if not segments:
         return None
+    if learned_path:
+        # Fold this run's own evidence into the accumulated
+        # interruptibility file (see analysis/interrupt_learning.py).
+        # Best-effort, like the enrich hook below: a cache that can't be
+        # written must never cost the run its reports.
+        try:
+            from .analysis.interrupt_learning import update_from_events
+            update_from_events(segments[-1].events, learned_path)
+        except Exception as exc:
+            print(f"warning: could not update learned interrupts: {exc}", file=sys.stderr)
     report = analyze_run(segments[-1], route=route, store=store,
                          avoidable=avoidable, interrupt_data=interrupt_data,
                          stealable=stealable, pull_gap_seconds=pull_gap_seconds)
@@ -797,6 +870,22 @@ def build_parser() -> argparse.ArgumentParser:
                     help="don't also copy the result into this package's "
                          "own data/ folder (see bundled.py)")
     p.set_defaults(func=cmd_build_interrupt_data)
+
+    p = sub.add_parser(
+        "learn-interrupts",
+        help="learn which enemy casts are (and aren't) interruptible from "
+             "your own combat logs -- see analysis/interrupt_learning.py",
+    )
+    p.add_argument("logs", nargs="+", help="combat logs or recorded run slices")
+    p.add_argument("-o", "--output", default="learned_interrupts.json",
+                    help="accumulated observations file to create/update "
+                         "(the desktop app keeps its own in the app data "
+                         "folder and updates it after every analyzed run)")
+    p.add_argument("--min-attempts", type=int, default=3,
+                    help="failed interrupt attempts, with zero successes "
+                         "ever, before a spell counts as uninterruptible "
+                         "(default 3; raise it for more confidence)")
+    p.set_defaults(func=cmd_learn_interrupts)
 
     p = sub.add_parser("runs", help="list Mythic+ runs found in a combat log")
     p.add_argument("log", help="path to WoWCombatLog.txt")

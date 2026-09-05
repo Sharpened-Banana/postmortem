@@ -189,14 +189,16 @@ class DesktopAPI:
                 # zero-config fallback: <config dir>/avoidable_spells.json
                 or _config.resolve_avoidable_data_path(_config.load_settings())
             )
-        interrupt_data = _cli._load_interruptibility(
+        interrupt_data = _cli._load_effective_interrupt_data(
             params.get("interrupt_data_path")
             # zero-config fallback: app data folder, then the packaged
             # community-sourced database (see bundled.py) -- until
             # 2026-09-04 this wasn't loaded here at all, so kick-efficiency
             # reporting silently ran on the plain "kicked at least once"
             # heuristic for every desktop analysis, not just Watch Live.
-            or _config.resolve_interrupt_data_path(_config.load_settings())
+            or _config.resolve_interrupt_data_path(_config.load_settings()),
+            # ...with whatever this account's own logs have proven on top
+            _config.resolve_learned_interrupts_path(_config.load_settings()),
         )
         stealable = _cli._load_stealable(
             params.get("stealable_data_path")
@@ -209,6 +211,18 @@ class DesktopAPI:
 
         run_selector = str(params.get("run_selector") or "last")
         segment = _cli._pick_run(segment_runs(parse_file(log_path)), run_selector)
+        # Fold what this run proves about interruptibility back into the
+        # accumulated file, so the next analysis knows more than this one
+        # did (see analysis/interrupt_learning.py). Best-effort: a cache
+        # that can't be written must never cost the user their report.
+        try:
+            from ..analysis.interrupt_learning import update_from_events
+            update_from_events(
+                segment.events,
+                _config.resolve_learned_interrupts_path(_config.load_settings()),
+            )
+        except Exception:
+            pass
         if route is None:
             # No route pasted for this analysis: fall back to the saved
             # default for whichever dungeon this run turns out to be.
@@ -499,9 +513,10 @@ class DesktopAPI:
             # watched run's kick-efficiency reporting silently ran on the
             # plain "kicked at least once" heuristic regardless of what
             # was configured.
-            interrupt_data = _cli._load_interruptibility(
+            interrupt_data = _cli._load_effective_interrupt_data(
                 params.get("interrupt_data_path")
-                or _config.resolve_interrupt_data_path(settings)
+                or _config.resolve_interrupt_data_path(settings),
+                _config.resolve_learned_interrupts_path(settings),
             )
             # zero-config fallback: <config dir>/stealable_spells.json --
             # no packaged copy, see analysis/stealable.py.
@@ -834,6 +849,7 @@ class DesktopAPI:
         report = _cli._write_recorded_reports(
             run, route, store, avoidable=avoidable, interrupt_data=interrupt_data,
             stealable=stealable,
+            learned_path=_config.resolve_learned_interrupts_path(_config.load_settings()),
             # embed the floor's map art from the user's MDT install into the
             # local report (best-effort; upload.py strips it before the site)
             enrich=lambda r: mapart.attach_map_backgrounds(r, mdt_dir, store),
