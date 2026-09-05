@@ -9,7 +9,7 @@ from ..mdt.dungeon_data import DungeonData, DungeonDataStore
 from ..mdt.route import Route
 from .avoidable import AvoidableData
 from .compare import compare_route
-from .interruptibility import InterruptibilityData
+from .interruptibility import KNOWN_UNINTERRUPTIBLE_SPELL_IDS, InterruptibilityData
 from .mapping import build_map_report, collect_map_bounds
 from .pulls import detect_pulls
 from .stats import PET_BUCKET, compute_stats
@@ -102,6 +102,11 @@ def _enemy_cast_summary(
     kicked_total = 0
     landed_kickable = 0
     for spell_id, entry in stats.enemy_cast_outcomes.items():
+        if spell_id in KNOWN_UNINTERRUPTIBLE_SPELL_IDS:
+            # e.g. this week's M+ affix mechanic -- never a real kick
+            # opportunity, checked unconditionally regardless of whether
+            # any interrupt_data is loaded (see that constant's docstring).
+            continue
         known = interrupt_data.get(spell_id) if interrupt_data else None
         if known is False:
             # confirmed genuinely uninterruptible -- never a missed kick
@@ -136,12 +141,13 @@ def _enemy_cast_summary(
         efficiency = round(100.0 * kicked_total / (kicked_total + landed_kickable), 1)
     return {
         "note": "counts every enemy hard-cast (SPELL_CAST_START); spells "
-                "confirmed uninterruptible by the addon-captured "
-                "interruptibility database (--interrupt-data) are excluded "
+                "confirmed uninterruptible -- by loaded interrupt data "
+                "(--interrupt-data) or by being a known-uninterruptible "
+                "mechanic (e.g. this week's M+ affix) -- are excluded "
                 "entirely; efficiency covers spells confirmed interruptible "
-                "by that database (whether or not they were kicked this "
-                "run) plus, for spells with no addon data, ones kicked at "
-                "least once this run",
+                "by loaded interrupt data (whether or not they were kicked "
+                "this run) plus, for spells with no data either way, ones "
+                "kicked at least once this run",
         "kick_efficiency_pct": efficiency,
         "spells": spells,
     }

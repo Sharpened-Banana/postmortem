@@ -47,6 +47,29 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+# Confirmed uninterruptible by design, not by any data source above --
+# WoW's weekly Mythic+ affix ("Xal'atath's Bargain": Ascendant/Voidbound/
+# Devour/Pulsar, rotating weekly) casts a signature environmental
+# mechanic every key regardless of dungeon, and it is never actually
+# interruptible. It still logs as an ordinary hard cast
+# (SPELL_CAST_START/SUCCESS), so without an explicit exclusion it
+# clutters the kick-efficiency table with something no kick could ever
+# have stopped. Confirmed real, 2026-09-05: "Xal'atath's Bargain: Devour"
+# (465051) showed 0 kicked / 19-20 landed in two different dungeons the
+# same week, in two of the user's own real reports.
+#
+# Deliberately hardcoded here rather than folded into interrupt_data.json
+# (bundled.py) -- these apply regardless of season/dungeon-pool and
+# regardless of which interrupt_data source (or none) is loaded, so this
+# check runs unconditionally in _enemy_cast_summary rather than depending
+# on a file being present. Only Devour is confirmed so far; add the other
+# three variants' spell ids here once observed the same way -- don't
+# guess them from a wiki/guide (see interruptibility.py's own posture on
+# never fabricating spell ids).
+KNOWN_UNINTERRUPTIBLE_SPELL_IDS: dict[int, str] = {
+    465051: "Xal'atath's Bargain: Devour",
+}
+
 
 @dataclass
 class InterruptibilityData:

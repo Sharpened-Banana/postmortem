@@ -131,6 +131,7 @@ function render() {
     ${R.route ? stat(R.route.pull_count, "planned pulls") : ""}
     ${R.comparison && R.comparison.adherence_pct != null ? stat(R.comparison.adherence_pct + "%", "route adherence") : ""}
     ${R.kick_value && R.kick_value.total_estimated_prevented_damage ? stat("~" + num(R.kick_value.total_estimated_prevented_damage), "dmg prevented by kicks (est.)") : ""}
+    ${R.kick_value && R.kick_value.total_estimated_prevented_healing ? stat("~" + num(R.kick_value.total_estimated_prevented_healing), "enemy healing prevented by kicks (est.)") : ""}
     ${R.enemy_casts && R.enemy_casts.kick_efficiency_pct != null ? stat(R.enemy_casts.kick_efficiency_pct + "%", "kick efficiency") : ""}
     ${R.death_cost && R.death_cost.deaths ? stat("-" + mmss(R.death_cost.total_s), "timer lost to deaths") : ""}
   </div>`;
@@ -232,7 +233,7 @@ function playersTable() {
     <tr><th>Player</th><th>Spec</th><th class="num">DPS</th><th class="num">HPS</th>
     <th class="num">Damage</th><th class="num">Healing</th><th class="num">Absorbs</th>
     <th class="num">Taken</th><th class="num">Kicks</th>
-    <th class="num" title="estimated damage/healing prevented by kicks">Kick prev.</th>
+    <th class="num" title="estimated damage + enemy healing prevented by this player's interrupts -- the two summary tiles above are those same two components split apart, so this column sums to both of them together">Kick prev. (dmg+heal)</th>
     <th class="num" title="dispels + purges">Dispels</th>
     <th class="num" title="killing blows">KB</th>
     <th class="num" title="casts per minute">CPM</th>
