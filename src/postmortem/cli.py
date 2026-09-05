@@ -15,6 +15,7 @@ from .analysis.run_analyzer import analyze_run
 from .analysis.stealable import StealableData
 from .chapters import write_chapter_files
 from .clips import DEFAULT_PAD_S, FfmpegNotFoundError, clip_specs_for_chapters, cut_clips, load_chapters
+from .combatlog.events import is_hostile_npc, spell_info
 from .combatlog.parser import parse_file
 from .combatlog.segmenter import RunSegment, segment_runs
 from .mdt.decode import MDTDecodeError, decode_mdt_string
@@ -316,6 +317,21 @@ def cmd_extract_interrupts(args: argparse.Namespace) -> int:
     return 0
 
 
+def _add_interrupt_spell(spells: dict[str, Any], spell_id: int, name: str) -> bool:
+    """Record one confirmed-interruptible spell. Returns True if this was
+    a *conflicting* duplicate -- the same id already recorded under a
+    different name, which would be a real data problem (spell ids don't
+    get reused for unrelated effects). The first name wins either way, so
+    a conflict is reported, never fatal. The same id arriving twice under
+    the same name is just an ability shared by several NPCs: not a
+    conflict, silently ignored."""
+    existing = spells.get(str(spell_id))
+    if existing is None:
+        spells[str(spell_id)] = {"name": name, "interruptible": True}
+        return False
+    return existing["name"] != name
+
+
 def cmd_build_interrupt_data(args: argparse.Namespace) -> int:
     """Convert a community "which mechanics matter in this dungeon" source
     file (schema: albvar/mplus-interrupts, MIT-licensed -- see
@@ -359,33 +375,59 @@ def cmd_build_interrupt_data(args: argparse.Namespace) -> int:
             "export (no top-level \"dungeons\" list)"
         )
 
+    # Optional: resolve ability NAMES against spell ids actually seen in
+    # real combat logs, instead of trusting the source's own ids.
+    # Confirmed necessary (2026-09-05): a guide listed Fel Missiles as
+    # 1216570 -- the damage component -- where the interruptible cast is
+    # 1216571, so a naive import silently matches nothing. Names are what
+    # a guide gets reliably right; ids are what the log gets right.
+    name_to_ids: dict[str, set[int]] = {}
+    for log in args.resolve_from or []:
+        try:
+            for event in parse_file(log):
+                if event.name not in ("SPELL_CAST_START", "SPELL_CAST_SUCCESS"):
+                    continue
+                if not is_hostile_npc(event.source_flags):
+                    continue
+                sp = spell_info(event)
+                if sp is not None:
+                    name_to_ids.setdefault(sp.spell_name.casefold(), set()).add(sp.spell_id)
+        except OSError as exc:
+            print(f"warning: skipping {log}: {exc}", file=sys.stderr)
+
     spells: dict[str, Any] = {}
     skipped_conflicts = 0
+    unresolved: list[str] = []
     for dungeon in dungeons:
         if not isinstance(dungeon, dict):
             continue
         for ability in dungeon.get("abilities", []) or []:
             if not isinstance(ability, dict) or ability.get("category") != "interrupt":
                 continue
-            spell_id = ability.get("spell_id")
-            if not isinstance(spell_id, int):
-                continue
-            name = ability.get("spell_name") or f"spell:{spell_id}"
-            key = str(spell_id)
-            # A spell id repeated across dungeons/NPCs with a different
-            # name would be a real data problem (spell ids don't get
-            # reused for unrelated effects) -- surfaced as a warning
-            # rather than silently overwritten, but the first name seen
-            # wins so this is never fatal.
-            if key in spells and spells[key]["name"] != name:
-                skipped_conflicts += 1
-                print(
-                    f"warning: spell {spell_id} tagged as both "
-                    f"{spells[key]['name']!r} and {name!r} -- keeping the first",
-                    file=sys.stderr,
-                )
-                continue
-            spells[key] = {"name": name, "interruptible": True}
+            name = ability.get("spell_name") or ""
+            if name_to_ids:
+                # Every id this ability's NAME actually had in the logs --
+                # plural on purpose, since the same ability cast by
+                # different NPCs legitimately carries different ids.
+                resolved = sorted(name_to_ids.get(name.casefold(), ()))
+                if not resolved:
+                    unresolved.append(f"{dungeon.get('name', '?')}: {name}")
+                    continue
+            else:
+                spell_id = ability.get("spell_id")
+                if not isinstance(spell_id, int):
+                    continue
+                resolved = [spell_id]
+            for spell_id in resolved:
+                label = name or f"spell:{spell_id}"
+                if _add_interrupt_spell(spells, spell_id, label):
+                    skipped_conflicts += 1
+                    print(
+                        f"warning: spell {spell_id} tagged as both "
+                        f"{spells[str(spell_id)]['name']!r} and {label!r} "
+                        f"-- keeping the first", file=sys.stderr,
+                    )
+            continue
 
     out_payload = {
         "spells": spells,
@@ -398,6 +440,9 @@ def cmd_build_interrupt_data(args: argparse.Namespace) -> int:
     }
     with open(args.output, "w", encoding="utf-8") as fh:
         json.dump(out_payload, fh, indent=1)
+    for miss in unresolved:
+        print(f"warning: no spell id in the logs for {miss} -- omitted rather "
+              f"than guessed", file=sys.stderr)
     print(f"built {len(spells)} confirmed-interruptible spells -> {args.output}"
           + (f" ({skipped_conflicts} conflicting duplicate(s) skipped)" if skipped_conflicts else ""))
 
@@ -866,6 +911,12 @@ def build_parser() -> argparse.ArgumentParser:
                          "this command reads a local file, it does not "
                          "fetch over the network itself)")
     p.add_argument("-o", "--output", default="interrupt_data.json")
+    p.add_argument("--resolve-from", nargs="+", metavar="LOG",
+                    help="resolve ability NAMES to spell ids using real "
+                         "combat logs instead of trusting the source's own "
+                         "ids (strongly recommended -- guide ids often point "
+                         "at an ability's damage component rather than its "
+                         "interruptible cast)")
     p.add_argument("--no-bundle", action="store_true",
                     help="don't also copy the result into this package's "
                          "own data/ folder (see bundled.py)")
