@@ -174,6 +174,157 @@ class TestAnalyzeSuccess:
         assert result["report"]["death_cost"]["per_death_s"] == 30
 
 
+class TestInterruptDataWiring:
+    """interrupt_data was, until 2026-09-04, never loaded by the desktop
+    app at all (CLI-only, via --interrupt-data) -- these pin down that
+    analyze() now both accepts an explicit path and falls back to the
+    zero-config resolution chain (config dir, then the bundled community
+    database), the same shape dungeon/avoidable data already had.
+
+    Uses a minimal purpose-built log (not the shared log_file fixture --
+    every enemy spell in that one already gets kicked at least once, which
+    the plain heuristic already handles correctly and so can't
+    demonstrate what interrupt_data actually changes): one enemy cast
+    that's never kicked. Without data it's invisible to kick efficiency
+    (the "kicked at least once" heuristic only counts spells someone
+    actually kicked); marking it confirmed-interruptible must make it
+    count as a fully-missed kick instead."""
+
+    UNKICKED_SPELL_ID = 900555
+
+    def _log_with_an_unkicked_cast(self, tmp_path) -> Path:
+        from conftest import DPS1, LogBuilder
+
+        b = LogBuilder()
+        mob = b.npc_guid(555000, "0001")
+        b.start(0)
+        b.combatant(0.5, DPS1)
+        b.npc_cast_start(10, mob, "Test Mob", self.UNKICKED_SPELL_ID, "Test Cast")
+        b.npc_cast_success(11, mob, "Test Mob", self.UNKICKED_SPELL_ID, "Test Cast")
+        b.end(20)
+        path = tmp_path / "WoWCombatLog.txt"
+        path.write_text(b.text(), encoding="utf-8")
+        return path
+
+    def _interrupt_data_file(self, tmp_path) -> Path:
+        path = tmp_path / "my-interrupt-data.json"
+        path.write_text(json.dumps({
+            "spells": {str(self.UNKICKED_SPELL_ID): {"name": "Test Cast", "interruptible": True}}
+        }), encoding="utf-8")
+        return path
+
+    def _entry(self, report):
+        return next(
+            s for s in report["enemy_casts"]["spells"]
+            if s["spell_id"] == self.UNKICKED_SPELL_ID
+        )
+
+    def test_without_interrupt_data_spell_is_uncounted_heuristic_only(self, api, tmp_path):
+        log = self._log_with_an_unkicked_cast(tmp_path)
+        report = api.analyze({"log_path": str(log)})["report"]
+        entry = self._entry(report)
+        assert entry["interruptible"] is None
+        assert entry["kicked"] == 0
+        # never kicked, no ground truth -> excluded from the efficiency
+        # denominator entirely, same as before this feature existed
+        assert report["enemy_casts"]["kick_efficiency_pct"] is None
+
+    def test_explicit_interrupt_data_path_confirms_the_spell(self, api, tmp_path):
+        log = self._log_with_an_unkicked_cast(tmp_path)
+        interrupt_data_file = self._interrupt_data_file(tmp_path)
+        report = api.analyze({
+            "log_path": str(log),
+            "interrupt_data_path": str(interrupt_data_file),
+        })["report"]
+
+        entry = self._entry(report)
+        assert entry["interruptible"] is True
+        # Confirmed kickable, zero kicks landed -> a fully-missed kick,
+        # not invisible: efficiency now exists and is exactly 0%.
+        assert report["enemy_casts"]["kick_efficiency_pct"] == 0.0
+
+    def test_zero_config_fallback_resolves_through_desktop_config(
+        self, api, tmp_path, monkeypatch,
+    ):
+        log = self._log_with_an_unkicked_cast(tmp_path)
+        interrupt_data_file = self._interrupt_data_file(tmp_path)
+        monkeypatch.setattr(
+            config_module, "resolve_interrupt_data_path", lambda settings: interrupt_data_file,
+        )
+        report = api.analyze({"log_path": str(log)})["report"]
+        assert self._entry(report)["interruptible"] is True
+
+
+class TestStealableDataWiring:
+    """stealable_data_path: same "not loaded at all before" gap as
+    interrupt_data, fixed the same session -- see TestInterruptDataWiring.
+    No zero-config bundled fallback here (unlike interrupt_data): there's
+    no community database to bundle for this one, see
+    analysis/stealable.py's module docstring."""
+
+    SPELL_ID = 900555
+
+    def _log_with_a_cast(self, tmp_path) -> Path:
+        from conftest import DPS1, LogBuilder
+
+        b = LogBuilder()
+        mob = b.npc_guid(555000, "0001")
+        b.start(0)
+        b.combatant(0.5, DPS1)
+        b.npc_cast_start(10, mob, "Test Mob", self.SPELL_ID, "Test Cast")
+        b.npc_cast_success(11, mob, "Test Mob", self.SPELL_ID, "Test Cast")
+        b.end(20)
+        path = tmp_path / "WoWCombatLog.txt"
+        path.write_text(b.text(), encoding="utf-8")
+        return path
+
+    def _stealable_data_file(self, tmp_path) -> Path:
+        path = tmp_path / "my-stealable-data.json"
+        path.write_text(json.dumps({
+            "spells": [{"id": self.SPELL_ID, "name": "Test Cast", "note": "steal it"}]
+        }), encoding="utf-8")
+        return path
+
+    def _entry(self, report):
+        return next(
+            s for s in report["enemy_casts"]["spells"] if s["spell_id"] == self.SPELL_ID
+        )
+
+    def test_without_stealable_data_flag_is_false(self, api, tmp_path):
+        log = self._log_with_a_cast(tmp_path)
+        report = api.analyze({"log_path": str(log)})["report"]
+        assert self._entry(report)["stealable"] is False
+
+    def test_explicit_stealable_data_path_tags_the_spell(self, api, tmp_path):
+        log = self._log_with_a_cast(tmp_path)
+        stealable_data_file = self._stealable_data_file(tmp_path)
+        report = api.analyze({
+            "log_path": str(log),
+            "stealable_data_path": str(stealable_data_file),
+        })["report"]
+        assert self._entry(report)["stealable"] is True
+
+    def test_zero_config_fallback_resolves_through_desktop_config(
+        self, api, tmp_path, monkeypatch,
+    ):
+        log = self._log_with_a_cast(tmp_path)
+        stealable_data_file = self._stealable_data_file(tmp_path)
+        monkeypatch.setattr(
+            config_module, "resolve_stealable_data_path", lambda settings: stealable_data_file,
+        )
+        report = api.analyze({"log_path": str(log)})["report"]
+        assert self._entry(report)["stealable"] is True
+
+    def test_no_bundled_fallback_exists(self, api, tmp_path):
+        # Unlike interrupt_data, there is no packaged copy for
+        # resolve_stealable_data_path to fall back to -- with nothing
+        # configured and nothing dropped in the (isolated, empty) config
+        # dir, the flag must simply be False, never crash.
+        log = self._log_with_a_cast(tmp_path)
+        report = api.analyze({"log_path": str(log)})["report"]
+        assert self._entry(report)["stealable"] is False
+
+
 class TestAnalyzeAutoSavesLocally:
     """analyze() ("New Analysis") used to only ever hold its report in
     memory for as long as the report screen stayed open -- unlike Watch
@@ -652,6 +803,58 @@ class TestWatchMode:
         assert run_event["zone"] == "Murder Row"
 
         api.stop_watch()
+
+    def test_interrupt_data_is_loaded_and_reaches_the_written_report(
+        self, api, events, tmp_path, monkeypatch,
+    ):
+        """Same gap as TestInterruptDataWiring, but for start_watch()'s
+        own loading (start_watch loads route/store/avoidable itself,
+        separately from analyze() -- see api.py) and _handle_watched_run's
+        threading of it into _write_recorded_reports."""
+        from conftest import DPS1, LogBuilder
+
+        monkeypatch.setattr("postmortem.upload.upload_report",
+                            lambda report, url, **kw: {"ok": True, "url": "/runs/1"})
+
+        spell_id = 900555
+        interrupt_data_file = tmp_path / "interrupts.json"
+        interrupt_data_file.write_text(json.dumps({
+            "spells": {str(spell_id): {"name": "Test Cast", "interruptible": True}}
+        }), encoding="utf-8")
+
+        log = tmp_path / "WoWCombatLog.txt"
+        log.write_text("", encoding="utf-8")
+        out_dir = tmp_path / "watch-runs"
+
+        result = api.start_watch({
+            "log_path": str(log), "site_url": "https://example.test",
+            "out_dir": str(out_dir), "interrupt_data_path": str(interrupt_data_file),
+        })
+        assert result == {"ok": True}
+
+        import time as _time
+        _time.sleep(0.2)
+        b = LogBuilder()
+        mob = b.npc_guid(555000, "0001")
+        b.start(0)
+        b.combatant(0.5, DPS1)
+        b.npc_cast_start(10, mob, "Test Mob", spell_id, "Test Cast")
+        b.npc_cast_success(11, mob, "Test Mob", spell_id, "Test Cast")
+        b.end(20)
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write(b.text())
+
+        self._wait_for(events, "uploaded")
+        api.stop_watch()
+
+        # <run>.json, not <run>.chapters.json -- _write_recorded_reports
+        # writes both next to each other in out_dir.
+        [report_path] = [
+            p for p in out_dir.glob("*.json") if not p.name.endswith(".chapters.json")
+        ]
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        entry = next(s for s in report["enemy_casts"]["spells"] if s["spell_id"] == spell_id)
+        assert entry["interruptible"] is True
 
     def test_full_cycle_analyzes_and_uploads_each_completed_run(
         self, api, events, tmp_path, monkeypatch,

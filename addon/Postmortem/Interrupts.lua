@@ -73,6 +73,7 @@ local function HandleSpellInterrupt(sourceName, sourceFlags)
   interrupts.total = (interrupts.total or 0) + 1
   local name = sourceName or "Unknown"
   interrupts.byPlayer[name] = (interrupts.byPlayer[name] or 0) + 1
+  MA:Debug("Interrupts: %s kicked (%d this run)", name, interrupts.total)
 
   if MA.Overlay_Refresh then MA.Overlay_Refresh(MA) end
 end
@@ -95,6 +96,7 @@ local function UnregisterCombatLogEvent()
   eventFrame:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 end
 
+MA:RegisterKeyEventFrame(eventFrame)
 eventFrame:RegisterEvent("CHALLENGE_MODE_START")
 eventFrame:RegisterEvent("CHALLENGE_MODE_COMPLETED")
 eventFrame:RegisterEvent("CHALLENGE_MODE_RESET")
@@ -103,8 +105,10 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
   if event == "CHALLENGE_MODE_START" then
     ResetInterrupts()
     RegisterCombatLogEvent()
+    MA:Debug("Interrupts: listening to the combat log (counts kicks by you/party/raid)")
   elseif event == "CHALLENGE_MODE_COMPLETED" or event == "CHALLENGE_MODE_RESET" then
     UnregisterCombatLogEvent()
+    MA:Debug("Interrupts: stopped -- %d kicks this run", (MA.state.interrupts and MA.state.interrupts.total) or 0)
   elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
     -- CombatLogGetCurrentEventInfo() is the standard, current, real API for
     -- unpacking a COMBAT_LOG_EVENT_UNFILTERED event -- verified as the idiom

@@ -189,9 +189,40 @@ class DesktopAPI:
                 # zero-config fallback: <config dir>/avoidable_spells.json
                 or _config.resolve_avoidable_data_path(_config.load_settings())
             )
+        interrupt_data = _cli._load_effective_interrupt_data(
+            params.get("interrupt_data_path")
+            # zero-config fallback: app data folder, then the packaged
+            # community-sourced database (see bundled.py) -- until
+            # 2026-09-04 this wasn't loaded here at all, so kick-efficiency
+            # reporting silently ran on the plain "kicked at least once"
+            # heuristic for every desktop analysis, not just Watch Live.
+            or _config.resolve_interrupt_data_path(_config.load_settings()),
+            # ...with whatever this account's own logs have proven on top
+            _config.resolve_learned_interrupts_path(_config.load_settings()),
+        )
+        stealable = _cli._load_stealable(
+            params.get("stealable_data_path")
+            # zero-config fallback: <config dir>/stealable_spells.json --
+            # no packaged copy (unlike interrupt_data): there's no
+            # community database to bundle for this one, see
+            # analysis/stealable.py.
+            or _config.resolve_stealable_data_path(_config.load_settings())
+        )
 
         run_selector = str(params.get("run_selector") or "last")
         segment = _cli._pick_run(segment_runs(parse_file(log_path)), run_selector)
+        # Fold what this run proves about interruptibility back into the
+        # accumulated file, so the next analysis knows more than this one
+        # did (see analysis/interrupt_learning.py). Best-effort: a cache
+        # that can't be written must never cost the user their report.
+        try:
+            from ..analysis.interrupt_learning import update_from_events
+            update_from_events(
+                segment.events,
+                _config.resolve_learned_interrupts_path(_config.load_settings()),
+            )
+        except Exception:
+            pass
         if route is None:
             # No route pasted for this analysis: fall back to the saved
             # default for whichever dungeon this run turns out to be.
@@ -219,6 +250,8 @@ class DesktopAPI:
             route=route,
             store=store,
             avoidable=avoidable,
+            interrupt_data=interrupt_data,
+            stealable=stealable,
             pull_gap_seconds=float(params.get("pull_gap_seconds", 5.0)),
             full_cast_timeline=bool(params.get("full_cast_timeline", True)),
             death_penalty_s=float(params.get("death_penalty_s", 15.0)),
@@ -474,6 +507,23 @@ class DesktopAPI:
                 # zero-config fallback: <config dir>/avoidable_spells.json
                 or _config.resolve_avoidable_data_path(_config.load_settings())
             )
+            # zero-config fallback: app data folder, then the packaged
+            # community-sourced database (see bundled.py) -- Watch Live
+            # never loaded this at all before 2026-09-04, so every
+            # watched run's kick-efficiency reporting silently ran on the
+            # plain "kicked at least once" heuristic regardless of what
+            # was configured.
+            interrupt_data = _cli._load_effective_interrupt_data(
+                params.get("interrupt_data_path")
+                or _config.resolve_interrupt_data_path(settings),
+                _config.resolve_learned_interrupts_path(settings),
+            )
+            # zero-config fallback: <config dir>/stealable_spells.json --
+            # no packaged copy, see analysis/stealable.py.
+            stealable = _cli._load_stealable(
+                params.get("stealable_data_path")
+                or _config.resolve_stealable_data_path(settings)
+            )
         except SystemExit as exc:
             return {"ok": False, "error": str(exc)}
         except Exception as exc:
@@ -523,7 +573,7 @@ class DesktopAPI:
                 try:
                     self._handle_watched_run(
                         run, route, store, avoidable, site_url, history_db_path, addon_dir,
-                        mdt_dir,
+                        mdt_dir, interrupt_data=interrupt_data, stealable=stealable,
                     )
                 except Exception as exc:
                     self._emit_watch_event({"type": "run_failed", "error": str(exc)})
@@ -769,7 +819,8 @@ class DesktopAPI:
         return str(_config.resolve_watch_log_path(folder))
 
     def _handle_watched_run(self, run, route, store, avoidable, site_url,
-                            history_db_path, addon_dir=None, mdt_dir=None) -> None:
+                            history_db_path, addon_dir=None, mdt_dir=None,
+                            interrupt_data=None, stealable=None) -> None:
         """One completed run, from Recorder's ``on_run_complete``:
         analyze it and upload it automatically, pushing progress to the
         UI as each step happens. Reuses ``cli.py``'s own
@@ -796,7 +847,9 @@ class DesktopAPI:
         # no avoidable-damage breakdown even with the file set in the UI.
         from .. import mapart
         report = _cli._write_recorded_reports(
-            run, route, store, avoidable=avoidable,
+            run, route, store, avoidable=avoidable, interrupt_data=interrupt_data,
+            stealable=stealable,
+            learned_path=_config.resolve_learned_interrupts_path(_config.load_settings()),
             # embed the floor's map art from the user's MDT install into the
             # local report (best-effort; upload.py strips it before the site)
             enrich=lambda r: mapart.attach_map_backgrounds(r, mdt_dir, store),

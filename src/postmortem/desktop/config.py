@@ -35,7 +35,7 @@ from typing import Any, Optional
 # directory too -- e.g. for the upload token in upload.py. Re-exported
 # here so nothing that already imports them from this module breaks.
 from ..appdirs import APP_DIR_NAME, config_dir
-from ..bundled import bundled_dungeon_data_path
+from ..bundled import bundled_dungeon_data_path, bundled_interrupt_data_path
 
 SETTINGS_FILENAME = "desktop_settings.json"
 
@@ -185,6 +185,44 @@ def resolve_avoidable_data_path(settings: dict[str, Any]) -> Optional[Path]:
     return default if default.is_file() else None
 
 
+LEARNED_INTERRUPTS_FILENAME = "learned_interrupts.json"
+
+
+def resolve_learned_interrupts_path(settings: dict[str, Any]) -> Path:
+    """Where this account's own learned interruptibility evidence lives
+    (see analysis/interrupt_learning.py). Always a real path -- unlike
+    the other resolvers this one never returns None, because the file is
+    written as well as read: it accumulates a little more every time a
+    run is analyzed, and a missing file just means nothing learned yet.
+    """
+    configured = settings.get("learned_interrupts_path")
+    if configured:
+        return Path(configured)
+    return config_dir() / LEARNED_INTERRUPTS_FILENAME
+
+
+STEALABLE_FILENAME = "stealable_spells.json"
+
+
+def resolve_stealable_data_path(settings: dict[str, Any]) -> Optional[Path]:
+    """The stealable-buff spell file to load: the ``stealable_data_path``
+    setting when set, otherwise ``<config dir>/stealable_spells.json`` if
+    one has been dropped there, otherwise None (no tagging).
+
+    Same posture as ``resolve_avoidable_data_path`` -- deliberately no
+    packaged fallback (contrast ``resolve_interrupt_data_path``): there's
+    no community-maintained database this project can convert into a
+    bundled copy the way ``mplus-interrupts`` covers interrupts (see
+    ``analysis/stealable.py``'s module docstring for why), so this is a
+    real user-supplied file or nothing.
+    """
+    configured = settings.get("stealable_data_path")
+    if configured:
+        return Path(configured)
+    default = config_dir() / STEALABLE_FILENAME
+    return default if default.is_file() else None
+
+
 def resolve_dungeon_data_path(settings: dict[str, Any]) -> Optional[Path]:
     """The MDT dungeon/enemy data to analyze with: an explicit
     ``dungeon_data_path`` setting when set, else a ``dungeon_data.json``
@@ -204,6 +242,35 @@ def resolve_dungeon_data_path(settings: dict[str, Any]) -> Optional[Path]:
     if local.is_file():
         return local
     bundled = bundled_dungeon_data_path()
+    return bundled if bundled.is_file() else None
+
+
+def resolve_interrupt_data_path(settings: dict[str, Any]) -> Optional[Path]:
+    """The spell-interruptibility data to analyze with: an explicit
+    ``interrupt_data_path`` setting when set, else an ``interrupt_data.json``
+    dropped into the app's own data folder, else the copy shipped inside
+    the package (see postmortem/bundled.py), else None. Same resolution
+    order as ``resolve_dungeon_data_path`` -- this is package-maintained
+    data too (see bundled.py's own comment on why), not a user-supplied
+    file the way avoidable-damage tagging is.
+
+    Until 2026-09-04 this had no resolution at all, in the CLI or the
+    desktop app -- ``--interrupt-data`` had to be passed explicitly on
+    every CLI invocation, and the desktop app (including Watch Live)
+    never loaded or passed this data at all, so kick-efficiency reporting
+    silently ran on the plain "kicked at least once" heuristic everywhere
+    except a bare CLI call with the flag set. Fixed alongside replacing
+    the addon's now-permanently-dead live capture with a bundled,
+    community-sourced database (see interruptibility.py's module
+    docstring) that's actually worth resolving automatically.
+    """
+    configured = settings.get("interrupt_data_path")
+    if configured:
+        return Path(configured)
+    local = config_dir() / "interrupt_data.json"
+    if local.is_file():
+        return local
+    bundled = bundled_interrupt_data_path()
     return bundled if bundled.is_file() else None
 
 

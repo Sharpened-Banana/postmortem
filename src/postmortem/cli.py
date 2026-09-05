@@ -12,8 +12,10 @@ from typing import Any, Iterable, Optional
 from .analysis.avoidable import AvoidableData
 from .analysis.interruptibility import InterruptibilityData
 from .analysis.run_analyzer import analyze_run
+from .analysis.stealable import StealableData
 from .chapters import write_chapter_files
 from .clips import DEFAULT_PAD_S, FfmpegNotFoundError, clip_specs_for_chapters, cut_clips, load_chapters
+from .combatlog.events import is_hostile_npc, spell_info
 from .combatlog.parser import parse_file
 from .combatlog.segmenter import RunSegment, segment_runs
 from .mdt.decode import MDTDecodeError, decode_mdt_string
@@ -73,6 +75,50 @@ def _load_interruptibility(path: Optional[str]) -> Optional[InterruptibilityData
         return InterruptibilityData.load(path)
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
         raise SystemExit(f"error: could not load interrupt data {path}: {exc}")
+
+
+def _load_effective_interrupt_data(
+    path: Optional[str], learned_path: Optional[str | Path] = None
+) -> Optional[InterruptibilityData]:
+    """The interruptibility answers to analyze with: a loaded file (the
+    bundled community database, or an explicit --interrupt-data) with
+    anything this account's own logs have proven layered on top.
+
+    Learned data wins on conflict -- it is real observed evidence from
+    these exact logs, while a community table's spell ids are only as
+    good as the scrape behind them (confirmed real, 2026-09-05: a guide
+    listed Fel Missiles as 1216570, the damage component, where the
+    interruptible cast is actually 1216571). Either source may be absent;
+    None means "no data at all", and callers fall back to their
+    heuristic exactly as before.
+    """
+    from .analysis.interrupt_learning import InterruptObservations
+
+    base = _load_interruptibility(path)
+    if not learned_path:
+        return base
+    learned = InterruptObservations.load(learned_path).to_interrupt_data()
+    if not learned["spells"]:
+        return base
+    learned_data = InterruptibilityData(spells={
+        int(sid): dict(entry) for sid, entry in learned["spells"].items()
+    })
+    return learned_data if base is None else base.merge(learned_data)
+
+
+def _load_stealable(path: Optional[str]) -> Optional[StealableData]:
+    """Load --stealable-data. Like --avoidable-data, an explicitly-passed
+    path that fails to load is a clear CLI error (SystemExit). Omitting
+    the flag entirely just skips stealable-buff tagging (see
+    analyze_run) -- there's no bundled/extracted fallback for this one,
+    same posture as avoidable-damage tagging (see stealable.py's module
+    docstring for why)."""
+    if not path:
+        return None
+    try:
+        return StealableData.load(path)
+    except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"error: could not load stealable-spell data {path}: {exc}")
 
 
 def _resolve_timer_par_ms(args: argparse.Namespace, challenge_map_id: Optional[int]) -> Optional[int]:
@@ -271,6 +317,178 @@ def cmd_extract_interrupts(args: argparse.Namespace) -> int:
     return 0
 
 
+def _add_interrupt_spell(spells: dict[str, Any], spell_id: int, name: str) -> bool:
+    """Record one confirmed-interruptible spell. Returns True if this was
+    a *conflicting* duplicate -- the same id already recorded under a
+    different name, which would be a real data problem (spell ids don't
+    get reused for unrelated effects). The first name wins either way, so
+    a conflict is reported, never fatal. The same id arriving twice under
+    the same name is just an ability shared by several NPCs: not a
+    conflict, silently ignored."""
+    existing = spells.get(str(spell_id))
+    if existing is None:
+        spells[str(spell_id)] = {"name": name, "interruptible": True}
+        return False
+    return existing["name"] != name
+
+
+def cmd_build_interrupt_data(args: argparse.Namespace) -> int:
+    """Convert a community "which mechanics matter in this dungeon" source
+    file (schema: albvar/mplus-interrupts, MIT-licensed -- see
+    ``docs/THIRD_PARTY_NOTICES.md``) into the JSON shape
+    ``InterruptibilityData.load()`` reads, and (unless --no-bundle) also
+    writes it to this package's own ``data/interrupt_data.json`` so every
+    consumer (CLI, desktop app, Watch Live, the public site) picks it up
+    with zero configuration -- see bundled.py.
+
+    The addon's own live capture (``extract-interrupts``) is permanently
+    dead: Patch 12.0.0 made the client's interruptible flag unreadable by
+    addon code (see InterruptDatabase.lua's own comment) -- this is its
+    replacement data source. Deliberately reads a LOCAL file, not a live
+    network fetch: like extract-data, refreshing this is a manual,
+    once-per-season step (the source repo's own README describes the same
+    per-season refresh cadence), not something this project's offline,
+    stdlib-only runtime does for itself.
+
+    Source-format nuance worth knowing (see interruptibility.py's module
+    docstring, and CLI help below): this source only ever tags an ability
+    as "here's an interrupt worth using" -- it never says "this cannot be
+    interrupted". So every spell this produces is written with
+    ``interruptible: true``; nothing ever gets ``false`` from this path.
+    That's still a real improvement over the plain "kicked at least once"
+    heuristic (see analysis/run_analyzer.py's _enemy_cast_summary): a
+    documented interrupt that lands zero kicks all key now correctly
+    counts against kick efficiency instead of being invisible.
+    """
+    try:
+        with open(args.source, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except OSError as exc:
+        raise SystemExit(f"error: could not read {args.source}: {exc}")
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"error: {args.source} is not valid JSON: {exc}")
+
+    dungeons = payload.get("dungeons")
+    if not isinstance(dungeons, list):
+        raise SystemExit(
+            f"error: {args.source} doesn't look like an mplus-interrupts "
+            "export (no top-level \"dungeons\" list)"
+        )
+
+    # Optional: resolve ability NAMES against spell ids actually seen in
+    # real combat logs, instead of trusting the source's own ids.
+    # Confirmed necessary (2026-09-05): a guide listed Fel Missiles as
+    # 1216570 -- the damage component -- where the interruptible cast is
+    # 1216571, so a naive import silently matches nothing. Names are what
+    # a guide gets reliably right; ids are what the log gets right.
+    name_to_ids: dict[str, set[int]] = {}
+    for log in args.resolve_from or []:
+        try:
+            for event in parse_file(log):
+                if event.name not in ("SPELL_CAST_START", "SPELL_CAST_SUCCESS"):
+                    continue
+                if not is_hostile_npc(event.source_flags):
+                    continue
+                sp = spell_info(event)
+                if sp is not None:
+                    name_to_ids.setdefault(sp.spell_name.casefold(), set()).add(sp.spell_id)
+        except OSError as exc:
+            print(f"warning: skipping {log}: {exc}", file=sys.stderr)
+
+    spells: dict[str, Any] = {}
+    skipped_conflicts = 0
+    unresolved: list[str] = []
+    for dungeon in dungeons:
+        if not isinstance(dungeon, dict):
+            continue
+        for ability in dungeon.get("abilities", []) or []:
+            if not isinstance(ability, dict) or ability.get("category") != "interrupt":
+                continue
+            name = ability.get("spell_name") or ""
+            if name_to_ids:
+                # Every id this ability's NAME actually had in the logs --
+                # plural on purpose, since the same ability cast by
+                # different NPCs legitimately carries different ids.
+                resolved = sorted(name_to_ids.get(name.casefold(), ()))
+                if not resolved:
+                    unresolved.append(f"{dungeon.get('name', '?')}: {name}")
+                    continue
+            else:
+                spell_id = ability.get("spell_id")
+                if not isinstance(spell_id, int):
+                    continue
+                resolved = [spell_id]
+            for spell_id in resolved:
+                label = name or f"spell:{spell_id}"
+                if _add_interrupt_spell(spells, spell_id, label):
+                    skipped_conflicts += 1
+                    print(
+                        f"warning: spell {spell_id} tagged as both "
+                        f"{spells[str(spell_id)]['name']!r} and {label!r} "
+                        f"-- keeping the first", file=sys.stderr,
+                    )
+            continue
+
+    out_payload = {
+        "spells": spells,
+        # Carried through for traceability -- which season/source/version
+        # this bundled file was built from, same spirit as dungeon_data.json's
+        # own "source"/"generated_at" fields.
+        "source": payload.get("source"),
+        "season": payload.get("season"),
+        "source_version": payload.get("version"),
+    }
+    with open(args.output, "w", encoding="utf-8") as fh:
+        json.dump(out_payload, fh, indent=1)
+    for miss in unresolved:
+        print(f"warning: no spell id in the logs for {miss} -- omitted rather "
+              f"than guessed", file=sys.stderr)
+    print(f"built {len(spells)} confirmed-interruptible spells -> {args.output}"
+          + (f" ({skipped_conflicts} conflicting duplicate(s) skipped)" if skipped_conflicts else ""))
+
+    if not args.no_bundle:
+        from .bundled import bundled_interrupt_data_path
+        bundled_path = bundled_interrupt_data_path()
+        bundled_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(args.output, bundled_path)
+        print(f"also copied to the bundled package location: {bundled_path}")
+    return 0
+
+
+def cmd_learn_interrupts(args: argparse.Namespace) -> int:
+    """Fold one or more combat logs into an accumulated interruptibility
+    file learned from real play (see analysis/interrupt_learning.py).
+
+    Exists so an existing pile of logs can seed the file in one go
+    instead of only learning from runs analyzed after the feature
+    landed. Re-running over the same log is safe in the sense that it
+    only ever adds evidence -- but it does double-count that log's
+    observations, so point it at each log once.
+    """
+    from .analysis.interrupt_learning import InterruptObservations, observe_events
+
+    acc = InterruptObservations.load(args.output)
+    before = len(acc.spells)
+    for path in args.logs:
+        try:
+            for segment in segment_runs(parse_file(path)):
+                acc.merge(observe_events(segment.events))
+        except OSError as exc:
+            print(f"warning: skipping {path}: {exc}", file=sys.stderr)
+            continue
+        print(f"  read {path}")
+    acc.save(args.output)
+
+    data = acc.to_interrupt_data(min_attempts=args.min_attempts)["spells"]
+    yes = sum(1 for v in data.values() if v["interruptible"])
+    no = len(data) - yes
+    print(f"learned from {len(args.logs)} log(s) -> {args.output}")
+    print(f"  {len(acc.spells)} spells observed ({len(acc.spells) - before} new)")
+    print(f"  {yes} confirmed interruptible, {no} confirmed NOT interruptible "
+          f"(>= {args.min_attempts} failed attempts, never once interrupted)")
+    return 0
+
+
 def cmd_runs(args: argparse.Namespace) -> int:
     # Consumed one segment at a time (no list(...)): each RunSegment's
     # events are only needed for summary() and are eligible for GC as soon
@@ -297,6 +515,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     store = _load_store(args.dungeon_data)
     avoidable = _load_avoidable(args.avoidable_data)
     interrupt_data = _load_interruptibility(args.interrupt_data)
+    stealable = _load_stealable(args.stealable_data)
     # Stream segments directly into _pick_run rather than list(...)-ing them
     # all up front — for a numeric --run it stops parsing once the wanted
     # run is found, and never retains other runs' event lists either way.
@@ -310,6 +529,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         store=store,
         avoidable=avoidable,
         interrupt_data=interrupt_data,
+        stealable=stealable,
         pull_gap_seconds=args.pull_gap,
         full_cast_timeline=not args.no_cast_timeline,
         death_penalty_s=args.death_penalty,
@@ -468,7 +688,7 @@ def cmd_index(args: argparse.Namespace) -> int:
 
 def _write_recorded_reports(
     run, route, store, pull_gap_seconds: float = 5.0, avoidable=None,
-    enrich=None,
+    interrupt_data=None, stealable=None, learned_path=None, enrich=None,
 ) -> Optional[dict]:
     """Analyze one recorded run's log slice and write its JSON/HTML/text
     reports, plus the chapters sidecars (``<run>.chapters.json`` /
@@ -506,8 +726,19 @@ def _write_recorded_reports(
     segments = list(segment_runs(parse_file(run.path)))
     if not segments:
         return None
+    if learned_path:
+        # Fold this run's own evidence into the accumulated
+        # interruptibility file (see analysis/interrupt_learning.py).
+        # Best-effort, like the enrich hook below: a cache that can't be
+        # written must never cost the run its reports.
+        try:
+            from .analysis.interrupt_learning import update_from_events
+            update_from_events(segments[-1].events, learned_path)
+        except Exception as exc:
+            print(f"warning: could not update learned interrupts: {exc}", file=sys.stderr)
     report = analyze_run(segments[-1], route=route, store=store,
-                         avoidable=avoidable, pull_gap_seconds=pull_gap_seconds)
+                         avoidable=avoidable, interrupt_data=interrupt_data,
+                         stealable=stealable, pull_gap_seconds=pull_gap_seconds)
     if enrich is not None:
         # A caller-supplied pass over the finished report before anything
         # is rendered or written -- the desktop app uses it to embed the
@@ -666,6 +897,47 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--output", default="interrupt_data.json")
     p.set_defaults(func=cmd_extract_interrupts)
 
+    p = sub.add_parser(
+        "build-interrupt-data",
+        help="convert a community mechanics source (albvar/mplus-interrupts "
+             "schema) into interrupt-data JSON, and bundle it into this "
+             "package by default -- see cli.py's cmd_build_interrupt_data "
+             "for why this replaces extract-interrupts as the primary source",
+    )
+    p.add_argument("source",
+                    help="path to a local mplus-interrupts-schema JSON file "
+                         "(download the latest from "
+                         "https://github.com/albvar/mplus-interrupts -- "
+                         "this command reads a local file, it does not "
+                         "fetch over the network itself)")
+    p.add_argument("-o", "--output", default="interrupt_data.json")
+    p.add_argument("--resolve-from", nargs="+", metavar="LOG",
+                    help="resolve ability NAMES to spell ids using real "
+                         "combat logs instead of trusting the source's own "
+                         "ids (strongly recommended -- guide ids often point "
+                         "at an ability's damage component rather than its "
+                         "interruptible cast)")
+    p.add_argument("--no-bundle", action="store_true",
+                    help="don't also copy the result into this package's "
+                         "own data/ folder (see bundled.py)")
+    p.set_defaults(func=cmd_build_interrupt_data)
+
+    p = sub.add_parser(
+        "learn-interrupts",
+        help="learn which enemy casts are (and aren't) interruptible from "
+             "your own combat logs -- see analysis/interrupt_learning.py",
+    )
+    p.add_argument("logs", nargs="+", help="combat logs or recorded run slices")
+    p.add_argument("-o", "--output", default="learned_interrupts.json",
+                    help="accumulated observations file to create/update "
+                         "(the desktop app keeps its own in the app data "
+                         "folder and updates it after every analyzed run)")
+    p.add_argument("--min-attempts", type=int, default=3,
+                    help="failed interrupt attempts, with zero successes "
+                         "ever, before a spell counts as uninterruptible "
+                         "(default 3; raise it for more confidence)")
+    p.set_defaults(func=cmd_learn_interrupts)
+
     p = sub.add_parser("runs", help="list Mythic+ runs found in a combat log")
     p.add_argument("log", help="path to WoWCombatLog.txt")
     p.set_defaults(func=cmd_runs)
@@ -681,9 +953,18 @@ def build_parser() -> argparse.ArgumentParser:
                         "user-maintained; see docs/avoidable_spells.example.json) "
                         "to break out avoidable damage taken per player")
     p.add_argument("--interrupt-data",
-                   help="JSON file of addon-captured spell-interruptibility "
-                        "data (ground truth from the game client, not a "
-                        "curated list; see `extract-interrupts`)")
+                   help="JSON file of spell-interruptibility data: either "
+                        "the bundled community database (see "
+                        "`build-interrupt-data`; this is what the desktop "
+                        "app and Watch Live fall back to automatically) or "
+                        "an old addon-captured extraction (see "
+                        "`extract-interrupts` -- the live capture path "
+                        "itself is permanently dead as of Patch 12.0.0)")
+    p.add_argument("--stealable-data",
+                   help="JSON file tagging spellsteal-worthy buff spell ids "
+                        "(community/user-maintained, like --avoidable-data; "
+                        "see docs/stealable_spells.example.json) to "
+                        "highlight them in the enemy-casts table")
     p.add_argument("--format", default="text",
                    help="comma-separated: text,json,html (default: text)")
     p.add_argument("--out", help="directory to write reports into (default: stdout/cwd)")

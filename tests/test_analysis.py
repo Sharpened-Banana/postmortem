@@ -22,7 +22,10 @@ from conftest import (
 
 from postmortem.analysis.avoidable import AvoidableData
 from postmortem.analysis.compare import compare_route
-from postmortem.analysis.interruptibility import InterruptibilityData
+from postmortem.analysis.interruptibility import (
+    KNOWN_UNINTERRUPTIBLE_SPELL_IDS,
+    InterruptibilityData,
+)
 from postmortem.analysis.pulls import ActualPull, UnitEngagement, detect_pulls
 from postmortem.analysis.run_analyzer import (
     _cc_summary,
@@ -31,6 +34,7 @@ from postmortem.analysis.run_analyzer import (
     analyze_run,
 )
 from postmortem.analysis.stats import RunStats, compute_stats
+from postmortem.analysis.stealable import StealableData
 from postmortem.combatlog.parser import iter_events
 from postmortem.combatlog.segmenter import segment_runs
 from postmortem.mdt.dungeon_data import DungeonData, DungeonDataStore, Enemy
@@ -494,14 +498,17 @@ class TestEnemyCastSummary:
         assert by_name["Dark Bolt"] == {
             "spell_id": 1216538, "name": "Dark Bolt", "kicked": 1,
             "got_through": 2, "expired": 0, "interruptible": None,
+            "stealable": False,
         }
         assert by_name["Creeping Rot"] == {
             "spell_id": 777001, "name": "Creeping Rot", "kicked": 1,
             "got_through": 1, "expired": 0, "interruptible": None,
+            "stealable": False,
         }
         assert by_name["Void Mending"] == {
             "spell_id": 888001, "name": "Void Mending", "kicked": 1,
             "got_through": 1, "expired": 1, "interruptible": None,
+            "stealable": False,
         }
 
     def test_confirmed_uninterruptible_spell_excluded(self):
@@ -567,6 +574,7 @@ class TestEnemyCastSummary:
         assert result["spells"][0] == {
             "spell_id": 444, "name": "Sometimes Kicked", "kicked": 3,
             "got_through": 7, "expired": 0, "interruptible": True,
+            "stealable": False,
         }
         # 100 * 3 / (3 + 7) = 30.0
         assert result["kick_efficiency_pct"] == 30.0
@@ -586,6 +594,164 @@ class TestEnemyCastSummary:
         # unchanged from the interrupt_data=None case, since none of this
         # run's spells are in the loaded (unrelated) interrupt_data
         assert result["kick_efficiency_pct"] == 42.9
+
+
+class TestChanneledEnemyCasts:
+    """Channels log SPELL_CAST_SUCCESS up front with no SPELL_CAST_START
+    and stay interruptible for their duration, so tracking only
+    SPELL_CAST_START missed them entirely -- confirmed real (2026-09-05):
+    57 of 730 landed interrupts across 13 runs (8%) were on channels
+    absent from the kick table, and adding them moved one real run's kick
+    efficiency from 11.5% to 21.5%.
+
+    Instant casts reach the same "CAST_SUCCESS with no open hard cast"
+    path and can never be interrupted, so only channels actually
+    interrupted at least once are allowed into the report."""
+
+    def _run(self, build):
+        from conftest import DPS1, HOSTILE, LogBuilder
+        b = LogBuilder()
+        mob = b.npc_guid(555000, "0001")
+        b.start(0)
+        b.combatant(0.5, DPS1)
+        build(b, mob, DPS1)
+        b.end(200)
+        segs = list(segment_runs(iter_events(b.text().splitlines())))
+        return analyze_run(segs[-1])["enemy_casts"]
+
+    def test_interrupted_channel_is_counted(self):
+        def build(b, mob, dps):
+            # three channels, one of them kicked
+            b.npc_cast_success(10, mob, "Test Mob", 900700, "Test Channel")
+            b.interrupt(11, dps, mob, "Test Mob", 2139, "Counterspell", 900700, "Test Channel")
+            b.npc_cast_success(20, mob, "Test Mob", 900700, "Test Channel")
+            b.npc_cast_success(30, mob, "Test Mob", 900700, "Test Channel")
+        ec = self._run(build)
+        entry = next(s for s in ec["spells"] if s["spell_id"] == 900700)
+        assert entry["kicked"] == 1
+        assert entry["got_through"] == 2   # the two never interrupted
+
+    def test_uninterrupted_instant_casts_stay_out_of_the_report(self):
+        def build(b, mob, dps):
+            for t in (10, 12, 14, 16):
+                b.npc_cast_success(t, mob, "Test Mob", 900701, "Instant Nuke")
+        ec = self._run(build)
+        assert all(s["spell_id"] != 900701 for s in ec["spells"])
+
+    def test_hard_casts_are_unaffected(self):
+        def build(b, mob, dps):
+            b.npc_cast_start(10, mob, "Test Mob", 900702, "Hard Cast")
+            b.npc_cast_success(12, mob, "Test Mob", 900702, "Hard Cast")
+        ec = self._run(build)
+        entry = next(s for s in ec["spells"] if s["spell_id"] == 900702)
+        assert (entry["kicked"], entry["got_through"]) == (0, 1)
+
+
+class TestEnemyCastSummaryKnownUninterruptible:
+    """A weekly M+ affix mechanic (see KNOWN_UNINTERRUPTIBLE_SPELL_IDS) is
+    excluded unconditionally -- confirmed real, 2026-09-05: "Xal'atath's
+    Bargain: Devour" (465051) showed 0 kicked / 19-20 landed in two real
+    reports the same week, cluttering the table with something no kick
+    could ever have stopped."""
+
+    AFFIX_SPELL_ID = next(iter(KNOWN_UNINTERRUPTIBLE_SPELL_IDS))
+
+    def test_excluded_even_with_no_interrupt_data_at_all(self):
+        stats = RunStats(enemy_cast_outcomes={
+            self.AFFIX_SPELL_ID: {"name": "Affix Mechanic", "kicked": 0, "landed": 20, "expired": 0},
+            111: {"name": "Normal Cast", "kicked": 1, "landed": 1, "expired": 0},
+        })
+        result = _enemy_cast_summary(stats)
+        names = [s["name"] for s in result["spells"]]
+        assert names == ["Normal Cast"]
+
+    def test_excluded_even_if_interrupt_data_would_otherwise_confirm_it_true(self):
+        # The hardcoded exclusion wins regardless of what any loaded
+        # interrupt_data says -- this is a design fact, not a guess a
+        # community file could contradict.
+        stats = RunStats(enemy_cast_outcomes={
+            self.AFFIX_SPELL_ID: {"name": "Affix Mechanic", "kicked": 0, "landed": 20, "expired": 0},
+        })
+        interrupt_data = InterruptibilityData(spells={
+            self.AFFIX_SPELL_ID: {"name": "Affix Mechanic", "interruptible": True},
+        })
+        result = _enemy_cast_summary(stats, interrupt_data)
+        assert result["spells"] == []
+
+    def test_never_kicked_affix_cast_does_not_affect_efficiency(self):
+        """Confirmed against a real report (2026-09-05, Murder Row): this
+        spell was never counted toward kick_efficiency_pct even before
+        this exclusion existed (kicked=0 already skipped the old
+        heuristic's counting), so removing it from the table must not
+        change the percentage -- only visual clutter goes away."""
+        stats = RunStats(enemy_cast_outcomes={
+            self.AFFIX_SPELL_ID: {"name": "Affix Mechanic", "kicked": 0, "landed": 20, "expired": 0},
+            222: {"name": "Kicked Once", "kicked": 1, "landed": 1, "expired": 0},
+        })
+        without_affix = _enemy_cast_summary(RunStats(enemy_cast_outcomes={
+            222: {"name": "Kicked Once", "kicked": 1, "landed": 1, "expired": 0},
+        }))
+        with_affix = _enemy_cast_summary(stats)
+        assert with_affix["kick_efficiency_pct"] == without_affix["kick_efficiency_pct"] == 50.0
+
+
+class TestEnemyCastSummaryStealable:
+    """The ``stealable`` flag (see stealable.py) is independent of
+    interrupt_data/kick efficiency -- purely a display tag with no effect
+    on the efficiency math, unlike ``interruptible``."""
+
+    def test_untagged_spell_is_stealable_false_not_none(self):
+        stats = RunStats(enemy_cast_outcomes={
+            111: {"name": "Some Cast", "kicked": 1, "landed": 1, "expired": 0},
+        })
+        result = _enemy_cast_summary(stats, stealable=StealableData(spells={
+            222: {"name": "A Different Spell", "note": None},
+        }))
+        assert result["spells"][0]["stealable"] is False
+
+    def test_tagged_spell_is_stealable_true(self):
+        stats = RunStats(enemy_cast_outcomes={
+            111: {"name": "Empowering Shield", "kicked": 0, "landed": 2, "expired": 0},
+        })
+        result = _enemy_cast_summary(stats, stealable=StealableData(spells={
+            111: {"name": "Empowering Shield", "note": "big shield, steal it"},
+        }))
+        assert result["spells"][0]["stealable"] is True
+
+    def test_no_stealable_data_defaults_false(self):
+        stats = RunStats(enemy_cast_outcomes={
+            111: {"name": "Some Cast", "kicked": 1, "landed": 1, "expired": 0},
+        })
+        result = _enemy_cast_summary(stats)
+        assert result["spells"][0]["stealable"] is False
+
+    def test_stealable_does_not_affect_kick_efficiency(self):
+        """A stealable tag alone must not change whether a spell counts
+        toward efficiency -- that's still purely interrupt_data's job."""
+        stats = RunStats(enemy_cast_outcomes={
+            111: {"name": "Never Kicked", "kicked": 0, "landed": 5, "expired": 0},
+        })
+        result = _enemy_cast_summary(stats, stealable=StealableData(spells={
+            111: {"name": "Never Kicked", "note": None},
+        }))
+        assert result["spells"][0]["stealable"] is True
+        assert result["spells"][0]["interruptible"] is None
+        # never kicked, no interrupt ground truth -> still excluded from
+        # the efficiency denominator despite being stealable
+        assert result["kick_efficiency_pct"] is None
+
+    def test_confirmed_uninterruptible_and_stealable_can_coexist(self):
+        stats = RunStats(enemy_cast_outcomes={
+            111: {"name": "Weird Combo", "kicked": 0, "landed": 3, "expired": 0},
+        })
+        interrupt_data = InterruptibilityData(spells={
+            111: {"name": "Weird Combo", "interruptible": False},
+        })
+        stealable = StealableData(spells={111: {"name": "Weird Combo", "note": None}})
+        result = _enemy_cast_summary(stats, interrupt_data, stealable)
+        # confirmed-uninterruptible exclusion still wins -- stealable
+        # tagging doesn't rescue a spell interrupt_data says to drop
+        assert result["spells"] == []
 
 
 class TestRealFormatAccuracy:
@@ -712,6 +878,19 @@ class TestAnalyzeRun:
         kicks = payload["kick_value"]
         assert kicks["total_estimated_prevented_damage"] == 245000
         assert kicks["total_estimated_prevented_healing"] == 80000
+        # The two summary tiles (damage, enemy healing) must together
+        # equal the players table's combined "Kick prev. (dmg+heal)"
+        # column. Real report (2026-09-05): only the damage tile existed,
+        # so a run whose kicks mostly stopped enemy *healing* showed
+        # ~2.11m in the summary against ~7.94m added up across the player
+        # rows -- same underlying numbers, two different subsets, no way
+        # for a reader to reconcile them.
+        column_total = sum(
+            (p.get("kick_prevented_damage") or 0) + (p.get("kick_prevented_healing") or 0)
+            for p in payload["players"]
+        )
+        assert column_total == (kicks["total_estimated_prevented_damage"]
+                                + kicks["total_estimated_prevented_healing"])
         assert kicks["by_player"][0]["name"] == "Thicktank-Area52"
         obs = {(o["spell_id"], o["kind"]): o for o in kicks["spell_observations"]}
         assert obs[(1216538, "damage")]["avg_per_cast"] == 200000
@@ -798,6 +977,12 @@ class TestAnalyzeRun:
         html = render_html(report)
         assert "<html" in html and "Murder Row" in html
         assert "</script>" in html
+        # both kick-value tiles exist in the template, and the players
+        # column says which components it combines (see the reconciliation
+        # assertion in test_full_report)
+        assert "dmg prevented by kicks (est.)" in html
+        assert "enemy healing prevented by kicks (est.)" in html
+        assert "Kick prev. (dmg+heal)" in html
         # no --avoidable-data passed: no section in either renderer (the
         # HTML template's JS source always defines avoidableDamage(), but
         # without avoidable_damage data in the embedded JSON it renders "")
@@ -810,6 +995,52 @@ class TestAnalyzeRun:
         # substring-presence of "<svg" in the page's JS source text.
         assert "<svg" in html
         assert '"map":' in html
+
+    def test_stealable_data_flows_through_and_colors_the_reports(
+        self, run_segment, route, dungeon_data_file,
+    ):
+        from postmortem.report.html import render_html
+        from postmortem.report.text import render_text
+
+        store = DungeonDataStore.load(dungeon_data_file)
+        stealable = StealableData(spells={1216538: {"name": "Dark Bolt", "note": None}})
+        report = analyze_run(run_segment, route=route, store=store, stealable=stealable)
+
+        by_name = {s["name"]: s for s in report["enemy_casts"]["spells"]}
+        assert by_name["Dark Bolt"]["stealable"] is True
+        assert by_name["Creeping Rot"]["stealable"] is False
+
+        # render_html() only embeds the report as JSON -- the "stealable"
+        # row class/star are generated client-side by the template's JS
+        # from that JSON at page-load, not by this Python renderer (same
+        # reasoning as test_renderers' own avoidable-damage checks below:
+        # what distinguishes "this section has data" from html's output
+        # is the embedded JSON, not literal rendered markup). The CSS
+        # (static, always present) and the client-side rendering logic
+        # that reads r.stealable are checked instead of a visual result.
+        html = render_html(report)
+        assert '"stealable": true' in html
+        assert "tr.stealable" in html  # CSS for the row highlight exists
+        assert "s.stealable" in html  # the JS template actually reads the flag
+
+        text = render_text(report)
+        assert "* Dark Bolt" in text
+        assert "  Creeping Rot" in text  # untagged: two-space prefix, no star
+        assert "* = worth Spellstealing" in text
+
+    def test_no_stealable_data_never_shows_the_stealable_flag_or_star(
+        self, run_segment, route, dungeon_data_file,
+    ):
+        from postmortem.report.html import render_html
+        from postmortem.report.text import render_text
+
+        store = DungeonDataStore.load(dungeon_data_file)
+        report = analyze_run(run_segment, route=route, store=store)
+        html = render_html(report)
+        assert '"stealable": true' not in html
+        text = render_text(report)
+        assert "worth Spellstealing" not in text
+        assert not any(line.startswith("* ") for line in text.splitlines())
 
     def test_html_title_escapes_a_malicious_zone_name(self):
         # Stored-XSS regression (2026-09-01): the report <title> took the
