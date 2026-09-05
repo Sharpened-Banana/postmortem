@@ -116,6 +116,27 @@ class TestResolveAvoidableDataPath:
         assert config.resolve_avoidable_data_path({"avoidable_data_path": None}) is None
 
 
+class TestResolveStealableDataPath:
+    """Same shape as TestResolveAvoidableDataPath -- deliberately no
+    packaged-copy fallback (contrast dungeon/interrupt data), see that
+    function's own docstring."""
+
+    def test_explicit_setting_wins(self, isolated_config_dir):
+        isolated_config_dir.mkdir(parents=True)
+        (isolated_config_dir / config.STEALABLE_FILENAME).write_text("{}", encoding="utf-8")
+        got = config.resolve_stealable_data_path({"stealable_data_path": "/explicit/list.json"})
+        assert got == config.Path("/explicit/list.json")
+
+    def test_default_file_in_config_dir_is_picked_up(self, isolated_config_dir):
+        isolated_config_dir.mkdir(parents=True)
+        default = isolated_config_dir / config.STEALABLE_FILENAME
+        default.write_text("{}", encoding="utf-8")
+        assert config.resolve_stealable_data_path({"stealable_data_path": None}) == default
+
+    def test_none_when_nothing_configured_or_present(self, isolated_config_dir):
+        assert config.resolve_stealable_data_path({"stealable_data_path": None}) is None
+
+
 class TestResolveDungeonDataPath:
     """Explicit setting > a dungeon_data.json in the app's data folder >
     the copy packaged with postmortem > None."""
@@ -142,6 +163,33 @@ class TestResolveDungeonDataPath:
             lambda: isolated_config_dir / "nope" / "dungeon_data.json",
         )
         assert config.resolve_dungeon_data_path({}) is None
+
+
+class TestResolveInterruptDataPath:
+    """Same resolution order as dungeon data (package-maintained, bundled
+    by default), not avoidable data (user-supplied) -- see that function's
+    own docstring for why."""
+
+    def test_explicit_setting_wins(self, isolated_config_dir):
+        got = config.resolve_interrupt_data_path({"interrupt_data_path": "/x/interrupts.json"})
+        assert got == config.Path("/x/interrupts.json")
+
+    def test_file_in_config_dir_beats_the_packaged_copy(self, isolated_config_dir):
+        isolated_config_dir.mkdir(parents=True)
+        local = isolated_config_dir / "interrupt_data.json"
+        local.write_text("{}", encoding="utf-8")
+        assert config.resolve_interrupt_data_path({}) == local
+
+    def test_falls_back_to_the_packaged_copy(self, isolated_config_dir):
+        got = config.resolve_interrupt_data_path({})
+        assert got is not None and got.name == "interrupt_data.json" and got.is_file()
+
+    def test_none_when_nothing_is_available(self, isolated_config_dir, monkeypatch):
+        monkeypatch.setattr(
+            config, "bundled_interrupt_data_path",
+            lambda: isolated_config_dir / "nope" / "interrupt_data.json",
+        )
+        assert config.resolve_interrupt_data_path({}) is None
 
 
 class TestResolveDefaultRoute:

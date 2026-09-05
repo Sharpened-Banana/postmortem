@@ -15,17 +15,11 @@ local ADDON_NAME, MA = ...
 -- True while a Mythic+ key is actively running.
 -- verified against EllesmereUIMythicTimer.lua:2760-2769 (real, currently-
 -- shipping addon source), cross-referenced against Details_MythicPlus.
+-- Shared with Overlay.lua via Bootstrap.lua's MA:IsKeyActive(), which also
+-- answers true in debug mode (/pm debug) so this file's reload-recovery
+-- path and the overlay agree on "a key is running".
 local function IsKeyActive()
-  if C_ChallengeMode.GetActiveChallengeMapID() then return true end
-  -- IsChallengeModeActive() flips false immediately at completion, before
-  -- our own CHALLENGE_MODE_COMPLETED handler has necessarily finished, so
-  -- fall back to the same instance-type/difficulty check MDT's own
-  -- CombatLogging.lua already uses for "am I in a Mythic+ instance".
-  -- verified against MythicDungeonTools/Core/CombatLogging.lua:67-69
-  -- (real, currently-shipping code): local _, instanceType, difficultyID =
-  -- GetInstanceInfo(); partyDifficultyToContent[8] == Mythic+.
-  local _, instanceType, difficultyID = GetInstanceInfo()
-  return instanceType == "party" and difficultyID == 8
+  return MA:IsKeyActive()
 end
 
 -- How long the overlay keeps showing final numbers after a key ends before
@@ -172,6 +166,10 @@ local function StartRun()
   -- Populate immediately instead of waiting for the next 1s Blizzard tick,
   -- so the overlay has real numbers (not just zeros) the moment it shows.
   MA:Tracker_OnTick()
+  MA:Debug("Tracker: run started -- forces %s/%s, elapsed %ss, deaths %d, tick hook %s",
+    tostring(MA.state.forces.current), tostring(MA.state.forces.total),
+    tostring(MA.state.elapsed), MA.state.deaths or 0,
+    tickHookInstalled and "installed" or "NOT installed (no ChallengeModeBlock; debug ticker drives ticks)")
 end
 
 -- Shared end path for CHALLENGE_MODE_COMPLETED and CHALLENGE_MODE_RESET.
@@ -199,6 +197,9 @@ local function EndRun(event)
 
   MA.state.active = false
   UnregisterRunEvents()
+  MA:Debug("Tracker: run ended (%s) -- final elapsed %ss, deaths %d, forces %.1f%%",
+    tostring(event), tostring(MA.state.elapsed), MA.state.deaths or 0,
+    (MA.state.forces and MA.state.forces.percent) or 0)
 
   -- Keep the overlay up for RECAP_DURATION_S showing final numbers, instead
   -- of it vanishing the instant IsKeyActive() flips false (see
@@ -227,11 +228,15 @@ end
 -- shipping code and comment): "API data isn't fully populated at PEW;
 -- retry once after 10s to catch a /reload mid-key."
 local function CheckForActiveKeyAfterReload()
+  -- Debug mode starts the run itself (Bootstrap.lua's Debug_Start), so
+  -- don't also soft-start here -- that would run StartRun twice on login.
+  if MA:IsDebugMode() then return end
   if IsKeyActive() and not MA.state.active then
     StartRun()
   end
 end
 
+MA:RegisterKeyEventFrame(trackerFrame)
 trackerFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 trackerFrame:RegisterEvent("CHALLENGE_MODE_START")
 trackerFrame:RegisterEvent("CHALLENGE_MODE_COMPLETED")

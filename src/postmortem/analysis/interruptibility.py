@@ -1,18 +1,29 @@
-"""Real, addon-captured spell-interruptibility data.
+"""Spell-interruptibility data: which enemy casts are (or aren't) kickable.
 
-Unlike avoidable-damage tagging (see ``avoidable.py`` -- a hand-curated
-community/user-maintained file), this data is captured live in-game by the
-WoW addon itself: every enemy cast the player has ever seen gets checked
-against WoW's own ``UnitCastingInfo()``/``UnitChannelInfo()`` return values
-and recorded, per spell id, with the game's own ground-truth interruptible
-flag (see ``addon/Postmortem/InterruptDatabase.lua``) -- no guessing or
-manual curation involved, just an accumulating log of what the client has
-actually observed.
+This USED to be captured live in-game by the WoW addon itself, checking
+every observed enemy cast against ``UnitCastingInfo()``/
+``UnitChannelInfo()``'s own ground-truth interruptible flag (see
+``addon/Postmortem/InterruptDatabase.lua``). That path is now permanently
+dead: Patch 12.0.0 made that flag a "secret" value addon code cannot read
+into a real boolean at all (Blizzard's own "Secret Values" anti-exploit
+system, confirmed 2026-09-04 -- deliberate and, per Blizzard's own planned-
+API notes, not expected to get a replacement API any time soon). Old
+captures can still be extracted with ``postmortem extract-interrupts`` and
+loaded here -- the JSON shape below hasn't changed -- but no client on
+Patch 12.0.0+ can ever add a new entry to one again.
 
-The addon persists this as a ``PostmortemSpellDB`` SavedVariables
-table. ``postmortem extract-interrupts`` (see ``cli.py``) pulls that
-table out of the addon's SavedVariables file and writes it out in the JSON
-shape this module reads:
+The primary source now is ``postmortem build-interrupt-data`` (see
+``cli.py``), which converts a community mechanics-guide export (schema:
+albvar/mplus-interrupts, MIT -- see ``docs/THIRD_PARTY_NOTICES.md``) into
+this same shape, and is what ``bundled.py``'s ``bundled_interrupt_data_path()``
+ships by default so every consumer (CLI, desktop app, Watch Live, the
+public site) gets it with zero configuration. One real limitation worth
+knowing: that source only ever tags "this is worth interrupting" -- it
+never asserts "this cannot be interrupted" the way the live client flag
+used to. So spells built from it are always ``interruptible: true``;
+``false`` entries, if any exist at all, can only come from an old
+addon-captured extraction. See ``.get()``'s own docstring for how that
+plays with the "kicked at least once" fallback heuristic.
 
     {
       "spells": {
@@ -23,10 +34,10 @@ shape this module reads:
 
 ``spells`` is keyed by spell id (as a JSON string key, since JSON object
 keys are always strings -- converted back to int on load). A spell id
-absent from this dict was never seen/recorded by the addon; that is
-distinct from a spell id that *was* seen and confirmed interruptible or
-not, so ``.get()`` returns ``None`` for "no data" rather than conflating it
-with either boolean outcome.
+absent from this dict has no data either way; that is distinct from a
+spell id that *is* present and confirmed interruptible or not, so
+``.get()`` returns ``None`` for "no data" rather than conflating it with
+either boolean outcome.
 """
 
 from __future__ import annotations

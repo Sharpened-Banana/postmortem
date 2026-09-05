@@ -6,6 +6,8 @@ from pathlib import Path
 
 from conftest import LogBuilder, build_run_log
 
+from postmortem import bundled as bundled_module
+from postmortem.analysis.interruptibility import InterruptibilityData
 from postmortem.cli import _pick_run, main
 from postmortem.combatlog.parser import parse_file
 from postmortem.combatlog.segmenter import segment_runs
@@ -111,6 +113,117 @@ class TestExtractor:
         path = tmp_path / "Other.lua"
         path.write_text("local x = 1", encoding="utf-8")
         assert extract_dungeon_file(path) is None
+
+
+def _mplus_interrupts_source(**overrides) -> dict:
+    """A minimal albvar/mplus-interrupts-schema document."""
+    doc = {
+        "version": "2026-04-28", "season": "Midnight S1", "source": "method.gg",
+        "dungeons": [
+            {"name": "Test Dungeon", "abilities": [
+                {"npc_name": "Corrupted Manafiend", "npc_id": 196045,
+                 "spell_name": "Surge", "spell_id": 388862, "category": "interrupt"},
+                {"npc_name": "Arcane Ravager", "npc_id": 196671,
+                 "spell_name": "Vicious Ambush", "spell_id": 388940, "category": "cc"},
+                {"npc_name": "Vile Lasher", "npc_id": 197219,
+                 "spell_name": "Detonation Seeds", "spell_id": 390918,
+                 "category": "dispel-poison"},
+            ]},
+        ],
+    }
+    doc.update(overrides)
+    return doc
+
+
+class TestBuildInterruptData:
+    """postmortem build-interrupt-data: converts a community mechanics
+    export (see interruptibility.py's module docstring for why this
+    replaces the addon's own permanently-dead live capture) into
+    InterruptibilityData's JSON shape. --no-bundle is used throughout
+    except the one test that specifically checks bundling, since the
+    default behavior writes into this package's own data/ folder."""
+
+    def test_only_interrupt_category_is_kept_as_confirmed_interruptible(
+        self, tmp_path, capsys,
+    ):
+        source = tmp_path / "source.json"
+        source.write_text(json.dumps(_mplus_interrupts_source()), encoding="utf-8")
+        output = tmp_path / "out.json"
+
+        assert main([
+            "build-interrupt-data", str(source), "-o", str(output), "--no-bundle",
+        ]) == 0
+        capsys.readouterr()  # drain, nothing asserted about stdout here
+
+        payload = json.loads(output.read_text(encoding="utf-8"))
+        assert payload["spells"] == {
+            "388862": {"name": "Surge", "interruptible": True},
+        }
+        assert payload["season"] == "Midnight S1"
+        assert payload["source"] == "method.gg"
+
+    def test_output_loads_cleanly_via_interruptibility_data(self, tmp_path):
+        source = tmp_path / "source.json"
+        source.write_text(json.dumps(_mplus_interrupts_source()), encoding="utf-8")
+        output = tmp_path / "out.json"
+        main(["build-interrupt-data", str(source), "-o", str(output), "--no-bundle"])
+
+        data = InterruptibilityData.load(output)
+        assert data.get(388862) is True
+        assert data.get(390918) is None  # dispel-poison, not an interrupt tag
+
+    def test_conflicting_spell_id_keeps_the_first_and_warns(self, tmp_path, capsys):
+        doc = _mplus_interrupts_source()
+        doc["dungeons"].append({
+            "name": "Other Dungeon", "abilities": [
+                {"npc_name": "Someone Else", "npc_id": 1, "spell_name": "Different Name",
+                 "spell_id": 388862, "category": "interrupt"},
+            ],
+        })
+        source = tmp_path / "source.json"
+        source.write_text(json.dumps(doc), encoding="utf-8")
+        output = tmp_path / "out.json"
+
+        assert main([
+            "build-interrupt-data", str(source), "-o", str(output), "--no-bundle",
+        ]) == 0
+        err = capsys.readouterr().err
+        assert "388862" in err and "Different Name" in err
+
+        payload = json.loads(output.read_text(encoding="utf-8"))
+        assert payload["spells"]["388862"]["name"] == "Surge"  # first one wins
+
+    def test_missing_dungeons_key_is_a_clear_error(self, tmp_path):
+        source = tmp_path / "source.json"
+        source.write_text(json.dumps({"not": "the right shape"}), encoding="utf-8")
+        try:
+            main(["build-interrupt-data", str(source), "--no-bundle"])
+            assert False, "expected SystemExit"
+        except SystemExit as exc:
+            assert "dungeons" in str(exc)
+
+    def test_missing_source_file_is_a_clear_error(self, tmp_path):
+        try:
+            main(["build-interrupt-data", str(tmp_path / "nope.json"), "--no-bundle"])
+            assert False, "expected SystemExit"
+        except SystemExit as exc:
+            assert "could not read" in str(exc)
+
+    def test_default_behavior_also_copies_to_the_bundled_location(
+        self, tmp_path, monkeypatch,
+    ):
+        bundled_path = tmp_path / "bundled" / "interrupt_data.json"
+        monkeypatch.setattr(bundled_module, "bundled_interrupt_data_path", lambda: bundled_path)
+
+        source = tmp_path / "source.json"
+        source.write_text(json.dumps(_mplus_interrupts_source()), encoding="utf-8")
+        output = tmp_path / "out.json"
+
+        assert main(["build-interrupt-data", str(source), "-o", str(output)]) == 0
+
+        assert bundled_path.is_file()
+        assert json.loads(bundled_path.read_text(encoding="utf-8")) == \
+            json.loads(output.read_text(encoding="utf-8"))
 
 
 class TestCLI:
