@@ -143,6 +143,61 @@ class TestAccumulation:
         assert json.loads(path.read_text())["spells"]["900803"]["interrupted"] == 2
 
 
+class TestEffectiveDataPrecedence:
+    """cli._load_effective_interrupt_data stacks the curated database over
+    what the logs learned. The two can only disagree one way -- the file
+    says interruptible, the logs concluded otherwise -- and the file wins
+    (see that function's docstring for why that is the safer direction)."""
+
+    def _learned_file(self, tmp_path, spells):
+        obs = InterruptObservations()
+        for sid, (name, interrupted, survived) in spells.items():
+            if interrupted:
+                obs.add_interrupted(sid, name, interrupted)
+            if survived:
+                obs.add_survived(sid, name, survived)
+        path = tmp_path / "learned.json"
+        obs.save(path)
+        return str(path)
+
+    def _curated_file(self, tmp_path, spells):
+        path = tmp_path / "curated.json"
+        path.write_text(json.dumps({"spells": {
+            str(sid): {"name": n, "interruptible": v} for sid, (n, v) in spells.items()
+        }}), encoding="utf-8")
+        return str(path)
+
+    def test_curated_overrides_a_learned_uninterruptible_verdict(self, tmp_path):
+        from postmortem import cli
+
+        learned = self._learned_file(tmp_path, {500: ("Contested", 0, 9)})
+        curated = self._curated_file(tmp_path, {500: ("Contested", True)})
+        data = cli._load_effective_interrupt_data(curated, learned)
+        assert data.get(500) is True
+
+    def test_learned_verdicts_outside_the_curated_list_still_apply(self, tmp_path):
+        from postmortem import cli
+
+        learned = self._learned_file(tmp_path, {
+            501: ("Immune Bolt", 0, 9),      # curated file says nothing
+            502: ("Kicked Once", 3, 0),
+        })
+        curated = self._curated_file(tmp_path, {999: ("Unrelated", True)})
+        data = cli._load_effective_interrupt_data(curated, learned)
+        assert data.get(501) is False
+        assert data.get(502) is True
+        assert data.get(999) is True
+
+    def test_either_source_alone_still_works(self, tmp_path):
+        from postmortem import cli
+
+        learned = self._learned_file(tmp_path, {503: ("Immune", 0, 9)})
+        assert cli._load_effective_interrupt_data(None, learned).get(503) is False
+        curated = self._curated_file(tmp_path, {504: ("Kickable", True)})
+        assert cli._load_effective_interrupt_data(curated, None).get(504) is True
+        assert cli._load_effective_interrupt_data(None, None) is None
+
+
 class TestThreshold:
     def test_raising_min_attempts_trades_coverage_for_confidence(self):
         obs = InterruptObservations()

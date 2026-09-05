@@ -80,17 +80,26 @@ def _load_interruptibility(path: Optional[str]) -> Optional[InterruptibilityData
 def _load_effective_interrupt_data(
     path: Optional[str], learned_path: Optional[str | Path] = None
 ) -> Optional[InterruptibilityData]:
-    """The interruptibility answers to analyze with: a loaded file (the
-    bundled community database, or an explicit --interrupt-data) with
-    anything this account's own logs have proven layered on top.
+    """The interruptibility answers to analyze with: what this account's
+    own logs have learned, with a loaded file (the bundled curated
+    database, or an explicit --interrupt-data) layered on top.
 
-    Learned data wins on conflict -- it is real observed evidence from
-    these exact logs, while a community table's spell ids are only as
-    good as the scrape behind them (confirmed real, 2026-09-05: a guide
-    listed Fel Missiles as 1216570, the damage component, where the
-    interruptible cast is actually 1216571). Either source may be absent;
-    None means "no data at all", and callers fall back to their
-    heuristic exactly as before.
+    The curated file wins on conflict. The two sources can only ever
+    disagree one way -- the file states a spell IS interruptible while
+    the logs concluded it is not -- and of those two the file is the more
+    trustworthy: it reflects how the ability was designed, whereas
+    "we attempted it and never succeeded" also describes a group that is
+    simply always a beat too late. Being wrong in that direction is also
+    the kinder failure: showing a kickable cast that is being missed is
+    the point of the report, while wrongly hiding one buries exactly the
+    insight worth having. Real example (2026-09-05): Interrupting
+    Cloudburst, guide-listed as interruptible, 4 failed attempts and no
+    successes across 13 runs.
+
+    Everything the logs learned that the file says nothing about -- which
+    is every confirmed-uninterruptible spell outside the curated list --
+    still applies. Either source may be absent; None means "no data at
+    all", and callers fall back to their heuristic exactly as before.
     """
     from .analysis.interrupt_learning import InterruptObservations
 
@@ -103,7 +112,7 @@ def _load_effective_interrupt_data(
     learned_data = InterruptibilityData(spells={
         int(sid): dict(entry) for sid, entry in learned["spells"].items()
     })
-    return learned_data if base is None else base.merge(learned_data)
+    return learned_data if base is None else learned_data.merge(base)
 
 
 def _load_stealable(path: Optional[str]) -> Optional[StealableData]:

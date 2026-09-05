@@ -102,11 +102,10 @@ class InterruptibilityData:
     def merge(self, other: "InterruptibilityData") -> "InterruptibilityData":
         """A new instance with ``other``'s answers winning any conflict.
 
-        Used to stack a weaker source under a stronger one: the bundled
-        community database (whose spell ids are only as good as a guide
-        scrape) underneath what this account's own logs have actually
-        proven (see interrupt_learning.py), so real observed evidence
-        always beats a third party's table.
+        Used to stack one interruptibility source on another -- see
+        ``cli._load_effective_interrupt_data``, which puts the curated
+        database over what the logs learned, and explains why that
+        direction is the safer one to be wrong in.
         """
         merged = dict(self.spells)
         merged.update(other.spells)
