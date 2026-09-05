@@ -596,6 +596,57 @@ class TestEnemyCastSummary:
         assert result["kick_efficiency_pct"] == 42.9
 
 
+class TestChanneledEnemyCasts:
+    """Channels log SPELL_CAST_SUCCESS up front with no SPELL_CAST_START
+    and stay interruptible for their duration, so tracking only
+    SPELL_CAST_START missed them entirely -- confirmed real (2026-09-05):
+    57 of 730 landed interrupts across 13 runs (8%) were on channels
+    absent from the kick table, and adding them moved one real run's kick
+    efficiency from 11.5% to 21.5%.
+
+    Instant casts reach the same "CAST_SUCCESS with no open hard cast"
+    path and can never be interrupted, so only channels actually
+    interrupted at least once are allowed into the report."""
+
+    def _run(self, build):
+        from conftest import DPS1, HOSTILE, LogBuilder
+        b = LogBuilder()
+        mob = b.npc_guid(555000, "0001")
+        b.start(0)
+        b.combatant(0.5, DPS1)
+        build(b, mob, DPS1)
+        b.end(200)
+        segs = list(segment_runs(iter_events(b.text().splitlines())))
+        return analyze_run(segs[-1])["enemy_casts"]
+
+    def test_interrupted_channel_is_counted(self):
+        def build(b, mob, dps):
+            # three channels, one of them kicked
+            b.npc_cast_success(10, mob, "Test Mob", 900700, "Test Channel")
+            b.interrupt(11, dps, mob, "Test Mob", 2139, "Counterspell", 900700, "Test Channel")
+            b.npc_cast_success(20, mob, "Test Mob", 900700, "Test Channel")
+            b.npc_cast_success(30, mob, "Test Mob", 900700, "Test Channel")
+        ec = self._run(build)
+        entry = next(s for s in ec["spells"] if s["spell_id"] == 900700)
+        assert entry["kicked"] == 1
+        assert entry["got_through"] == 2   # the two never interrupted
+
+    def test_uninterrupted_instant_casts_stay_out_of_the_report(self):
+        def build(b, mob, dps):
+            for t in (10, 12, 14, 16):
+                b.npc_cast_success(t, mob, "Test Mob", 900701, "Instant Nuke")
+        ec = self._run(build)
+        assert all(s["spell_id"] != 900701 for s in ec["spells"])
+
+    def test_hard_casts_are_unaffected(self):
+        def build(b, mob, dps):
+            b.npc_cast_start(10, mob, "Test Mob", 900702, "Hard Cast")
+            b.npc_cast_success(12, mob, "Test Mob", 900702, "Hard Cast")
+        ec = self._run(build)
+        entry = next(s for s in ec["spells"] if s["spell_id"] == 900702)
+        assert (entry["kicked"], entry["got_through"]) == (0, 1)
+
+
 class TestEnemyCastSummaryKnownUninterruptible:
     """A weekly M+ affix mechanic (see KNOWN_UNINTERRUPTIBLE_SPELL_IDS) is
     excluded unconditionally -- confirmed real, 2026-09-05: "Xal'atath's
