@@ -208,6 +208,8 @@ def compute_stats(
     data: Optional[DungeonData] = None,
     full_cast_timeline: bool = True,
     avoidable: Optional[AvoidableData] = None,
+    spell_damage_fallbacks: Optional[list[tuple[str, Any]]] = None,
+    keystone_level: Optional[int] = None,
 ) -> RunStats:
     stats = RunStats()
     owner_map: dict[str, str] = {}
@@ -257,6 +259,26 @@ def compute_stats(
     last_hp_pct: dict[str, float] = {}
     # enemy hard-casts in flight: caster guid -> (spell_id, spell_name, ts)
     open_enemy_casts: dict[str, tuple[int, str, float]] = {}
+    # Enemy CHANNELS in flight, same shape. A channel is not a hard cast:
+    # it logs SPELL_CAST_SUCCESS up front (at channel start, with no
+    # preceding SPELL_CAST_START) and can still be interrupted for its
+    # whole duration. Tracking only SPELL_CAST_START therefore missed
+    # every channel entirely -- confirmed real (2026-09-05): across 13
+    # runs, 57 of 730 landed interrupts (8%) were on channels that never
+    # appeared in the kick-efficiency table at all, including Fel
+    # Missiles (25 kicks) and the enemy healing channel Health Funnel
+    # (7 kicks), which also under-reported healing prevented.
+    #
+    # An instant cast reaches this same "CAST_SUCCESS with no open hard
+    # cast" path though, and instants can never be interrupted -- so a
+    # channel only ever reaches the report once it has actually been
+    # interrupted at least once (see the merge after the event loop).
+    # That keeps this from flooding the table with uninterruptible
+    # instants, which is the opposite of what it's for.
+    open_enemy_channels: dict[str, tuple[int, str, float]] = {}
+    channel_casts: Counter[int] = Counter()    # spell_id -> channels started
+    channel_kicked: Counter[int] = Counter()   # spell_id -> channels interrupted
+    channel_names: dict[int, str] = {}
     # buff uptime windows: (player_guid, spell_id) -> window start ts
     open_buffs: dict[tuple[str, int], float] = {}
     buff_totals: dict[tuple[str, int], dict[str, Any]] = {}
@@ -277,15 +299,19 @@ def compute_stats(
     run_start_ts = events[0].ts if events else 0.0
     run_end_ts = events[-1].ts if events else 0.0
 
-    def close_enemy_cast(caster_guid: str, outcome: str) -> None:
+    def close_enemy_cast(caster_guid: str, outcome: str) -> bool:
+        """Close an in-flight enemy HARD cast. Returns whether there was
+        one -- False lets the caller fall back to the channel bookkeeping
+        above (see open_enemy_channels)."""
         cast = open_enemy_casts.pop(caster_guid, None)
         if cast is None:
-            return
+            return False
         spell_id, spell_name, _ = cast
         entry = stats.enemy_cast_outcomes.setdefault(spell_id, {
             "name": spell_name, "kicked": 0, "landed": 0, "expired": 0,
         })
         entry[outcome] += 1
+        return True
 
     def close_cc(target_guid: str, spell_id: int, end_ts: float) -> None:
         window = open_cc.pop((target_guid, spell_id), None)
@@ -580,7 +606,13 @@ def compute_stats(
             source_player = resolve_source(src_guid, src_name, src_flags)
             if source_player is not None:
                 source_player.interrupts += 1
-                close_enemy_cast(dst_guid, "kicked")
+                if not close_enemy_cast(dst_guid, "kicked"):
+                    # not a hard cast -- a channel, then (see
+                    # open_enemy_channels); this is what proves the spell
+                    # is both a channel and interruptible.
+                    channel = open_enemy_channels.pop(dst_guid, None)
+                    if channel is not None:
+                        channel_kicked[channel[0]] += 1
                 extra = extra_spell_info(event)
                 stats.interrupt_events.append({
                     "ts": event.ts,
@@ -629,6 +661,15 @@ def compute_stats(
                 cast = open_enemy_casts.get(src_guid)
                 if cast is not None and cast[0] == sp.spell_id:
                     close_enemy_cast(src_guid, "landed")
+                else:
+                    # No hard cast in flight for this spell: either an
+                    # instant (never interruptible) or the START of a
+                    # channel (which is). Recorded either way; only the
+                    # ones actually interrupted are merged into the
+                    # report -- see open_enemy_channels.
+                    open_enemy_channels[src_guid] = (sp.spell_id, sp.spell_name, event.ts)
+                    channel_casts[sp.spell_id] += 1
+                    channel_names[sp.spell_id] = sp.spell_name
                 continue
             source_player = resolve_source(src_guid, src_name, src_flags)
             if source_player is None or source_player.guid == PET_BUCKET:
@@ -773,7 +814,21 @@ def compute_stats(
         entries.sort(key=lambda e: -e["uptime_s"])
         stats.buff_uptimes[guid] = entries[:15]
 
-    _estimate_kick_value(stats)
+    # Merge interrupted channels into the enemy-cast outcomes (see
+    # open_enemy_channels). Only spells actually interrupted at least
+    # once qualify -- that is the evidence they were a channel and were
+    # interruptible, and it keeps every uninterruptible instant cast
+    # (which reaches the same bookkeeping) out of the report.
+    for spell_id, kicked in channel_kicked.items():
+        entry = stats.enemy_cast_outcomes.setdefault(spell_id, {
+            "name": channel_names.get(spell_id, f"spell:{spell_id}"),
+            "kicked": 0, "landed": 0, "expired": 0,
+        })
+        entry["kicked"] += kicked
+        # every channel of it that wasn't interrupted got through
+        entry["landed"] += max(0, channel_casts.get(spell_id, 0) - kicked)
+
+    _estimate_kick_value(stats, spell_damage_fallbacks, keystone_level)
     _finish_pull_stats(stats, pulls, data)
     _tag_death_defensives(stats, defensive_windows, full_cast_timeline)
     _tag_close_calls(stats)
@@ -900,15 +955,31 @@ def _tag_avoidable_damage(stats: RunStats, avoidable: AvoidableData) -> None:
                 player.avoidable_hits += player.damage_taken_hits_by_spell[key]
 
 
-def _estimate_kick_value(stats: RunStats) -> None:
+def _estimate_kick_value(
+    stats: RunStats,
+    fallbacks: Optional[list[tuple[str, Any]]] = None,
+    keystone_level: Optional[int] = None,
+) -> None:
     """Estimate the damage/healing each kick prevented.
 
     Basis: the average amount per completed cast of the interrupted spell,
     observed elsewhere in this same run — the up-front hit plus the full
     periodic (DoT/HoT) component per application. Multi-target hits and
-    debuff applications within 1 s count as one cast. Spells that never
-    landed in the run still contribute nothing; a debuff that carries no
-    damage at all is reported as a prevented application instead.
+    debuff applications within 1 s count as one cast. A debuff that
+    carries no damage at all is reported as a prevented application
+    instead.
+
+    A spell that never landed in this run has nothing to average, which
+    used to mean the kick was credited at zero -- backwards, since a
+    spell kicked every single time is the one the kicks mattered most
+    for. ``fallbacks`` is an ordered list of ``(label, SpellDamageData)``
+    (see analysis/spell_damage.py; typically this account's own history
+    first, then the bundled community data) consulted only in that case,
+    at ``keystone_level`` or the nearest level with data. Every estimate
+    records where it came from in ``estimate_source`` ("observed", or the
+    fallback's label) plus ``estimate_level``/``estimate_samples`` for a
+    fallback, so the report never presents a borrowed number as a
+    measured one.
     """
     for obs in (stats.enemy_cast_observations, stats.enemy_heal_observations):
         for entry in obs.values():
@@ -923,12 +994,39 @@ def _estimate_kick_value(stats: RunStats) -> None:
             entry["avg"] = round(avg_direct + avg_dot)
             entry["observed_casts"] = max(direct_casts, entry["dot_casts"])
 
+    # A cast and the damage it does often log under DIFFERENT spell ids:
+    # the interruptible channel Fel Missiles is 1216571 while every tick
+    # of its damage is 1216570 (confirmed 2026-09-06: 124 completed
+    # channels across 17 runs, zero damage ever attributed to 1216571).
+    # They share a name, so when the kicked id itself has no damage on
+    # record, borrow the best-observed same-named spell's numbers.
+    by_name: dict[tuple[str, str], tuple[int, dict[str, Any]]] = {}
+    for kind, obs in (("dmg", stats.enemy_cast_observations),
+                      ("heal", stats.enemy_heal_observations)):
+        for sid, entry in obs.items():
+            if not entry.get("avg"):
+                continue
+            key = (kind, str(entry.get("name", "")).casefold())
+            if key not in by_name or entry["observed_casts"] > by_name[key][1]["observed_casts"]:
+                by_name[key] = (sid, entry)
+
     for ev in stats.interrupt_events:
         spell_id = ev.get("interrupted_spell_id")
         dmg = stats.enemy_cast_observations.get(spell_id) if spell_id else None
         heal = stats.enemy_heal_observations.get(spell_id) if spell_id else None
-        ev["estimated_prevented_damage"] = (dmg["avg"] or None) if dmg else None
-        ev["estimated_prevented_healing"] = (heal["avg"] or None) if heal else None
+        name_key = str(ev.get("interrupted_spell") or "").casefold()
+        if name_key and not (dmg and dmg["avg"]):
+            linked = by_name.get(("dmg", name_key))
+            if linked and linked[0] != spell_id:
+                dmg = linked[1]
+                ev["estimate_linked_spell_id"] = linked[0]
+        if name_key and not (heal and heal["avg"]):
+            linked = by_name.get(("heal", name_key))
+            if linked and linked[0] != spell_id:
+                heal = linked[1]
+                ev["estimate_linked_spell_id"] = linked[0]
+        est_damage = (dmg["avg"] or None) if dmg else None
+        est_healing = (heal["avg"] or None) if heal else None
         ev["prevented_dot_damage"] = dmg["avg_dot"] if dmg else 0
         ev["observed_casts"] = (dmg or heal or {}).get("observed_casts", 0)
         # a zero-damage debuff (CC, snare, heal absorb...): no number to put
@@ -937,10 +1035,25 @@ def _estimate_kick_value(stats: RunStats) -> None:
             dmg["aura_applications"]
             if dmg and not dmg["avg"] and dmg["aura_applications"] else 0
         )
+        ev["estimate_source"] = "observed" if (est_damage or est_healing) else None
+        if (not est_damage and not est_healing
+                and not ev["prevented_debuff_applications"] and spell_id):
+            for label, data in fallbacks or []:
+                found = data.estimate(spell_id, keystone_level,
+                                      name=ev.get("interrupted_spell")) if data else None
+                if found and (found["damage"] or found["healing"]):
+                    est_damage = found["damage"] or None
+                    est_healing = found["healing"] or None
+                    ev["estimate_source"] = label
+                    ev["estimate_level"] = found["level"]
+                    ev["estimate_samples"] = found["casts"]
+                    break
+        ev["estimated_prevented_damage"] = est_damage
+        ev["estimated_prevented_healing"] = est_healing
         player = stats.players.get(ev.get("player_guid", ""))
         if player is not None:
-            player.kick_prevented_damage += (dmg or {}).get("avg") or 0
-            player.kick_prevented_healing += (heal or {}).get("avg") or 0
+            player.kick_prevented_damage += est_damage or 0
+            player.kick_prevented_healing += est_healing or 0
 
 
 def _finish_pull_stats(

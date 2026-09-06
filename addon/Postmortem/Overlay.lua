@@ -18,11 +18,6 @@ local ADDON_NAME, MA = ...
 -- shipping addon source), cross-referenced against Details_MythicPlus, and
 -- against MythicDungeonTools/Core/CombatLogging.lua:67-69 for the
 -- instanceType/difficultyID fallback.
-local function IsKeyActive()
-  if C_ChallengeMode.GetActiveChallengeMapID() then return true end
-  local _, instanceType, difficultyID = GetInstanceInfo()
-  return instanceType == "party" and difficultyID == 8
-end
 
 -- Formats seconds as MM:SS.
 -- verified against EllesmereUIMythicTimer.lua:401-417 (FormatTime, real,
@@ -220,12 +215,22 @@ function MA:Overlay_Refresh()
   end
 
   local state = MA.state or {}
-  local active = IsKeyActive()
+  -- MA.state.active, not MA:IsKeyActive() -- see that function's own
+  -- comment (real bug, 2026-09-04): calling the broad Blizzard-API check
+  -- here meant the overlay stayed visible with frozen numbers for as long
+  -- as the group remained in the dungeon after the key ended, since "in a
+  -- Mythic+ instance" and "a key is running" are not the same thing.
+  -- state.active is set precisely by CHALLENGE_MODE_START/COMPLETED/RESET
+  -- (and by debug mode), so it flips the instant the key actually ends.
+  local active = state.active
   local inRecap = not active and state.recapUntil and GetTime() < state.recapUntil
 
   if not active and not inRecap then
     frame:Hide()
     return
+  end
+  if not frame:IsShown() then
+    MA:Debug("Overlay: showing (%s)", inRecap and "post-key recap" or "key active")
   end
   local forces = state.forces or {}
   local pct = forces.percent or 0

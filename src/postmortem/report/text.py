@@ -196,8 +196,13 @@ def render_text(report: dict[str, Any]) -> str:
         add("-- ENEMY CASTS THAT GOT THROUGH " + "-" * 40)
         for s in sorted(through, key=lambda s: -s["got_through"])[:12]:
             total = s["got_through"] + s["kicked"]
-            add(f"  {s['name']:<32}{s['got_through']:>3} landed / {total:>3} casts"
+            # No color in a text report -- a star marker is the plain-text
+            # equivalent of the HTML report's stealable row highlight.
+            name = ("* " if s.get("stealable") else "  ") + s["name"]
+            add(f"  {name:<32}{s['got_through']:>3} landed / {total:>3} casts"
                 + (f"  ({s['kicked']} kicked)" if s["kicked"] else "  (never kicked)"))
+        if any(s.get("stealable") for s in through):
+            add("  * = worth Spellstealing")
 
     # --- encounters (only interesting when there were wipes) ---
     encounters = report.get("encounters") or []
@@ -251,7 +256,11 @@ def render_text(report: dict[str, Any]) -> str:
                     f"a debuff application (seen "
                     f"{i['prevented_debuff_applications']}x elsewhere, no damage)"
                 )
-            if est or est_h:
+            src = i.get("estimate_source")
+            if (est or est_h) and src and src != "observed":
+                basis = (f" (from {src}: avg of {i.get('estimate_samples') or '?'} "
+                         f"casts at +{i.get('estimate_level')})")
+            elif est or est_h:
                 basis = f" (avg of {i['observed_casts']} landed casts)"
             elif i.get("prevented_debuff_applications"):
                 basis = ""

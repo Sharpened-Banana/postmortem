@@ -1,13 +1,21 @@
 -- InterruptDatabase.lua
--- Self-growing "is this spell interruptible" database. The combat log the
--- Python side parses has no such flag -- it currently guesses via a
--- heuristic (a spell only counts as "kickable" once someone has actually
--- kicked it at least once), which wrongly flags genuinely-uninterruptible
--- casts as missed kicks. The client itself knows this live, via
--- UnitCastingInfo()/UnitChannelInfo()'s notInterruptible return value, so
--- this file watches every enemy cast during a key and records that flag per
--- spellID into PostmortemSpellDB (via MA:GetSpellDB(), see
--- Bootstrap.lua) -- a real, always-accurate database built purely from play.
+--
+-- PERMANENTLY DEAD, kept only as a documented historical stub -- see the
+-- CHALLENGE_MODE_START handler below for the full story. This file used
+-- to self-build an "is this spell interruptible" database by watching
+-- every enemy cast during a key and checking WoW's own
+-- UnitCastingInfo()/UnitChannelInfo() notInterruptible flag, real ground
+-- truth with no guessing. Patch 12.0.0 made that flag unreadable by addon
+-- code at all (Blizzard's "Secret Values" anti-exploit system), and this
+-- is a deliberate, permanent restriction, not a bug to wait out --
+-- confirmed via web research 2026-09-04, cross-checked against Blizzard's
+-- own planned-API notes (an "Interruptible Spellcasts" curve-treatment
+-- API is listed as a candidate under consideration, unshipped, no
+-- timeline). The replacement lives entirely on the Python side now: see
+-- analysis/interruptibility.py's module docstring and
+-- `postmortem build-interrupt-data`, which builds the same JSON shape
+-- this file used to produce from a community mechanics database instead
+-- of live client capture.
 --
 -- Cast-watching pattern (one shared frame with plain RegisterEvent on
 -- UNIT_SPELLCAST_START/UNIT_SPELLCAST_CHANNEL_START, filtered against a
@@ -143,24 +151,32 @@ end)
 -- Interrupts.lua's exact gating structure: these high-frequency unit-cast
 -- events are only useful (and only registered) while a key is active.
 local challengeModeFrame = CreateFrame("Frame")
+MA:RegisterKeyEventFrame(challengeModeFrame)
 challengeModeFrame:RegisterEvent("CHALLENGE_MODE_START")
 challengeModeFrame:RegisterEvent("CHALLENGE_MODE_COMPLETED")
 challengeModeFrame:RegisterEvent("CHALLENGE_MODE_RESET")
 
--- TEMPORARILY DISABLED (2026-09-02): a real WoW client update flags
+-- DISABLED PERMANENTLY, not temporarily (see this file's header comment).
+-- Original finding (2026-09-02) that led here: a WoW client update flagged
 -- UnitCastingInfo()/UnitChannelInfo()'s notInterruptible return as a
--- "secret" value -- RecordCast()'s `not notInterruptible` (line 53)
--- throws "attempt to negate ... a secret boolean value" and, worse,
--- that taint doesn't stay inside a pcall: it propagated into this same
--- file's later UnregisterEvent() calls too, throwing
--- ADDON_ACTION_FORBIDDEN and likely leaving the high-frequency cast
--- events stuck registered across keys. Confirmed live in-game (BugSack:
--- 2659 hits in one session). Not touching the secret value at all is
--- the safe stopgap until there's a verified, currently-correct pattern
--- for reading it -- re-enable by restoring the RegisterCastEvents()
--- call below once that's confirmed.
+-- "secret" value -- RecordCast()'s `not notInterruptible` (line 53) threw
+-- "attempt to negate ... a secret boolean value" and, worse, that taint
+-- didn't stay inside a pcall: it propagated into this same file's later
+-- UnregisterEvent() calls too, throwing ADDON_ACTION_FORBIDDEN and likely
+-- leaving the high-frequency cast events stuck registered across keys
+-- (confirmed live in-game via BugSack: 2659 hits in one session). Further
+-- research (2026-09-04) confirmed there is no sanctioned way to read a
+-- secret boolean back into ordinary Lua at all -- only "opaque pipeline"
+-- functions (SetAlphaFromBoolean and similar) exist, and those only ever
+-- produce a visual effect, never a storable true/false. So this can never
+-- be un-disabled by finding the right idiom; there isn't one. Left as
+-- dead code (RegisterCastEvents() below is never called) rather than
+-- deleted only in case Blizzard ships their own mentioned-but-unshipped
+-- replacement API someday -- see this file's header.
 function MA:InterruptDB_OnChallengeModeStart()
-  -- RegisterCastEvents() -- disabled, see comment above
+  -- RegisterCastEvents() -- permanently disabled, see comment above
+  MA:Debug("Interrupt DB: cast watching is permanently disabled (Blizzard's Secret Values system) -- %d spells known from an old, pre-Patch-12.0.0 capture, if any",
+    (function() local n = 0; for _ in pairs(MA:GetSpellDB() or {}) do n = n + 1 end; return n end)())
 end
 
 function MA:InterruptDB_OnChallengeModeEnd()

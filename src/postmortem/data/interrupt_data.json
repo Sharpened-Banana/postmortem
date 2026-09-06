@@ -1,0 +1,211 @@
+{
+ "spells": {
+  "1294557": {
+   "name": "Piercing Hiss",
+   "interruptible": true
+  },
+  "1289416": {
+   "name": "Envenom",
+   "interruptible": true
+  },
+  "1307567": {
+   "name": "Mass Envenom",
+   "interruptible": true
+  },
+  "1310358": {
+   "name": "Toxic Atrophy",
+   "interruptible": true
+  },
+  "1239394": {
+   "name": "Scavenge",
+   "interruptible": true
+  },
+  "1297696": {
+   "name": "Healing Breeze",
+   "interruptible": true
+  },
+  "1241214": {
+   "name": "Earth Bolt",
+   "interruptible": true
+  },
+  "1309919": {
+   "name": "Frigid Roar",
+   "interruptible": true
+  },
+  "1235829": {
+   "name": "Winter's Shroud",
+   "interruptible": true
+  },
+  "1297778": {
+   "name": "Arc Lightning",
+   "interruptible": true
+  },
+  "1246687": {
+   "name": "Lightning Bolt",
+   "interruptible": true
+  },
+  "1290205": {
+   "name": "Lightning Bolt",
+   "interruptible": true
+  },
+  "1291262": {
+   "name": "Lightning Bolt",
+   "interruptible": true
+  },
+  "269972": {
+   "name": "Hex Volley",
+   "interruptible": true
+  },
+  "270901": {
+   "name": "Unholy Mending",
+   "interruptible": true
+  },
+  "270920": {
+   "name": "Bind Soul",
+   "interruptible": true
+  },
+  "1294972": {
+   "name": "Soul Bolt",
+   "interruptible": true
+  },
+  "270492": {
+   "name": "Hex",
+   "interruptible": true
+  },
+  "1295125": {
+   "name": "Spectral Bolt",
+   "interruptible": true
+  },
+  "267763": {
+   "name": "Wretched Discharge",
+   "interruptible": true
+  },
+  "267273": {
+   "name": "Poison Nova",
+   "interruptible": true
+  },
+  "269369": {
+   "name": "Deathly Roar",
+   "interruptible": true
+  },
+  "371984": {
+   "name": "Frostbolt",
+   "interruptible": true
+  },
+  "372743": {
+   "name": "Ice Shield",
+   "interruptible": true
+  },
+  "372808": {
+   "name": "Frigid Shard",
+   "interruptible": true
+  },
+  "384194": {
+   "name": "Cinderbolt",
+   "interruptible": true
+  },
+  "1305955": {
+   "name": "Fiery Blast",
+   "interruptible": true
+  },
+  "373017": {
+   "name": "Blaze Volley",
+   "interruptible": true
+  },
+  "392576": {
+   "name": "Thunder Blast",
+   "interruptible": true
+  },
+  "1301834": {
+   "name": "Light Bolt Volley",
+   "interruptible": true
+  },
+  "1235616": {
+   "name": "Light Bolt",
+   "interruptible": true
+  },
+  "1238063": {
+   "name": "Light Bolt",
+   "interruptible": true
+  },
+  "1238294": {
+   "name": "Disorienting Screech",
+   "interruptible": true
+  },
+  "1238232": {
+   "name": "Seed Shot",
+   "interruptible": true
+  },
+  "1239821": {
+   "name": "Warden's Wrath",
+   "interruptible": true
+  },
+  "1247669": {
+   "name": "Lightspore Shot",
+   "interruptible": true
+  },
+  "1298899": {
+   "name": "Demoralizing Shout",
+   "interruptible": true
+  },
+  "1228176": {
+   "name": "Lava Bolt",
+   "interruptible": true
+  },
+  "1299938": {
+   "name": "Shadowbolt Volley",
+   "interruptible": true
+  },
+  "1249621": {
+   "name": "Violent Sand",
+   "interruptible": true
+  },
+  "1310324": {
+   "name": "Mending Void",
+   "interruptible": true
+  },
+  "1216571": {
+   "name": "Fel Missiles",
+   "interruptible": true
+  },
+  "1201554": {
+   "name": "Seduction",
+   "interruptible": true
+  },
+  "1223204": {
+   "name": "Felfire Burst",
+   "interruptible": true
+  },
+  "1214922": {
+   "name": "Fel Rage",
+   "interruptible": true
+  },
+  "1214980": {
+   "name": "Health Funnel",
+   "interruptible": true
+  },
+  "474375": {
+   "name": "Chaos Bolt",
+   "interruptible": true
+  },
+  "1310683": {
+   "name": "Venom Bolt",
+   "interruptible": true
+  },
+  "1293307": {
+   "name": "Addle Mind",
+   "interruptible": true
+  },
+  "268013": {
+   "name": "Flame Shock",
+   "interruptible": true
+  },
+  "1302158": {
+   "name": "Flame Shock",
+   "interruptible": true
+  }
+ },
+ "source": "method.gg",
+ "season": "Midnight S2 (patch 12.1)",
+ "source_version": "2026-09-06"
+}
