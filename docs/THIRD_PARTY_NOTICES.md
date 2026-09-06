@@ -26,8 +26,13 @@ Building it needs a Warcraft Logs API client (register one at
 https://www.warcraftlogs.com/api/clients/ and export `WCL_CLIENT_ID` /
 `WCL_CLIENT_SECRET`); the analyzer, desktop app and site never contact
 Warcraft Logs themselves. The API is rate-limited by points per hour
-(3,600 on a free account); the build stops before exhausting them and
-resumes from its samples file on the next run.
+(3,600 on a free account, about 3.7 per sampled fight); the build stops
+before exhausting them and resumes from its samples file on the next run.
+`--offline` re-aggregates an existing samples file without contacting the
+API. Listings are capped at 25 pages, so the build walks time windows;
+whole keystone runs only (boss pulls inside a key are skipped). First
+built 2026-09-06: 1,124 fights, all eight Season 2 dungeons, 8 per
+(dungeon, level) through key 19; keys 20+ are sparse in public logs.
 
 ## `src/postmortem/data/interrupt_data.json`
 

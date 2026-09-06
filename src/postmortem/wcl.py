@@ -204,8 +204,9 @@ def iter_keystone_fights(client: WCLClient, zone_id: int,
     zone, newest first, scanning at most ``max_pages`` pages of
     ``REPORTS_PER_PAGE`` reports in total across as many time windows as
     that takes: ``{"code", "fight_id", "level", "encounter_id",
-    "encounter", "kill"}``. Fights without a keystone level (raid pulls,
-    trash) are skipped."""
+    "encounter", "kill"}``. Only whole keystone runs: fights without a
+    keystone level (raid pulls, trash) and boss pulls inside a key are
+    skipped."""
     pages_used = 0
     end_time: Optional[float] = None
     while pages_used < max_pages:
@@ -223,7 +224,7 @@ def iter_keystone_fights(client: WCLClient, zone_id: int,
                 f"reportData {{ reports(zoneID: $zone, limit: {REPORTS_PER_PAGE}, "
                 f"page: $page{window}) {{ "
                 "has_more_pages data { code startTime fights(killType: Encounters) { "
-                "id name encounterID keystoneLevel kill } } } }"
+                "id name encounterID keystoneLevel kill countRequired } } } }"
             )
             data = client.query(body, variables)
             pages_used += 1
@@ -238,6 +239,13 @@ def iter_keystone_fights(client: WCLClient, zone_id: int,
                 for fight in report.get("fights") or []:
                     level = fight.get("keystoneLevel")
                     if not code or not level:
+                        continue
+                    # A boss pull inside a key also carries keystoneLevel
+                    # but is a subset of the run's fight; only the whole
+                    # run has an enemy-forces requirement (live 2026-09-06:
+                    # "T'zala / Mchimba the Embalmer" fights showed up as
+                    # separate +8 Kings' Rest samples).
+                    if "countRequired" in fight and not fight.get("countRequired"):
                         continue
                     yield {
                         "code": code,

@@ -233,8 +233,11 @@ class FakeTransport:
             {"has_more_pages": True, "data": [
                 {"code": "AAA", "fights": [
                     {"id": 1, "name": "Altar of Fangs", "encounterID": 5001,
-                     "keystoneLevel": 10, "kill": True},
+                     "keystoneLevel": 10, "kill": True, "countRequired": 300},
                     {"id": 2, "name": "trash", "encounterID": 0, "keystoneLevel": None},
+                    # a boss pull inside the key: has a level, no forces requirement
+                    {"id": 9, "name": "The Writhing Coil", "encounterID": 9001,
+                     "keystoneLevel": 10, "kill": True, "countRequired": None},
                 ]},
                 {"code": "BBB", "fights": [
                     {"id": 3, "name": "Altar of Fangs", "encounterID": 5001,
@@ -485,6 +488,29 @@ class TestBuildSpellDamageCommand:
         printed = capsys.readouterr().out
         assert "stopped early" in printed
         assert not any("table(" in json.loads(b)["query"] for u, b, _h in t3.calls if u == API_URL)
+
+    def test_offline_reaggregates_without_credentials(self, monkeypatch, tmp_path, capsys):
+        t = FakeTransport()
+        self._env(monkeypatch, t)
+        out, samples = tmp_path / "o.json", tmp_path / "s.json"
+        assert main(["build-spell-damage", "-o", str(out), "--samples", str(samples),
+                     "--all-spells", "--no-bundle"]) == 0
+        capsys.readouterr()
+        monkeypatch.delenv("WCL_CLIENT_ID")
+        monkeypatch.delenv("WCL_CLIENT_SECRET")
+        out.unlink()
+        assert main(["build-spell-damage", "-o", str(out), "--samples", str(samples),
+                     "--all-spells", "--no-bundle", "--offline"]) == 0
+        assert "offline: re-aggregating 3 sampled fight(s)" in capsys.readouterr().out
+        data = SpellDamageData.load(out)
+        assert data.estimate(111, 10)["casts"] == 4
+        assert data.season == "Mythic+ Season 2"   # zone name remembered in the samples
+        try:
+            main(["build-spell-damage", "-o", str(out), "--samples", str(tmp_path / "none.json"),
+                  "--no-bundle", "--offline"])
+            assert False
+        except SystemExit as exc:
+            assert "no fights" in str(exc)
 
     def test_default_keeps_only_bundled_interrupt_spells(self, monkeypatch, tmp_path):
         t = FakeTransport()

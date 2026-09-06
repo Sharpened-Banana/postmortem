@@ -522,21 +522,32 @@ def cmd_build_spell_damage(args: argparse.Namespace) -> int:
     from .wcl import (WCLClient, WCLError, fetch_fight_tables, find_mplus_zone,
                       iter_keystone_fights)
 
-    try:
-        client = WCLClient(os.environ.get("WCL_CLIENT_ID", ""),
-                           os.environ.get("WCL_CLIENT_SECRET", ""))
-    except WCLError as exc:
-        raise SystemExit(f"error: {exc} -- register an API client at "
-                         "https://www.warcraftlogs.com/api/clients/ and export both")
-
     samples_path = Path(args.samples)
     try:
         samples = json.loads(samples_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         samples = {"fights": {}}
     fights: dict[str, Any] = samples.setdefault("fights", {})
+    zone_id, zone_name = samples.get("zone_id"), str(samples.get("zone_name") or "")
+    fetched = skipped = 0
+    stopped_for_budget = False
+    client = None
+
+    if args.offline:
+        if not fights:
+            raise SystemExit(f"error: --offline needs an existing samples file; "
+                             f"{samples_path} has no fights")
+        print(f"offline: re-aggregating {len(fights)} sampled fight(s) from {samples_path}")
+    else:
+        try:
+            client = WCLClient(os.environ.get("WCL_CLIENT_ID", ""),
+                               os.environ.get("WCL_CLIENT_SECRET", ""))
+        except WCLError as exc:
+            raise SystemExit(f"error: {exc} -- register an API client at "
+                             "https://www.warcraftlogs.com/api/clients/ and export both")
 
     try:
+      if client is not None:
         if args.zone_id:
             zone_id, zone_name = int(args.zone_id), ""
         else:
@@ -545,6 +556,8 @@ def cmd_build_spell_damage(args: argparse.Namespace) -> int:
             print(f"warning: samples file is for zone {samples.get('zone_id')}, "
                   f"now sampling zone {zone_id} -- keeping both", file=sys.stderr)
         samples["zone_id"] = zone_id
+        if zone_name:
+            samples["zone_name"] = zone_name
         print(f"zone {zone_id} {zone_name}".rstrip())
 
         # how many fights we already hold per (encounter, level)
@@ -553,8 +566,6 @@ def cmd_build_spell_damage(args: argparse.Namespace) -> int:
             key = (int(f.get("encounter_id") or 0), int(f.get("level") or 0))
             have[key] = have.get(key, 0) + 1
 
-        fetched = skipped = 0
-        stopped_for_budget = False
         for fight in iter_keystone_fights(client, zone_id, max_pages=args.max_pages):
             if not (args.min_level <= fight["level"] <= args.max_level):
                 continue
@@ -607,11 +618,12 @@ def cmd_build_spell_damage(args: argparse.Namespace) -> int:
         "and completed-cast count over the sampled fights, so the kick-value "
         "estimate has a number for a spell that never landed in a run."))
     levels = sorted({lv for e in data.spells.values() for lv in e["levels"]})
-    print(f"fetched {fetched} new fight(s), {skipped} already sampled; "
-          f"{len(fights)} sampled fights total")
+    if client is not None:
+        print(f"fetched {fetched} new fight(s), {skipped} already sampled; "
+              f"{len(fights)} sampled fights total")
     print(f"built {len(data.spells)} spell(s) across key levels "
           f"{levels[0] if levels else '-'}..{levels[-1] if levels else '-'} -> {args.output}")
-    if client.rate_limit:
+    if client is not None and client.rate_limit:
         rl = client.rate_limit
         print(f"API points: {rl.get('pointsSpentThisHour')}/{rl.get('limitPerHour')} "
               f"used this hour, reset in {rl.get('pointsResetIn')}s")
@@ -1180,6 +1192,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reserve-points", type=float, default=200,
                     help="stop when fewer than this many API points remain "
                          "this hour (default 200); rerun later to resume")
+    p.add_argument("--offline", action="store_true",
+                    help="don't contact Warcraft Logs; just re-aggregate the "
+                         "existing --samples file (no credentials needed)")
     p.add_argument("--all-spells", action="store_true",
                     help="keep every enemy ability, not just the ones in the "
                          "bundled interrupt database")

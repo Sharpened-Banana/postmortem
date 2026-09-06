@@ -17,15 +17,10 @@
      "healing": 0,
      "casts": 2
     },
-    "8": {
-     "damage": 1760871,
-     "healing": 0,
-     "casts": 1
-    },
     "9": {
-     "damage": 3214240,
+     "damage": 7678673,
      "healing": 0,
-     "casts": 2
+     "casts": 3
     },
     "14": {
      "damage": 9551801,
@@ -47,25 +42,35 @@
      "healing": 0,
      "casts": 5
     },
-    "5": {
-     "damage": 12222694,
+    "3": {
+     "damage": 15629755,
      "healing": 0,
      "casts": 7
+    },
+    "4": {
+     "damage": 32222814,
+     "healing": 0,
+     "casts": 18
+    },
+    "5": {
+     "damage": 37739727,
+     "healing": 0,
+     "casts": 19
     },
     "6": {
-     "damage": 2926109,
+     "damage": 19517368,
      "healing": 0,
-     "casts": 1
+     "casts": 10
     },
     "7": {
-     "damage": 20361579,
+     "damage": 31405372,
      "healing": 0,
-     "casts": 7
+     "casts": 10
     },
     "8": {
-     "damage": 3368924,
+     "damage": 23060506,
      "healing": 0,
-     "casts": 1
+     "casts": 6
     },
     "9": {
      "damage": 13427964,
@@ -137,20 +142,35 @@
   "269369": {
    "name": "Deathly Roar",
    "levels": {
+    "3": {
+     "damage": 955535,
+     "healing": 0,
+     "casts": 2
+    },
+    "4": {
+     "damage": 462008,
+     "healing": 0,
+     "casts": 1
+    },
     "5": {
      "damage": 606663,
      "healing": 0,
      "casts": 1
     },
-    "7": {
-     "damage": 621165,
+    "6": {
+     "damage": 1909219,
      "healing": 0,
-     "casts": 1
+     "casts": 3
+    },
+    "7": {
+     "damage": 2357092,
+     "healing": 0,
+     "casts": 4
     },
     "8": {
-     "damage": 1066581,
+     "damage": 654155,
      "healing": 0,
-     "casts": 2
+     "casts": 1
     },
     "9": {
      "damage": 1611494,
@@ -177,25 +197,35 @@
      "healing": 0,
      "casts": 3
     },
-    "5": {
-     "damage": 10985648,
-     "healing": 0,
-     "casts": 4
-    },
-    "6": {
-     "damage": 1836834,
+    "3": {
+     "damage": 1160346,
      "healing": 0,
      "casts": 1
     },
-    "7": {
-     "damage": 5216126,
+    "4": {
+     "damage": 6166141,
      "healing": 0,
-     "casts": 2
+     "casts": 3
+    },
+    "5": {
+     "damage": 13774048,
+     "healing": 0,
+     "casts": 5
+    },
+    "6": {
+     "damage": 7825855,
+     "healing": 0,
+     "casts": 3
+    },
+    "7": {
+     "damage": 8117133,
+     "healing": 0,
+     "casts": 3
     },
     "8": {
-     "damage": 7028792,
+     "damage": 10343534,
      "healing": 0,
-     "casts": 2
+     "casts": 4
     },
     "9": {
      "damage": 7585685,
@@ -241,6 +271,11 @@
      "damage": 9984963,
      "healing": 0,
      "casts": 2
+    },
+    "20": {
+     "damage": 0,
+     "healing": 0,
+     "casts": 1
     }
    }
   },
@@ -252,30 +287,35 @@
      "healing": 0,
      "casts": 3
     },
+    "3": {
+     "damage": 0,
+     "healing": 0,
+     "casts": 5
+    },
     "4": {
      "damage": 0,
      "healing": 0,
-     "casts": 1
+     "casts": 5
     },
     "5": {
      "damage": 0,
      "healing": 0,
-     "casts": 3
+     "casts": 8
     },
     "6": {
      "damage": 0,
      "healing": 0,
-     "casts": 1
+     "casts": 8
     },
     "7": {
      "damage": 0,
      "healing": 0,
-     "casts": 6
+     "casts": 11
     },
     "8": {
      "damage": 0,
      "healing": 0,
-     "casts": 1
+     "casts": 7
     },
     "9": {
      "damage": 0,
@@ -327,9 +367,19 @@
   "270901": {
    "name": "Unholy Mending",
    "levels": {
+    "4": {
+     "damage": 0,
+     "healing": 2387539,
+     "casts": 5
+    },
     "5": {
      "damage": 0,
-     "healing": 1412682,
+     "healing": 2385735,
+     "casts": 2
+    },
+    "6": {
+     "damage": 0,
+     "healing": 1589195,
      "casts": 1
     },
     "7": {
@@ -362,10 +412,30 @@
      "healing": 0,
      "casts": 2
     },
+    "3": {
+     "damage": 0,
+     "healing": 0,
+     "casts": 2
+    },
+    "4": {
+     "damage": 0,
+     "healing": 0,
+     "casts": 3
+    },
+    "6": {
+     "damage": 0,
+     "healing": 0,
+     "casts": 1
+    },
     "7": {
      "damage": 0,
      "healing": 0,
      "casts": 1
+    },
+    "8": {
+     "damage": 0,
+     "healing": 0,
+     "casts": 2
     },
     "9": {
      "damage": 0,
@@ -403,39 +473,44 @@
    "name": "Frostbolt",
    "levels": {
     "2": {
-     "damage": 3872149,
+     "damage": 12503148,
      "healing": 0,
-     "casts": 38
+     "casts": 125
     },
     "3": {
-     "damage": 1606266,
+     "damage": 6047088,
      "healing": 0,
-     "casts": 15
+     "casts": 58
     },
     "4": {
-     "damage": 3325216,
+     "damage": 17241158,
      "healing": 0,
-     "casts": 30
+     "casts": 157
+    },
+    "5": {
+     "damage": 14715215,
+     "healing": 0,
+     "casts": 134
     },
     "6": {
-     "damage": 2834190,
+     "damage": 8024121,
      "healing": 0,
-     "casts": 20
+     "casts": 60
     },
     "7": {
-     "damage": 6676582,
+     "damage": 15195858,
      "healing": 0,
-     "casts": 42
+     "casts": 92
     },
     "8": {
-     "damage": 9126972,
+     "damage": 21042998,
      "healing": 0,
-     "casts": 55
+     "casts": 116
     },
     "9": {
-     "damage": 16038529,
+     "damage": 21977135,
      "healing": 0,
-     "casts": 87
+     "casts": 118
     },
     "10": {
      "damage": 23169180,
@@ -483,9 +558,14 @@
      "casts": 28
     },
     "19": {
-     "damage": 7405736,
+     "damage": 19291484,
      "healing": 0,
-     "casts": 18
+     "casts": 47
+    },
+    "20": {
+     "damage": 272340,
+     "healing": 0,
+     "casts": 1
     }
    }
   },
@@ -494,38 +574,43 @@
    "levels": {
     "2": {
      "damage": 0,
-     "healing": 6075574,
-     "casts": 12
+     "healing": 18552843,
+     "casts": 38
     },
     "3": {
      "damage": 0,
-     "healing": 1966888,
-     "casts": 5
+     "healing": 11007924,
+     "casts": 23
     },
     "4": {
      "damage": 0,
-     "healing": 5352674,
-     "casts": 9
+     "healing": 23587880,
+     "casts": 47
+    },
+    "5": {
+     "damage": 0,
+     "healing": 23121548,
+     "casts": 49
     },
     "6": {
      "damage": 0,
-     "healing": 3882175,
-     "casts": 9
+     "healing": 15566842,
+     "casts": 30
     },
     "7": {
      "damage": 0,
-     "healing": 21032403,
-     "casts": 31
+     "healing": 32639007,
+     "casts": 47
     },
     "8": {
      "damage": 0,
-     "healing": 13881220,
-     "casts": 18
+     "healing": 30382928,
+     "casts": 41
     },
     "9": {
      "damage": 0,
-     "healing": 27090075,
-     "casts": 41
+     "healing": 35379954,
+     "casts": 52
     },
     "10": {
      "damage": 0,
@@ -574,8 +659,13 @@
     },
     "19": {
      "damage": 0,
-     "healing": 24970003,
-     "casts": 15
+     "healing": 80207382,
+     "casts": 49
+    },
+    "20": {
+     "damage": 0,
+     "healing": 18469990,
+     "casts": 10
     }
    }
   },
@@ -583,34 +673,44 @@
    "name": "Frigid Shard",
    "levels": {
     "2": {
-     "damage": 1075216,
+     "damage": 3424501,
      "healing": 0,
-     "casts": 7
+     "casts": 19
     },
     "3": {
-     "damage": 618438,
+     "damage": 2069946,
      "healing": 0,
-     "casts": 2
+     "casts": 10
     },
     "4": {
-     "damage": 1210389,
+     "damage": 4719438,
      "healing": 0,
-     "casts": 6
+     "casts": 17
+    },
+    "5": {
+     "damage": 4591307,
+     "healing": 0,
+     "casts": 22
+    },
+    "6": {
+     "damage": 2770216,
+     "healing": 0,
+     "casts": 10
     },
     "7": {
-     "damage": 2686633,
+     "damage": 4465061,
      "healing": 0,
-     "casts": 11
+     "casts": 16
     },
     "8": {
-     "damage": 2184136,
+     "damage": 4440953,
      "healing": 0,
-     "casts": 9
+     "casts": 16
     },
     "9": {
-     "damage": 1763158,
+     "damage": 2583095,
      "healing": 0,
-     "casts": 7
+     "casts": 9
     },
     "10": {
      "damage": 4204923,
@@ -658,19 +758,44 @@
      "casts": 5
     },
     "19": {
-     "damage": 2618620,
+     "damage": 9323311,
      "healing": 0,
-     "casts": 3
+     "casts": 11
+    },
+    "20": {
+     "damage": 428313,
+     "healing": 0,
+     "casts": 1
     }
    }
   },
   "373017": {
    "name": "Blaze Volley",
    "levels": {
-    "4": {
-     "damage": 544460,
+    "2": {
+     "damage": 1415786,
      "healing": 0,
-     "casts": 1
+     "casts": 3
+    },
+    "3": {
+     "damage": 785212,
+     "healing": 0,
+     "casts": 5
+    },
+    "4": {
+     "damage": 942597,
+     "healing": 0,
+     "casts": 2
+    },
+    "5": {
+     "damage": 1119050,
+     "healing": 0,
+     "casts": 2
+    },
+    "6": {
+     "damage": 2699234,
+     "healing": 0,
+     "casts": 4
     },
     "7": {
      "damage": 1224279,
@@ -678,9 +803,9 @@
      "casts": 2
     },
     "8": {
-     "damage": 1195137,
+     "damage": 1913971,
      "healing": 0,
-     "casts": 2
+     "casts": 3
     },
     "9": {
      "damage": 1004773,
@@ -723,39 +848,44 @@
    "name": "Cinderbolt",
    "levels": {
     "2": {
-     "damage": 8372121,
+     "damage": 25147760,
      "healing": 0,
-     "casts": 91
+     "casts": 268
     },
     "3": {
-     "damage": 5389595,
+     "damage": 18448347,
      "healing": 0,
-     "casts": 50
+     "casts": 184
     },
     "4": {
-     "damage": 8898584,
+     "damage": 31058196,
      "healing": 0,
-     "casts": 89
+     "casts": 301
+    },
+    "5": {
+     "damage": 27067861,
+     "healing": 0,
+     "casts": 246
     },
     "6": {
-     "damage": 4592224,
+     "damage": 29400469,
      "healing": 0,
-     "casts": 35
+     "casts": 222
     },
     "7": {
-     "damage": 17957829,
+     "damage": 39104072,
      "healing": 0,
-     "casts": 119
+     "casts": 250
     },
     "8": {
-     "damage": 14521193,
+     "damage": 33110276,
      "healing": 0,
-     "casts": 87
+     "casts": 186
     },
     "9": {
-     "damage": 44748303,
+     "damage": 57720963,
      "healing": 0,
-     "casts": 239
+     "casts": 306
     },
     "10": {
      "damage": 51344881,
@@ -803,9 +933,14 @@
      "casts": 43
     },
     "19": {
-     "damage": 17302551,
+     "damage": 32818617,
      "healing": 0,
-     "casts": 43
+     "casts": 84
+    },
+    "20": {
+     "damage": 3964138,
+     "healing": 0,
+     "casts": 10
     }
    }
   },
@@ -813,9 +948,9 @@
    "name": "Thunder Blast",
    "levels": {
     "2": {
-     "damage": 327337,
+     "damage": 2240717,
      "healing": 0,
-     "casts": 1
+     "casts": 9
     },
     "3": {
      "damage": 377970,
@@ -823,9 +958,19 @@
      "casts": 1
     },
     "4": {
-     "damage": 544741,
+     "damage": 933594,
      "healing": 0,
-     "casts": 2
+     "casts": 5
+    },
+    "5": {
+     "damage": 871484,
+     "healing": 0,
+     "casts": 3
+    },
+    "6": {
+     "damage": 1981649,
+     "healing": 0,
+     "casts": 5
     },
     "7": {
      "damage": 416864,
@@ -833,9 +978,9 @@
      "casts": 1
     },
     "8": {
-     "damage": 933234,
+     "damage": 1551935,
      "healing": 0,
-     "casts": 2
+     "casts": 3
     },
     "9": {
      "damage": 453893,
@@ -876,6 +1021,11 @@
      "damage": 1329602,
      "healing": 0,
      "casts": 2
+    },
+    "19": {
+     "damage": 1247879,
+     "healing": 0,
+     "casts": 1
     }
    }
   },
@@ -887,20 +1037,30 @@
      "healing": 0,
      "casts": 16
     },
-    "5": {
-     "damage": 355028,
+    "3": {
+     "damage": 1591425,
      "healing": 0,
-     "casts": 2
+     "casts": 10
     },
-    "6": {
-     "damage": 1727853,
+    "4": {
+     "damage": 2941949,
+     "healing": 0,
+     "casts": 18
+    },
+    "5": {
+     "damage": 1631888,
      "healing": 0,
      "casts": 9
     },
-    "7": {
-     "damage": 2324970,
+    "6": {
+     "damage": 3101957,
      "healing": 0,
-     "casts": 13
+     "casts": 16
+    },
+    "7": {
+     "damage": 3344707,
+     "healing": 0,
+     "casts": 18
     },
     "8": {
      "damage": 2562905,
@@ -967,15 +1127,30 @@
      "healing": 0,
      "casts": 9
     },
+    "3": {
+     "damage": 0,
+     "healing": 0,
+     "casts": 1
+    },
+    "4": {
+     "damage": 0,
+     "healing": 0,
+     "casts": 3
+    },
+    "5": {
+     "damage": 0,
+     "healing": 0,
+     "casts": 5
+    },
     "6": {
      "damage": 0,
      "healing": 0,
-     "casts": 4
+     "casts": 8
     },
     "7": {
      "damage": 0,
      "healing": 0,
-     "casts": 7
+     "casts": 10
     },
     "8": {
      "damage": 0,
@@ -1036,6 +1211,16 @@
      "damage": 0,
      "healing": 0,
      "casts": 3
+    },
+    "20": {
+     "damage": 0,
+     "healing": 0,
+     "casts": 3
+    },
+    "21": {
+     "damage": 0,
+     "healing": 0,
+     "casts": 2
     }
    }
   },
@@ -1047,20 +1232,30 @@
      "healing": 0,
      "casts": 52
     },
+    "3": {
+     "damage": 0,
+     "healing": 0,
+     "casts": 20
+    },
+    "4": {
+     "damage": 0,
+     "healing": 0,
+     "casts": 44
+    },
     "5": {
      "damage": 0,
      "healing": 0,
-     "casts": 5
+     "casts": 28
     },
     "6": {
      "damage": 0,
      "healing": 0,
-     "casts": 24
+     "casts": 41
     },
     "7": {
      "damage": 0,
      "healing": 0,
-     "casts": 33
+     "casts": 50
     },
     "8": {
      "damage": 0,
@@ -1121,6 +1316,16 @@
      "damage": 0,
      "healing": 0,
      "casts": 9
+    },
+    "20": {
+     "damage": 0,
+     "healing": 0,
+     "casts": 6
+    },
+    "21": {
+     "damage": 0,
+     "healing": 0,
+     "casts": 2
     }
    }
   },
@@ -1132,20 +1337,30 @@
      "healing": 52089430,
      "casts": 74
     },
+    "3": {
+     "damage": 0,
+     "healing": 31051389,
+     "casts": 33
+    },
+    "4": {
+     "damage": 0,
+     "healing": 53036182,
+     "casts": 95
+    },
     "5": {
      "damage": 0,
-     "healing": 19823889,
-     "casts": 20
+     "healing": 60900900,
+     "casts": 74
     },
     "6": {
      "damage": 0,
-     "healing": 36320639,
-     "casts": 45
+     "healing": 66309341,
+     "casts": 82
     },
     "7": {
      "damage": 0,
-     "healing": 64372821,
-     "casts": 63
+     "healing": 104192729,
+     "casts": 95
     },
     "8": {
      "damage": 0,
@@ -1206,6 +1421,16 @@
      "damage": 0,
      "healing": 80964419,
      "casts": 34
+    },
+    "20": {
+     "damage": 0,
+     "healing": 16982124,
+     "casts": 22
+    },
+    "21": {
+     "damage": 0,
+     "healing": 35635467,
+     "casts": 16
     }
    }
   },
@@ -1217,20 +1442,30 @@
      "healing": 0,
      "casts": 358
     },
-    "5": {
-     "damage": 6040069,
+    "3": {
+     "damage": 6737356,
      "healing": 0,
-     "casts": 84
+     "casts": 124
+    },
+    "4": {
+     "damage": 20566848,
+     "healing": 0,
+     "casts": 375
+    },
+    "5": {
+     "damage": 28317946,
+     "healing": 0,
+     "casts": 382
     },
     "6": {
-     "damage": 15417349,
+     "damage": 30214405,
      "healing": 0,
-     "casts": 199
+     "casts": 412
     },
     "7": {
-     "damage": 33233570,
+     "damage": 47665622,
      "healing": 0,
-     "casts": 335
+     "casts": 491
     },
     "8": {
      "damage": 54364676,
@@ -1291,6 +1526,16 @@
      "damage": 151630433,
      "healing": 0,
      "casts": 565
+    },
+    "20": {
+     "damage": 20835648,
+     "healing": 0,
+     "casts": 79
+    },
+    "21": {
+     "damage": 25829933,
+     "healing": 0,
+     "casts": 94
     }
    }
   },
@@ -1302,20 +1547,30 @@
      "healing": 0,
      "casts": 868
     },
-    "5": {
-     "damage": 8367584,
+    "3": {
+     "damage": 11862293,
      "healing": 0,
-     "casts": 212
+     "casts": 343
+    },
+    "4": {
+     "damage": 33985848,
+     "healing": 0,
+     "casts": 985
+    },
+    "5": {
+     "damage": 36958443,
+     "healing": 0,
+     "casts": 973
     },
     "6": {
-     "damage": 14282928,
+     "damage": 31285394,
      "healing": 0,
-     "casts": 342
+     "casts": 764
     },
     "7": {
-     "damage": 36172684,
+     "damage": 49986033,
      "healing": 0,
-     "casts": 733
+     "casts": 1025
     },
     "8": {
      "damage": 52165571,
@@ -1376,6 +1631,16 @@
      "damage": 72287237,
      "healing": 0,
      "casts": 627
+    },
+    "20": {
+     "damage": 22940195,
+     "healing": 0,
+     "casts": 194
+    },
+    "21": {
+     "damage": 19218790,
+     "healing": 0,
+     "casts": 136
     }
    }
   },
@@ -1383,34 +1648,39 @@
    "name": "Lava Bolt",
    "levels": {
     "2": {
-     "damage": 7147134,
+     "damage": 12501672,
      "healing": 0,
-     "casts": 79
+     "casts": 137
+    },
+    "3": {
+     "damage": 9742392,
+     "healing": 0,
+     "casts": 91
     },
     "4": {
-     "damage": 3495448,
+     "damage": 17628195,
      "healing": 0,
-     "casts": 33
+     "casts": 168
     },
     "5": {
-     "damage": 4810316,
+     "damage": 33200405,
      "healing": 0,
-     "casts": 38
+     "casts": 295
     },
     "6": {
-     "damage": 13331163,
+     "damage": 29963057,
      "healing": 0,
-     "casts": 106
+     "casts": 239
     },
     "7": {
-     "damage": 13182933,
+     "damage": 29013913,
      "healing": 0,
-     "casts": 86
+     "casts": 192
     },
     "8": {
-     "damage": 10781005,
+     "damage": 30504081,
      "healing": 0,
-     "casts": 63
+     "casts": 185
     },
     "9": {
      "damage": 48915841,
@@ -1466,6 +1736,11 @@
      "damage": 8956439,
      "healing": 0,
      "casts": 23
+    },
+    "20": {
+     "damage": 4585567,
+     "healing": 0,
+     "casts": 11
     }
    }
   },
@@ -1473,24 +1748,29 @@
    "name": "Light Bolt",
    "levels": {
     "2": {
-     "damage": 2892436,
+     "damage": 9199213,
      "healing": 0,
-     "casts": 28
+     "casts": 94
+    },
+    "4": {
+     "damage": 3892098,
+     "healing": 0,
+     "casts": 37
     },
     "5": {
-     "damage": 1986078,
+     "damage": 4361827,
      "healing": 0,
-     "casts": 17
+     "casts": 38
     },
     "6": {
-     "damage": 1857092,
+     "damage": 7111068,
      "healing": 0,
-     "casts": 15
+     "casts": 56
     },
     "7": {
-     "damage": 1445254,
+     "damage": 3761981,
      "healing": 0,
-     "casts": 11
+     "casts": 28
     },
     "8": {
      "damage": 3821018,
@@ -1533,9 +1813,9 @@
      "casts": 24
     },
     "16": {
-     "damage": 7243653,
+     "damage": 6852676,
      "healing": 0,
-     "casts": 20
+     "casts": 19
     },
     "17": {
      "damage": 8245045,
@@ -1551,6 +1831,11 @@
      "damage": 2242819,
      "healing": 0,
      "casts": 5
+    },
+    "20": {
+     "damage": 517942,
+     "healing": 0,
+     "casts": 2
     }
    }
   },
@@ -1558,24 +1843,39 @@
    "name": "Winter's Shroud",
    "levels": {
     "2": {
-     "damage": 2763492,
+     "damage": 4078037,
+     "healing": 0,
+     "casts": 10
+    },
+    "3": {
+     "damage": 3314159,
      "healing": 0,
      "casts": 7
     },
-    "5": {
-     "damage": 532455,
+    "4": {
+     "damage": 4015523,
      "healing": 0,
-     "casts": 1
+     "casts": 9
+    },
+    "5": {
+     "damage": 3488425,
+     "healing": 0,
+     "casts": 7
     },
     "6": {
      "damage": 3563956,
      "healing": 0,
      "casts": 8
     },
-    "8": {
-     "damage": 656268,
+    "7": {
+     "damage": 3772415,
      "healing": 0,
-     "casts": 1
+     "casts": 6
+    },
+    "8": {
+     "damage": 6457232,
+     "healing": 0,
+     "casts": 11
     },
     "9": {
      "damage": 3909202,
@@ -1628,24 +1928,29 @@
    "name": "Light Bolt",
    "levels": {
     "2": {
-     "damage": 10143477,
+     "damage": 23347737,
      "healing": 0,
-     "casts": 99
+     "casts": 230
+    },
+    "4": {
+     "damage": 16773530,
+     "healing": 0,
+     "casts": 161
     },
     "5": {
-     "damage": 7240418,
+     "damage": 23242007,
      "healing": 0,
-     "casts": 61
+     "casts": 194
     },
     "6": {
-     "damage": 2258942,
+     "damage": 14269068,
      "healing": 0,
-     "casts": 18
+     "casts": 112
     },
     "7": {
-     "damage": 8225339,
+     "damage": 31128898,
      "healing": 0,
-     "casts": 45
+     "casts": 176
     },
     "8": {
      "damage": 23413627,
@@ -1688,9 +1993,9 @@
      "casts": 99
     },
     "16": {
-     "damage": 39620768,
+     "damage": 30817098,
      "healing": 0,
-     "casts": 121
+     "casts": 90
     },
     "17": {
      "damage": 25040388,
@@ -1703,9 +2008,14 @@
      "casts": 65
     },
     "19": {
-     "damage": 17830354,
+     "damage": 22342865,
      "healing": 0,
-     "casts": 40
+     "casts": 51
+    },
+    "20": {
+     "damage": 5588780,
+     "healing": 0,
+     "casts": 11
     }
    }
   },
@@ -1713,24 +2023,29 @@
    "name": "Seed Shot",
    "levels": {
     "2": {
-     "damage": 4191062,
+     "damage": 21220196,
      "healing": 0,
-     "casts": 40
+     "casts": 208
+    },
+    "4": {
+     "damage": 11011626,
+     "healing": 0,
+     "casts": 97
     },
     "5": {
-     "damage": 1756766,
+     "damage": 8413292,
      "healing": 0,
-     "casts": 15
+     "casts": 68
     },
     "6": {
-     "damage": 1259935,
+     "damage": 12221754,
      "healing": 0,
-     "casts": 10
+     "casts": 96
     },
     "7": {
-     "damage": 2332220,
+     "damage": 11978482,
      "healing": 0,
-     "casts": 13
+     "casts": 68
     },
     "8": {
      "damage": 11360847,
@@ -1773,9 +2088,9 @@
      "casts": 53
     },
     "16": {
-     "damage": 11856827,
+     "damage": 8680410,
      "healing": 0,
-     "casts": 33
+     "casts": 23
     },
     "17": {
      "damage": 9160489,
@@ -1788,9 +2103,14 @@
      "casts": 40
     },
     "19": {
-     "damage": 5272467,
+     "damage": 10622580,
      "healing": 0,
-     "casts": 13
+     "casts": 28
+    },
+    "20": {
+     "damage": 4800717,
+     "healing": 0,
+     "casts": 10
     }
    }
   },
@@ -1800,22 +2120,27 @@
     "2": {
      "damage": 0,
      "healing": 0,
-     "casts": 1
+     "casts": 24
+    },
+    "4": {
+     "damage": 0,
+     "healing": 0,
+     "casts": 7
     },
     "5": {
      "damage": 0,
      "healing": 0,
-     "casts": 1
+     "casts": 7
     },
     "6": {
      "damage": 0,
      "healing": 0,
-     "casts": 1
+     "casts": 14
     },
     "7": {
      "damage": 0,
      "healing": 0,
-     "casts": 2
+     "casts": 6
     },
     "8": {
      "damage": 0,
@@ -1861,6 +2186,11 @@
      "damage": 0,
      "healing": 0,
      "casts": 1
+    },
+    "19": {
+     "damage": 0,
+     "healing": 0,
+     "casts": 1
     }
    }
   },
@@ -1870,17 +2200,22 @@
     "2": {
      "damage": 0,
      "healing": 0,
-     "casts": 2
+     "casts": 3
+    },
+    "5": {
+     "damage": 0,
+     "healing": 0,
+     "casts": 1
     },
     "6": {
      "damage": 0,
      "healing": 0,
-     "casts": 1
+     "casts": 3
     },
     "8": {
      "damage": 0,
      "healing": 0,
-     "casts": 1
+     "casts": 3
     },
     "9": {
      "damage": 0,
@@ -1943,24 +2278,29 @@
    "name": "Warden's Wrath",
    "levels": {
     "2": {
-     "damage": 558152,
+     "damage": 1145472,
      "healing": 0,
-     "casts": 17
+     "casts": 37
+    },
+    "4": {
+     "damage": 503558,
+     "healing": 0,
+     "casts": 14
     },
     "5": {
-     "damage": 49420,
+     "damage": 481822,
      "healing": 0,
-     "casts": 1
+     "casts": 14
     },
     "6": {
-     "damage": 171534,
+     "damage": 710065,
      "healing": 0,
-     "casts": 4
+     "casts": 18
     },
     "7": {
-     "damage": 116184,
+     "damage": 603302,
      "healing": 0,
-     "casts": 3
+     "casts": 14
     },
     "8": {
      "damage": 266852,
@@ -2018,9 +2358,14 @@
      "casts": 11
     },
     "19": {
-     "damage": 320988,
+     "damage": 448230,
      "healing": 0,
-     "casts": 2
+     "casts": 3
+    },
+    "20": {
+     "damage": 2399062,
+     "healing": 0,
+     "casts": 23
     }
    }
   },
@@ -2028,44 +2373,44 @@
    "name": "Earth Bolt",
    "levels": {
     "2": {
-     "damage": 11853304,
+     "damage": 17164039,
      "healing": 0,
-     "casts": 125
+     "casts": 182
     },
     "3": {
-     "damage": 3049502,
+     "damage": 7654422,
      "healing": 0,
-     "casts": 30
+     "casts": 76
     },
     "4": {
-     "damage": 6157755,
+     "damage": 27942947,
      "healing": 0,
-     "casts": 58
+     "casts": 256
     },
     "5": {
-     "damage": 3842055,
+     "damage": 18582111,
      "healing": 0,
-     "casts": 31
+     "casts": 162
     },
     "6": {
-     "damage": 12535786,
+     "damage": 14229240,
      "healing": 0,
-     "casts": 98
+     "casts": 110
     },
     "7": {
-     "damage": 1415686,
+     "damage": 25604687,
      "healing": 0,
-     "casts": 9
+     "casts": 156
     },
     "8": {
-     "damage": 1548539,
+     "damage": 30655127,
      "healing": 0,
-     "casts": 8
+     "casts": 180
     },
     "9": {
-     "damage": 17771464,
+     "damage": 23569205,
      "healing": 0,
-     "casts": 97
+     "casts": 130
     },
     "10": {
      "damage": 32929994,
@@ -2123,39 +2468,44 @@
    "name": "Lightning Bolt",
    "levels": {
     "2": {
-     "damage": 4071417,
+     "damage": 6834715,
      "healing": 0,
-     "casts": 43
+     "casts": 70
     },
     "3": {
-     "damage": 1746268,
+     "damage": 3866331,
      "healing": 0,
-     "casts": 17
+     "casts": 37
     },
     "4": {
-     "damage": 3029768,
+     "damage": 12317426,
      "healing": 0,
-     "casts": 29
+     "casts": 112
     },
     "5": {
-     "damage": 2196633,
+     "damage": 7853045,
      "healing": 0,
-     "casts": 18
+     "casts": 67
     },
     "6": {
-     "damage": 5893826,
+     "damage": 8160709,
      "healing": 0,
-     "casts": 46
+     "casts": 64
+    },
+    "7": {
+     "damage": 12477439,
+     "healing": 0,
+     "casts": 75
     },
     "8": {
-     "damage": 887422,
+     "damage": 9963015,
      "healing": 0,
-     "casts": 5
+     "casts": 59
     },
     "9": {
-     "damage": 13613985,
+     "damage": 14125973,
      "healing": 0,
-     "casts": 72
+     "casts": 75
     },
     "10": {
      "damage": 19864471,
@@ -2213,24 +2563,29 @@
    "name": "Lightspore Shot",
    "levels": {
     "2": {
-     "damage": 1719786,
+     "damage": 8228759,
      "healing": 0,
-     "casts": 31
+     "casts": 158
+    },
+    "4": {
+     "damage": 4648366,
+     "healing": 0,
+     "casts": 83
     },
     "5": {
-     "damage": 1600525,
+     "damage": 5453730,
      "healing": 0,
-     "casts": 28
+     "casts": 96
     },
     "6": {
-     "damage": 2659760,
+     "damage": 4513555,
      "healing": 0,
-     "casts": 42
+     "casts": 73
     },
     "7": {
-     "damage": 2006074,
+     "damage": 8916009,
      "healing": 0,
-     "casts": 27
+     "casts": 122
     },
     "8": {
      "damage": 5666221,
@@ -2288,15 +2643,30 @@
      "casts": 90
     },
     "19": {
-     "damage": 4507902,
+     "damage": 8311914,
      "healing": 0,
-     "casts": 23
+     "casts": 47
+    },
+    "20": {
+     "damage": 4750862,
+     "healing": 0,
+     "casts": 25
     }
    }
   },
   "1249621": {
    "name": "Violent Sand",
    "levels": {
+    "4": {
+     "damage": 1364211,
+     "healing": 0,
+     "casts": 2
+    },
+    "5": {
+     "damage": 1912099,
+     "healing": 0,
+     "casts": 3
+    },
     "6": {
      "damage": 800280,
      "healing": 0,
@@ -2323,29 +2693,34 @@
    "name": "Envenom",
    "levels": {
     "2": {
-     "damage": 5557522,
+     "damage": 19933310,
      "healing": 0,
-     "casts": 82
+     "casts": 224
+    },
+    "3": {
+     "damage": 8755949,
+     "healing": 0,
+     "casts": 95
     },
     "4": {
-     "damage": 2033499,
+     "damage": 19334341,
      "healing": 0,
-     "casts": 18
+     "casts": 164
     },
     "5": {
-     "damage": 2777849,
+     "damage": 16346604,
      "healing": 0,
-     "casts": 38
+     "casts": 175
     },
     "6": {
-     "damage": 16024426,
+     "damage": 17437155,
      "healing": 0,
-     "casts": 108
+     "casts": 126
     },
     "7": {
-     "damage": 6711038,
+     "damage": 20702157,
      "healing": 0,
-     "casts": 34
+     "casts": 120
     },
     "8": {
      "damage": 23021506,
@@ -2406,6 +2781,11 @@
      "damage": 18917311,
      "healing": 0,
      "casts": 63
+    },
+    "21": {
+     "damage": 5567858,
+     "healing": 0,
+     "casts": 14
     }
    }
   },
@@ -2413,39 +2793,44 @@
    "name": "Lightning Bolt",
    "levels": {
     "2": {
-     "damage": 593716,
+     "damage": 993451,
      "healing": 0,
-     "casts": 6
+     "casts": 10
     },
     "3": {
-     "damage": 109166,
+     "damage": 709750,
      "healing": 0,
-     "casts": 1
+     "casts": 7
     },
     "4": {
-     "damage": 465427,
+     "damage": 1473931,
      "healing": 0,
-     "casts": 4
+     "casts": 13
     },
     "5": {
-     "damage": 125306,
+     "damage": 1072901,
      "healing": 0,
-     "casts": 1
+     "casts": 10
     },
     "6": {
      "damage": 814815,
      "healing": 0,
      "casts": 6
     },
-    "8": {
-     "damage": 202542,
+    "7": {
+     "damage": 875190,
      "healing": 0,
-     "casts": 1
+     "casts": 5
+    },
+    "8": {
+     "damage": 1532636,
+     "healing": 0,
+     "casts": 8
     },
     "9": {
-     "damage": 1928171,
+     "damage": 2683971,
      "healing": 0,
-     "casts": 10
+     "casts": 14
     },
     "10": {
      "damage": 3981803,
@@ -2503,34 +2888,39 @@
    "name": "Lightning Bolt",
    "levels": {
     "2": {
-     "damage": 12206104,
+     "damage": 33162407,
      "healing": 0,
-     "casts": 130
+     "casts": 363
+    },
+    "3": {
+     "damage": 9562586,
+     "healing": 0,
+     "casts": 92
     },
     "4": {
-     "damage": 10343815,
+     "damage": 46276942,
      "healing": 0,
-     "casts": 100
+     "casts": 434
     },
     "5": {
-     "damage": 21771868,
+     "damage": 25988524,
      "healing": 0,
-     "casts": 184
+     "casts": 223
     },
     "6": {
-     "damage": 37850164,
+     "damage": 49217497,
      "healing": 0,
-     "casts": 304
+     "casts": 399
     },
     "7": {
-     "damage": 10903322,
+     "damage": 57487148,
      "healing": 0,
-     "casts": 65
+     "casts": 348
     },
     "8": {
-     "damage": 43204369,
+     "damage": 63520323,
      "healing": 0,
-     "casts": 241
+     "casts": 363
     },
     "9": {
      "damage": 65446058,
@@ -2586,6 +2976,11 @@
      "damage": 34681701,
      "healing": 0,
      "casts": 87
+    },
+    "20": {
+     "damage": 5390497,
+     "healing": 0,
+     "casts": 13
     }
    }
   },
@@ -2595,27 +2990,32 @@
     "2": {
      "damage": 0,
      "healing": 0,
-     "casts": 2
+     "casts": 3
+    },
+    "4": {
+     "damage": 0,
+     "healing": 0,
+     "casts": 3
     },
     "5": {
      "damage": 0,
      "healing": 0,
-     "casts": 3
+     "casts": 4
     },
     "6": {
      "damage": 0,
      "healing": 0,
-     "casts": 4
+     "casts": 5
     },
     "7": {
      "damage": 0,
      "healing": 0,
-     "casts": 2
+     "casts": 5
     },
     "8": {
      "damage": 0,
      "healing": 0,
-     "casts": 3
+     "casts": 6
     },
     "9": {
      "damage": 0,
@@ -2663,29 +3063,34 @@
    "name": "Piercing Hiss",
    "levels": {
     "2": {
-     "damage": 5975789,
+     "damage": 18445250,
      "healing": 0,
-     "casts": 11
+     "casts": 38
+    },
+    "3": {
+     "damage": 12054529,
+     "healing": 0,
+     "casts": 21
     },
     "4": {
-     "damage": 3953124,
+     "damage": 22650141,
      "healing": 0,
-     "casts": 6
+     "casts": 37
     },
     "5": {
-     "damage": 5384787,
+     "damage": 12748444,
      "healing": 0,
-     "casts": 8
+     "casts": 19
     },
     "6": {
-     "damage": 8432061,
+     "damage": 11727371,
      "healing": 0,
-     "casts": 12
+     "casts": 17
     },
     "7": {
-     "damage": 5654217,
+     "damage": 16157295,
      "healing": 0,
-     "casts": 6
+     "casts": 18
     },
     "8": {
      "damage": 15957338,
@@ -2746,6 +3151,16 @@
      "damage": 2161064,
      "healing": 0,
      "casts": 1
+    },
+    "20": {
+     "damage": 3578753,
+     "healing": 0,
+     "casts": 3
+    },
+    "21": {
+     "damage": 2672637,
+     "healing": 0,
+     "casts": 1
     }
    }
   },
@@ -2757,35 +3172,40 @@
      "healing": 0,
      "casts": 7
     },
-    "4": {
-     "damage": 87626,
+    "3": {
+     "damage": 95141,
      "healing": 0,
      "casts": 1
     },
-    "5": {
-     "damage": 536852,
+    "4": {
+     "damage": 813512,
      "healing": 0,
-     "casts": 4
+     "casts": 10
+    },
+    "5": {
+     "damage": 594502,
+     "healing": 0,
+     "casts": 5
     },
     "6": {
-     "damage": 276454,
-     "healing": 0,
-     "casts": 2
-    },
-    "7": {
-     "damage": 530921,
+     "damage": 510583,
      "healing": 0,
      "casts": 4
     },
-    "8": {
-     "damage": 280746,
+    "7": {
+     "damage": 2058308,
      "healing": 0,
-     "casts": 2
+     "casts": 13
+    },
+    "8": {
+     "damage": 1122377,
+     "healing": 0,
+     "casts": 7
     },
     "9": {
-     "damage": 1686976,
+     "damage": 2047499,
      "healing": 0,
-     "casts": 9
+     "casts": 11
     },
     "10": {
      "damage": 1436094,
@@ -2847,35 +3267,40 @@
      "healing": 0,
      "casts": 65
     },
-    "4": {
-     "damage": 360467,
+    "3": {
+     "damage": 2380734,
      "healing": 0,
-     "casts": 3
+     "casts": 25
+    },
+    "4": {
+     "damage": 3957002,
+     "healing": 0,
+     "casts": 39
     },
     "5": {
-     "damage": 5915788,
+     "damage": 10645018,
      "healing": 0,
-     "casts": 48
+     "casts": 90
     },
     "6": {
-     "damage": 768598,
+     "damage": 7585571,
      "healing": 0,
-     "casts": 6
+     "casts": 60
     },
     "7": {
-     "damage": 14119812,
+     "damage": 26205735,
      "healing": 0,
-     "casts": 87
+     "casts": 158
     },
     "8": {
-     "damage": 3058222,
+     "damage": 15034921,
      "healing": 0,
-     "casts": 19
+     "casts": 84
     },
     "9": {
-     "damage": 8704729,
+     "damage": 10982482,
      "healing": 0,
-     "casts": 48
+     "casts": 60
     },
     "10": {
      "damage": 12517222,
@@ -2934,38 +3359,43 @@
    "levels": {
     "2": {
      "damage": 0,
-     "healing": 52508554,
-     "casts": 13
+     "healing": 93312967,
+     "casts": 22
     },
     "3": {
      "damage": 0,
-     "healing": 14728588,
-     "casts": 4
+     "healing": 32903222,
+     "casts": 9
     },
     "4": {
      "damage": 0,
-     "healing": 37854065,
-     "casts": 9
+     "healing": 136499108,
+     "casts": 34
     },
     "5": {
      "damage": 0,
-     "healing": 25451718,
-     "casts": 5
+     "healing": 94764361,
+     "casts": 21
     },
     "6": {
      "damage": 0,
-     "healing": 63851452,
-     "casts": 10
+     "healing": 71391046,
+     "casts": 12
+    },
+    "7": {
+     "damage": 0,
+     "healing": 137721943,
+     "casts": 21
     },
     "8": {
      "damage": 0,
-     "healing": 15288961,
-     "casts": 2
+     "healing": 208159613,
+     "casts": 21
     },
     "9": {
      "damage": 0,
-     "healing": 67728169,
-     "casts": 12
+     "healing": 121966019,
+     "casts": 18
     },
     "10": {
      "damage": 0,
@@ -3023,34 +3453,39 @@
    "name": "Arc Lightning",
    "levels": {
     "2": {
-     "damage": 2299941,
+     "damage": 4188916,
      "healing": 0,
-     "casts": 5
+     "casts": 9
     },
     "3": {
-     "damage": 2533531,
+     "damage": 2897222,
      "healing": 0,
-     "casts": 5
+     "casts": 6
     },
     "4": {
-     "damage": 1515505,
+     "damage": 7239006,
      "healing": 0,
-     "casts": 3
+     "casts": 15
     },
     "5": {
-     "damage": 1278092,
+     "damage": 4178745,
      "healing": 0,
-     "casts": 2
+     "casts": 7
     },
     "6": {
-     "damage": 3220973,
+     "damage": 3335489,
      "healing": 0,
-     "casts": 5
+     "casts": 6
+    },
+    "7": {
+     "damage": 10437236,
+     "healing": 0,
+     "casts": 13
     },
     "8": {
-     "damage": 890903,
+     "damage": 4458728,
      "healing": 0,
-     "casts": 1
+     "casts": 5
     },
     "9": {
      "damage": 8848537,
@@ -3110,32 +3545,37 @@
     "2": {
      "damage": 0,
      "healing": 0,
-     "casts": 3
+     "casts": 6
     },
-    "4": {
-     "damage": 0,
-     "healing": 0,
-     "casts": 1
-    },
-    "5": {
+    "3": {
      "damage": 0,
      "healing": 0,
      "casts": 2
     },
-    "6": {
+    "4": {
      "damage": 0,
      "healing": 0,
      "casts": 5
     },
+    "5": {
+     "damage": 0,
+     "healing": 0,
+     "casts": 14
+    },
+    "6": {
+     "damage": 0,
+     "healing": 0,
+     "casts": 10
+    },
     "7": {
      "damage": 0,
      "healing": 0,
-     "casts": 7
+     "casts": 11
     },
     "8": {
      "damage": 0,
      "healing": 0,
-     "casts": 6
+     "casts": 10
     },
     "9": {
      "damage": 0,
@@ -3191,6 +3631,11 @@
      "damage": 0,
      "healing": 0,
      "casts": 3
+    },
+    "20": {
+     "damage": 0,
+     "healing": 0,
+     "casts": 1
     }
    }
   },
@@ -3198,34 +3643,39 @@
    "name": "Shadowbolt Volley",
    "levels": {
     "2": {
-     "damage": 3647381,
+     "damage": 5005144,
      "healing": 0,
-     "casts": 5
+     "casts": 7
+    },
+    "3": {
+     "damage": 7106045,
+     "healing": 0,
+     "casts": 9
     },
     "4": {
-     "damage": 909778,
+     "damage": 7300889,
      "healing": 0,
-     "casts": 1
+     "casts": 9
     },
     "5": {
-     "damage": 1017204,
+     "damage": 19934116,
      "healing": 0,
-     "casts": 1
+     "casts": 22
     },
     "6": {
-     "damage": 1040062,
+     "damage": 10848727,
      "healing": 0,
-     "casts": 1
+     "casts": 11
     },
     "7": {
-     "damage": 4534899,
+     "damage": 16351707,
      "healing": 0,
-     "casts": 4
+     "casts": 16
     },
     "8": {
-     "damage": 13386177,
+     "damage": 19545018,
      "healing": 0,
-     "casts": 10
+     "casts": 15
     },
     "9": {
      "damage": 31670610,
@@ -3288,24 +3738,29 @@
    "name": "Light Bolt Volley",
    "levels": {
     "2": {
-     "damage": 7212973,
+     "damage": 25181478,
      "healing": 0,
-     "casts": 10
+     "casts": 36
+    },
+    "4": {
+     "damage": 16069123,
+     "healing": 0,
+     "casts": 25
     },
     "5": {
-     "damage": 8957308,
+     "damage": 28708870,
      "healing": 0,
-     "casts": 11
+     "casts": 36
     },
     "6": {
-     "damage": 3059186,
+     "damage": 13532138,
      "healing": 0,
-     "casts": 4
+     "casts": 16
     },
     "7": {
-     "damage": 4799570,
+     "damage": 22027154,
      "healing": 0,
-     "casts": 4
+     "casts": 17
     },
     "8": {
      "damage": 16209372,
@@ -3348,9 +3803,9 @@
      "casts": 8
     },
     "16": {
-     "damage": 25979516,
+     "damage": 19743207,
      "healing": 0,
-     "casts": 12
+     "casts": 9
     },
     "17": {
      "damage": 7691613,
@@ -3363,9 +3818,14 @@
      "casts": 1
     },
     "19": {
-     "damage": 9543135,
+     "damage": 12794170,
      "healing": 0,
-     "casts": 3
+     "casts": 4
+    },
+    "20": {
+     "damage": 3515272,
+     "healing": 0,
+     "casts": 1
     }
    }
   },
@@ -3373,29 +3833,34 @@
    "name": "Flame Shock",
    "levels": {
     "2": {
-     "damage": 736132,
+     "damage": 2502311,
      "healing": 0,
-     "casts": 1
+     "casts": 6
     },
-    "4": {
-     "damage": 2743654,
-     "healing": 0,
-     "casts": 4
-    },
-    "6": {
-     "damage": 955776,
-     "healing": 0,
-     "casts": 1
-    },
-    "7": {
-     "damage": 866472,
-     "healing": 0,
-     "casts": 1
-    },
-    "8": {
-     "damage": 1955321,
+    "3": {
+     "damage": 1273219,
      "healing": 0,
      "casts": 2
+    },
+    "4": {
+     "damage": 9720461,
+     "healing": 0,
+     "casts": 12
+    },
+    "6": {
+     "damage": 1717719,
+     "healing": 0,
+     "casts": 2
+    },
+    "7": {
+     "damage": 3025369,
+     "healing": 0,
+     "casts": 3
+    },
+    "8": {
+     "damage": 10532743,
+     "healing": 0,
+     "casts": 12
     },
     "10": {
      "damage": 1849042,
@@ -3433,39 +3898,44 @@
    "name": "Fiery Blast",
    "levels": {
     "2": {
-     "damage": 1030605,
+     "damage": 3747937,
+     "healing": 0,
+     "casts": 20
+    },
+    "3": {
+     "damage": 1157237,
      "healing": 0,
      "casts": 5
     },
-    "3": {
-     "damage": 675135,
-     "healing": 0,
-     "casts": 3
-    },
     "4": {
-     "damage": 2176075,
+     "damage": 5381762,
      "healing": 0,
-     "casts": 9
+     "casts": 21
+    },
+    "5": {
+     "damage": 3313130,
+     "healing": 0,
+     "casts": 14
     },
     "6": {
-     "damage": 1279323,
-     "healing": 0,
-     "casts": 4
-    },
-    "7": {
-     "damage": 3607460,
-     "healing": 0,
-     "casts": 9
-    },
-    "8": {
-     "damage": 1800271,
-     "healing": 0,
-     "casts": 4
-    },
-    "9": {
-     "damage": 6075471,
+     "damage": 4187800,
      "healing": 0,
      "casts": 15
+    },
+    "7": {
+     "damage": 4424674,
+     "healing": 0,
+     "casts": 11
+    },
+    "8": {
+     "damage": 5610437,
+     "healing": 0,
+     "casts": 13
+    },
+    "9": {
+     "damage": 8522859,
+     "healing": 0,
+     "casts": 19
     },
     "10": {
      "damage": 7556140,
@@ -3513,9 +3983,14 @@
      "casts": 3
     },
     "19": {
-     "damage": 5053770,
+     "damage": 25344479,
      "healing": 0,
-     "casts": 5
+     "casts": 25
+    },
+    "20": {
+     "damage": 958479,
+     "healing": 0,
+     "casts": 3
     }
    }
   },
@@ -3525,27 +4000,32 @@
     "2": {
      "damage": 0,
      "healing": 0,
-     "casts": 9
+     "casts": 46
+    },
+    "3": {
+     "damage": 0,
+     "healing": 0,
+     "casts": 17
     },
     "4": {
      "damage": 0,
      "healing": 0,
-     "casts": 4
+     "casts": 45
     },
     "5": {
      "damage": 0,
      "healing": 0,
-     "casts": 3
+     "casts": 26
     },
     "6": {
      "damage": 0,
      "healing": 0,
-     "casts": 33
+     "casts": 35
     },
     "7": {
      "damage": 0,
      "healing": 0,
-     "casts": 12
+     "casts": 30
     },
     "8": {
      "damage": 0,
@@ -3606,6 +4086,11 @@
      "damage": 0,
      "healing": 0,
      "casts": 6
+    },
+    "21": {
+     "damage": 0,
+     "healing": 0,
+     "casts": 2
     }
    }
   },
@@ -3615,32 +4100,37 @@
     "2": {
      "damage": 0,
      "healing": 0,
-     "casts": 3
+     "casts": 5
     },
     "4": {
      "damage": 0,
      "healing": 0,
-     "casts": 3
+     "casts": 15
     },
     "5": {
      "damage": 0,
      "healing": 0,
-     "casts": 2
+     "casts": 6
     },
     "6": {
      "damage": 0,
      "healing": 0,
-     "casts": 10
+     "casts": 11
+    },
+    "7": {
+     "damage": 0,
+     "healing": 0,
+     "casts": 6
     },
     "8": {
      "damage": 0,
      "healing": 0,
-     "casts": 2
+     "casts": 14
     },
     "9": {
      "damage": 0,
      "healing": 0,
-     "casts": 17
+     "casts": 21
     },
     "10": {
      "damage": 0,
@@ -3694,33 +4184,38 @@
    "levels": {
     "2": {
      "damage": 0,
-     "healing": 22661257,
-     "casts": 57
+     "healing": 27788387,
+     "casts": 86
+    },
+    "3": {
+     "damage": 0,
+     "healing": 8582373,
+     "casts": 42
     },
     "4": {
      "damage": 0,
-     "healing": 1637169,
-     "casts": 11
+     "healing": 12386263,
+     "casts": 78
     },
     "5": {
      "damage": 0,
-     "healing": 3185075,
-     "casts": 18
+     "healing": 28608611,
+     "casts": 88
     },
     "6": {
      "damage": 0,
-     "healing": 9355698,
-     "casts": 45
+     "healing": 19647139,
+     "casts": 88
     },
     "7": {
      "damage": 0,
-     "healing": 17653687,
-     "casts": 49
+     "healing": 27448965,
+     "casts": 95
     },
     "8": {
      "damage": 0,
-     "healing": 15339090,
-     "casts": 36
+     "healing": 28155692,
+     "casts": 97
     },
     "9": {
      "damage": 0,
@@ -3782,6 +4277,26 @@
   "1310358": {
    "name": "Toxic Atrophy",
    "levels": {
+    "2": {
+     "damage": 392602,
+     "healing": 0,
+     "casts": 1
+    },
+    "3": {
+     "damage": 1806688,
+     "healing": 0,
+     "casts": 3
+    },
+    "4": {
+     "damage": 797375,
+     "healing": 0,
+     "casts": 2
+    },
+    "5": {
+     "damage": 518520,
+     "healing": 0,
+     "casts": 1
+    },
     "6": {
      "damage": 1463535,
      "healing": 0,
@@ -3833,34 +4348,39 @@
    "name": "Venom Bolt",
    "levels": {
     "2": {
-     "damage": 3617073,
+     "damage": 8410562,
      "healing": 0,
-     "casts": 39
+     "casts": 89
+    },
+    "3": {
+     "damage": 3381636,
+     "healing": 0,
+     "casts": 34
     },
     "4": {
-     "damage": 3031539,
+     "damage": 18593839,
      "healing": 0,
-     "casts": 28
+     "casts": 174
     },
     "5": {
-     "damage": 5430770,
+     "damage": 8489304,
      "healing": 0,
-     "casts": 49
+     "casts": 76
     },
     "6": {
-     "damage": 17606301,
+     "damage": 25531202,
      "healing": 0,
-     "casts": 142
+     "casts": 210
     },
     "7": {
-     "damage": 1740356,
+     "damage": 20423070,
      "healing": 0,
-     "casts": 10
+     "casts": 120
     },
     "8": {
-     "damage": 14394994,
+     "damage": 20963949,
      "healing": 0,
-     "casts": 80
+     "casts": 116
     },
     "9": {
      "damage": 25985820,
@@ -3916,6 +4436,11 @@
      "damage": 10554935,
      "healing": 0,
      "casts": 24
+    },
+    "20": {
+     "damage": 1672540,
+     "healing": 0,
+     "casts": 3
     }
    }
   }
