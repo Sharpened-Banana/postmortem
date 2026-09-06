@@ -48,6 +48,11 @@ Transport = Callable[[str, bytes, dict[str, str]], dict]
 
 RATE_LIMIT_FIELD = "rateLimitData { limitPerHour pointsSpentThisHour pointsResetIn }"
 
+#: Reports per listing page. The API caps query complexity at 50,000 and
+#: a 100-report page with nested fights came in at 50,305 (live, 2026-09-06);
+#: 40 leaves headroom for reports with many fights.
+REPORTS_PER_PAGE = 40
+
 
 class WCLError(Exception):
     """Any failure talking to Warcraft Logs: HTTP, auth, or a GraphQL
@@ -153,11 +158,11 @@ def find_mplus_zone(client: WCLClient) -> tuple[int, str]:
 def iter_keystone_fights(client: WCLClient, zone_id: int,
                          max_pages: int = 10) -> Iterator[dict[str, Any]]:
     """Every keystone dungeon fight in recent public reports for the
-    zone, newest reports first: ``{"code", "fight_id", "level",
-    "encounter_id", "encounter", "kill"}``. Fights without a keystone
+    zone (``max_pages`` pages of ``REPORTS_PER_PAGE``), newest first:
+    ``{"code", "fight_id", "level", "encounter_id", "encounter", "kill"}``. Fights without a keystone
     level (raid pulls, trash) are skipped."""
     body = (
-        "reportData { reports(zoneID: $zone, limit: 100, page: $page) { "
+        f"reportData {{ reports(zoneID: $zone, limit: {REPORTS_PER_PAGE}, page: $page) {{ "
         "has_more_pages data { code fights(killType: Encounters) { "
         "id name encounterID keystoneLevel kill } } } }"
     )
