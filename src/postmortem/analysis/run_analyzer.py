@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Optional
 
 from ..combatlog.segmenter import RunSegment
@@ -12,6 +13,7 @@ from .compare import compare_route
 from .interruptibility import KNOWN_UNINTERRUPTIBLE_SPELL_IDS, InterruptibilityData
 from .mapping import build_map_report, collect_map_bounds
 from .pulls import detect_pulls
+from .spell_damage import SpellDamageData, update_from_stats
 from .stats import PET_BUCKET, compute_stats
 from .stealable import StealableData
 
@@ -60,9 +62,11 @@ def _kick_value_summary(stats) -> dict[str, Any]:
     return {
         "note": "estimates: average observed amount per completed cast of the "
                 "interrupted spell in this run, including its periodic "
-                "(DoT/HoT) component per application; spells that never "
-                "landed count as 0, zero-damage debuffs are reported as "
-                "prevented applications",
+                "(DoT/HoT) component per application; a spell that never "
+                "landed this run falls back to this account's own history "
+                "at the nearest key level, then to bundled community data "
+                "(each kick's estimate_source says which); zero-damage "
+                "debuffs are reported as prevented applications",
         "total_estimated_prevented_damage": sum(
             e["estimated_prevented_damage"] for e in by_player
         ),
@@ -298,19 +302,43 @@ def analyze_run(
     full_cast_timeline: bool = True,
     death_penalty_s: float = 15.0,
     par_ms: Optional[int] = None,
+    spell_damage_history_path: Optional[str | Path] = None,
+    community_spell_damage: Optional[SpellDamageData] = None,
 ) -> dict[str, Any]:
-    """Analyze one M+ run; returns a JSON-ready report dict."""
+    """Analyze one M+ run; returns a JSON-ready report dict.
+
+    ``spell_damage_history_path`` is this account's accumulated per-spell
+    damage-per-cast file (see analysis/spell_damage.py): read first as a
+    fallback for kicks whose spell never landed this run, then updated
+    with this run's own landed casts afterwards (best-effort -- a cache
+    that can't be written never costs the report). ``community_spell_damage``
+    is the bundled Warcraft Logs-derived data, consulted after history.
+    """
     data: Optional[DungeonData] = None
     if store is not None:
         data = store.by_challenge_map_id(segment.challenge_map_id)
         if data is None and route is not None:
             data = store.by_dungeon_idx(route.dungeon_idx)
 
+    fallbacks: list[tuple[str, SpellDamageData]] = []
+    if spell_damage_history_path:
+        history = SpellDamageData.load(spell_damage_history_path)
+        if history:
+            fallbacks.append(("history", history))
+    if community_spell_damage:
+        fallbacks.append(("community", community_spell_damage))
+
     pulls = detect_pulls(segment.events, gap_seconds=pull_gap_seconds)
     stats = compute_stats(
         segment.events, pulls, data, full_cast_timeline=full_cast_timeline,
-        avoidable=avoidable,
+        avoidable=avoidable, spell_damage_fallbacks=fallbacks or None,
+        keystone_level=segment.keystone_level,
     )
+    if spell_damage_history_path:
+        try:
+            update_from_stats(stats, segment.keystone_level, spell_damage_history_path)
+        except Exception:
+            pass
 
     start = segment.start_ts
     report: dict[str, Any] = {

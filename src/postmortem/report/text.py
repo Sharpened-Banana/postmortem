@@ -256,7 +256,11 @@ def render_text(report: dict[str, Any]) -> str:
                     f"a debuff application (seen "
                     f"{i['prevented_debuff_applications']}x elsewhere, no damage)"
                 )
-            if est or est_h:
+            src = i.get("estimate_source")
+            if (est or est_h) and src and src != "observed":
+                basis = (f" (from {src}: avg of {i.get('estimate_samples') or '?'} "
+                         f"casts at +{i.get('estimate_level')})")
+            elif est or est_h:
                 basis = f" (avg of {i['observed_casts']} landed casts)"
             elif i.get("prevented_debuff_applications"):
                 basis = ""

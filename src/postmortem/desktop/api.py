@@ -256,6 +256,9 @@ class DesktopAPI:
             full_cast_timeline=bool(params.get("full_cast_timeline", True)),
             death_penalty_s=float(params.get("death_penalty_s", 15.0)),
             par_ms=par_ms,
+            spell_damage_history_path=_config.resolve_learned_spell_damage_path(
+                _config.load_settings()),
+            community_spell_damage=_cli._load_community_spell_damage(),
         )
 
         raiderio_region = params.get("raiderio_region")
@@ -850,6 +853,8 @@ class DesktopAPI:
             run, route, store, avoidable=avoidable, interrupt_data=interrupt_data,
             stealable=stealable,
             learned_path=_config.resolve_learned_interrupts_path(_config.load_settings()),
+            spell_damage_history_path=_config.resolve_learned_spell_damage_path(
+                _config.load_settings()),
             # embed the floor's map art from the user's MDT install into the
             # local report (best-effort; upload.py strips it before the site)
             enrich=lambda r: mapart.attach_map_backgrounds(r, mdt_dir, store),

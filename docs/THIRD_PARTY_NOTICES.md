@@ -3,6 +3,32 @@
 Postmortem's own code is this project's; the files below are bundled data
 built from other people's work and carry their own license.
 
+## `src/postmortem/data/spell_damage.json`
+
+Built by `postmortem build-spell-damage` (see `cli.py` and `wcl.py`) from
+public Mythic+ reports on [Warcraft Logs](https://www.warcraftlogs.com/),
+through their v2 GraphQL API. Per enemy spell and keystone level it holds
+only aggregates: total damage the group took from that spell, total
+healing enemies got from it, and the number of completed casts, summed
+over the sampled fights. No report codes, player names or per-event data
+are kept in the bundled file (the build's `--samples` file, which is not
+bundled, records report codes so a resumed build can skip fights it has
+already fetched).
+
+This is the *community* tier of the kick-value estimate's fallback chain
+(see `analysis/spell_damage.py`): a kick on a spell that never landed in
+the run being analyzed is valued from this account's own past runs first,
+then from this file, at the nearest key level with data, and the report
+labels which. It is never consulted when the run itself has an observed
+number.
+
+Building it needs a Warcraft Logs API client (register one at
+https://www.warcraftlogs.com/api/clients/ and export `WCL_CLIENT_ID` /
+`WCL_CLIENT_SECRET`); the analyzer, desktop app and site never contact
+Warcraft Logs themselves. The API is rate-limited by points per hour
+(3,600 on a free account); the build stops before exhausting them and
+resumes from its samples file on the next run.
+
 ## `src/postmortem/data/interrupt_data.json`
 
 Built by `postmortem build-interrupt-data` (see `cli.py`) from

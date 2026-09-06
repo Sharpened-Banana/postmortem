@@ -115,6 +115,16 @@ def _load_effective_interrupt_data(
     return learned_data if base is None else learned_data.merge(base)
 
 
+def _load_community_spell_damage() -> Optional["SpellDamageData"]:
+    """The bundled Warcraft Logs-derived per-spell damage-per-cast data
+    (see analysis/spell_damage.py), or None when it was never built --
+    it is a fallback for the kick-value estimate, never a requirement."""
+    from .analysis.spell_damage import SpellDamageData
+    from .bundled import bundled_spell_damage_path
+    data = SpellDamageData.load(bundled_spell_damage_path())
+    return data or None
+
+
 def _load_stealable(path: Optional[str]) -> Optional[StealableData]:
     """Load --stealable-data. Like --avoidable-data, an explicitly-passed
     path that fails to load is a clear CLI error (SystemExit). Omitting
@@ -494,6 +504,182 @@ def cmd_build_interrupt_data(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_build_spell_damage(args: argparse.Namespace) -> int:
+    """Sample public Warcraft Logs keystone runs for per-spell damage per
+    completed cast, by key level, and bundle it -- see wcl.py for the
+    client and analysis/spell_damage.py for what the data is for.
+
+    Two files: ``--samples`` holds raw per-fight totals and is the unit
+    of resumability (a fight already in it is never fetched again, so a
+    build cut short by the hourly points budget just continues on the
+    next run); ``--output`` is the aggregated, bundled result rebuilt
+    from the samples every time. Damage per cast is
+    ``sum(damage) / sum(casts)`` over every sampled fight at that level,
+    so one unusual fight cannot dominate.
+    """
+    import os
+    from .analysis.spell_damage import SpellDamageData
+    from .wcl import (WCLClient, WCLError, fetch_fight_tables, find_mplus_zone,
+                      iter_keystone_fights)
+
+    try:
+        client = WCLClient(os.environ.get("WCL_CLIENT_ID", ""),
+                           os.environ.get("WCL_CLIENT_SECRET", ""))
+    except WCLError as exc:
+        raise SystemExit(f"error: {exc} -- register an API client at "
+                         "https://www.warcraftlogs.com/api/clients/ and export both")
+
+    samples_path = Path(args.samples)
+    try:
+        samples = json.loads(samples_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        samples = {"fights": {}}
+    fights: dict[str, Any] = samples.setdefault("fights", {})
+
+    try:
+        if args.zone_id:
+            zone_id, zone_name = int(args.zone_id), ""
+        else:
+            zone_id, zone_name = find_mplus_zone(client)
+        if samples.get("zone_id") not in (None, zone_id):
+            print(f"warning: samples file is for zone {samples.get('zone_id')}, "
+                  f"now sampling zone {zone_id} -- keeping both", file=sys.stderr)
+        samples["zone_id"] = zone_id
+        print(f"zone {zone_id} {zone_name}".rstrip())
+
+        # how many fights we already hold per (encounter, level)
+        have: dict[tuple[int, int], int] = {}
+        for f in fights.values():
+            key = (int(f.get("encounter_id") or 0), int(f.get("level") or 0))
+            have[key] = have.get(key, 0) + 1
+
+        fetched = skipped = 0
+        stopped_for_budget = False
+        for fight in iter_keystone_fights(client, zone_id, max_pages=args.max_pages):
+            if not (args.min_level <= fight["level"] <= args.max_level):
+                continue
+            key = (fight["encounter_id"], fight["level"])
+            fkey = f"{fight['code']}:{fight['fight_id']}"
+            if fkey in fights:
+                skipped += 1
+                continue
+            if have.get(key, 0) >= args.per_level:
+                continue
+            left = client.points_left()
+            if left is not None and left < args.reserve_points:
+                stopped_for_budget = True
+                break
+            tables = fetch_fight_tables(client, fight["code"], fight["fight_id"])
+            fights[fkey] = {
+                "level": fight["level"],
+                "encounter_id": fight["encounter_id"],
+                "encounter": fight["encounter"],
+                "kill": fight["kill"],
+                "damage": {str(k): v for k, v in tables["damage"].items()},
+                "healing": {str(k): v for k, v in tables["healing"].items()},
+                "casts": {str(k): v for k, v in tables["casts"].items()},
+                "names": {str(k): v for k, v in tables["names"].items()},
+            }
+            have[key] = have.get(key, 0) + 1
+            fetched += 1
+            # save as we go: the budget can run out mid-loop
+            samples_path.write_text(json.dumps(samples, indent=0), encoding="utf-8")
+    except WCLError as exc:
+        samples_path.write_text(json.dumps(samples, indent=0), encoding="utf-8")
+        raise SystemExit(f"error: {exc} (samples so far kept in {samples_path})")
+
+    samples_path.write_text(json.dumps(samples, indent=0), encoding="utf-8")
+
+    keep: Optional[set[int]] = None
+    if not args.all_spells:
+        from .bundled import bundled_interrupt_data_path
+        keep = set(InterruptibilityData.load(bundled_interrupt_data_path()).spells) \
+            if bundled_interrupt_data_path().is_file() else set()
+
+    data = aggregate_spell_damage_samples(samples, keep)
+    data.source = "warcraftlogs.com"
+    data.season = zone_name or f"zone {zone_id}"
+    data.version = __import__("datetime").date.today().isoformat()
+    data.save(args.output, comment=(
+        "Built by `postmortem build-spell-damage` from public Warcraft Logs "
+        "reports -- see analysis/spell_damage.py and wcl.py. Per enemy spell "
+        "and keystone level: total damage taken by the group / enemy healing "
+        "and completed-cast count over the sampled fights, so the kick-value "
+        "estimate has a number for a spell that never landed in a run."))
+    levels = sorted({lv for e in data.spells.values() for lv in e["levels"]})
+    print(f"fetched {fetched} new fight(s), {skipped} already sampled; "
+          f"{len(fights)} sampled fights total")
+    print(f"built {len(data.spells)} spell(s) across key levels "
+          f"{levels[0] if levels else '-'}..{levels[-1] if levels else '-'} -> {args.output}")
+    if client.rate_limit:
+        rl = client.rate_limit
+        print(f"API points: {rl.get('pointsSpentThisHour')}/{rl.get('limitPerHour')} "
+              f"used this hour, reset in {rl.get('pointsResetIn')}s")
+    if stopped_for_budget:
+        print("stopped early to stay inside the hourly points budget -- rerun "
+              "after the reset to keep sampling (already-sampled fights are skipped)")
+    if not args.no_bundle:
+        from .bundled import bundled_spell_damage_path
+        bundled_path = bundled_spell_damage_path()
+        bundled_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(args.output, bundled_path)
+        print(f"also copied to the bundled package location: {bundled_path}")
+    return 0
+
+
+def aggregate_spell_damage_samples(samples: dict[str, Any],
+                                   keep: Optional[set[int]] = None) -> "SpellDamageData":
+    """Fold a build-spell-damage samples file into SpellDamageData: per
+    spell and key level, total damage/healing and completed casts summed
+    over every sampled fight. ``keep`` restricts to those spell ids (None
+    keeps all). A spell with casts but no damage row still counts (it
+    did zero damage), a damage row with no cast count is skipped --
+    without a denominator there is no per-cast number."""
+    from .analysis.spell_damage import SpellDamageData
+
+    data = SpellDamageData()
+    for f in (samples.get("fights") or {}).values():
+        if not isinstance(f, dict):
+            continue
+        try:
+            level = int(f.get("level") or 0)
+        except (TypeError, ValueError):
+            continue
+        names = f.get("names") or {}
+        damage = f.get("damage") or {}
+        healing = f.get("healing") or {}
+        casts = f.get("casts") or {}
+        # A cast and its damage can log under different ids with the same
+        # name (Fel Missiles: cast 1216571, damage 1216570 -- see
+        # stats._estimate_kick_value). When the cast id has no damage row
+        # of its own, take the same-named damage/healing row instead.
+        dmg_by_name: dict[str, str] = {}
+        heal_by_name: dict[str, str] = {}
+        for sid in damage:
+            if sid not in casts and names.get(sid):
+                dmg_by_name.setdefault(str(names[sid]).casefold(), sid)
+        for sid in healing:
+            if sid not in casts and names.get(sid):
+                heal_by_name.setdefault(str(names[sid]).casefold(), sid)
+        for sid, n_casts in casts.items():
+            try:
+                spell_id = int(sid)
+                n = int(n_casts)
+            except (TypeError, ValueError):
+                continue
+            if n <= 0 or (keep is not None and spell_id not in keep):
+                continue
+            name = str(names.get(sid) or f"spell:{spell_id}")
+            dmg = int(damage.get(sid) or 0)
+            heal = int(healing.get(sid) or 0)
+            if not dmg:
+                dmg = int(damage.get(dmg_by_name.get(name.casefold(), ""), 0) or 0)
+            if not heal:
+                heal = int(healing.get(heal_by_name.get(name.casefold(), ""), 0) or 0)
+            data.add(spell_id, name, level, damage=dmg, healing=heal, casts=n)
+    return data
+
+
 def cmd_learn_interrupts(args: argparse.Namespace) -> int:
     """Fold one or more combat logs into an accumulated interruptibility
     file learned from real play (see analysis/interrupt_learning.py).
@@ -573,6 +759,8 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         full_cast_timeline=not args.no_cast_timeline,
         death_penalty_s=args.death_penalty,
         par_ms=par_ms,
+        spell_damage_history_path=args.spell_damage_history,
+        community_spell_damage=_load_community_spell_damage(),
     )
 
     if args.raiderio:
@@ -728,6 +916,7 @@ def cmd_index(args: argparse.Namespace) -> int:
 def _write_recorded_reports(
     run, route, store, pull_gap_seconds: float = 5.0, avoidable=None,
     interrupt_data=None, stealable=None, learned_path=None, enrich=None,
+    spell_damage_history_path=None,
 ) -> Optional[dict]:
     """Analyze one recorded run's log slice and write its JSON/HTML/text
     reports, plus the chapters sidecars (``<run>.chapters.json`` /
@@ -777,7 +966,9 @@ def _write_recorded_reports(
             print(f"warning: could not update learned interrupts: {exc}", file=sys.stderr)
     report = analyze_run(segments[-1], route=route, store=store,
                          avoidable=avoidable, interrupt_data=interrupt_data,
-                         stealable=stealable, pull_gap_seconds=pull_gap_seconds)
+                         stealable=stealable, pull_gap_seconds=pull_gap_seconds,
+                         spell_damage_history_path=spell_damage_history_path,
+                         community_spell_damage=_load_community_spell_damage())
     if enrich is not None:
         # A caller-supplied pass over the finished report before anything
         # is rendered or written -- the desktop app uses it to embed the
@@ -964,6 +1155,39 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_build_interrupt_data)
 
     p = sub.add_parser(
+        "build-spell-damage",
+        help="sample public Warcraft Logs Mythic+ reports for damage per "
+             "completed cast of each kickable enemy spell, per key level, "
+             "and bundle the result as the kick-value estimate's community "
+             "fallback -- needs WCL_CLIENT_ID/WCL_CLIENT_SECRET in the "
+             "environment (see wcl.py)",
+    )
+    p.add_argument("-o", "--output", default="spell_damage.json")
+    p.add_argument("--samples", metavar="JSON", default="spell_damage_samples.json",
+                    help="raw per-fight samples, kept between runs so an "
+                         "interrupted build resumes where it stopped and a "
+                         "later run only fetches fights it hasn't seen")
+    p.add_argument("--zone-id", type=int,
+                    help="Warcraft Logs zone id of the Mythic+ season "
+                         "(default: the newest zone named 'Mythic+')")
+    p.add_argument("--per-level", type=int, default=5, metavar="N",
+                    help="fights to sample per (dungeon, key level) (default 5)")
+    p.add_argument("--min-level", type=int, default=2)
+    p.add_argument("--max-level", type=int, default=30)
+    p.add_argument("--max-pages", type=int, default=20,
+                    help="pages of 100 reports to scan at most (default 20)")
+    p.add_argument("--reserve-points", type=float, default=200,
+                    help="stop when fewer than this many API points remain "
+                         "this hour (default 200); rerun later to resume")
+    p.add_argument("--all-spells", action="store_true",
+                    help="keep every enemy ability, not just the ones in the "
+                         "bundled interrupt database")
+    p.add_argument("--no-bundle", action="store_true",
+                    help="don't also copy the result into this package's "
+                         "own data/ folder (see bundled.py)")
+    p.set_defaults(func=cmd_build_spell_damage)
+
+    p = sub.add_parser(
         "learn-interrupts",
         help="learn which enemy casts are (and aren't) interruptible from "
              "your own combat logs -- see analysis/interrupt_learning.py",
@@ -993,6 +1217,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="JSON file tagging avoidable-damage spell ids (community/"
                         "user-maintained; see docs/avoidable_spells.example.json) "
                         "to break out avoidable damage taken per player")
+    p.add_argument("--spell-damage-history", metavar="JSON",
+                    help="this account's accumulated per-spell damage-per-cast "
+                         "file (see analysis/spell_damage.py): read as a "
+                         "fallback for kicks on spells that never landed this "
+                         "run, then updated with this run's own landed casts. "
+                         "The desktop app keeps one automatically; the bare "
+                         "CLI only uses one when told to")
     p.add_argument("--interrupt-data",
                    help="JSON file of spell-interruptibility data: either "
                         "the bundled community database (see "

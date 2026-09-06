@@ -208,6 +208,8 @@ def compute_stats(
     data: Optional[DungeonData] = None,
     full_cast_timeline: bool = True,
     avoidable: Optional[AvoidableData] = None,
+    spell_damage_fallbacks: Optional[list[tuple[str, Any]]] = None,
+    keystone_level: Optional[int] = None,
 ) -> RunStats:
     stats = RunStats()
     owner_map: dict[str, str] = {}
@@ -826,7 +828,7 @@ def compute_stats(
         # every channel of it that wasn't interrupted got through
         entry["landed"] += max(0, channel_casts.get(spell_id, 0) - kicked)
 
-    _estimate_kick_value(stats)
+    _estimate_kick_value(stats, spell_damage_fallbacks, keystone_level)
     _finish_pull_stats(stats, pulls, data)
     _tag_death_defensives(stats, defensive_windows, full_cast_timeline)
     _tag_close_calls(stats)
@@ -953,15 +955,31 @@ def _tag_avoidable_damage(stats: RunStats, avoidable: AvoidableData) -> None:
                 player.avoidable_hits += player.damage_taken_hits_by_spell[key]
 
 
-def _estimate_kick_value(stats: RunStats) -> None:
+def _estimate_kick_value(
+    stats: RunStats,
+    fallbacks: Optional[list[tuple[str, Any]]] = None,
+    keystone_level: Optional[int] = None,
+) -> None:
     """Estimate the damage/healing each kick prevented.
 
     Basis: the average amount per completed cast of the interrupted spell,
     observed elsewhere in this same run — the up-front hit plus the full
     periodic (DoT/HoT) component per application. Multi-target hits and
-    debuff applications within 1 s count as one cast. Spells that never
-    landed in the run still contribute nothing; a debuff that carries no
-    damage at all is reported as a prevented application instead.
+    debuff applications within 1 s count as one cast. A debuff that
+    carries no damage at all is reported as a prevented application
+    instead.
+
+    A spell that never landed in this run has nothing to average, which
+    used to mean the kick was credited at zero -- backwards, since a
+    spell kicked every single time is the one the kicks mattered most
+    for. ``fallbacks`` is an ordered list of ``(label, SpellDamageData)``
+    (see analysis/spell_damage.py; typically this account's own history
+    first, then the bundled community data) consulted only in that case,
+    at ``keystone_level`` or the nearest level with data. Every estimate
+    records where it came from in ``estimate_source`` ("observed", or the
+    fallback's label) plus ``estimate_level``/``estimate_samples`` for a
+    fallback, so the report never presents a borrowed number as a
+    measured one.
     """
     for obs in (stats.enemy_cast_observations, stats.enemy_heal_observations):
         for entry in obs.values():
@@ -976,12 +994,39 @@ def _estimate_kick_value(stats: RunStats) -> None:
             entry["avg"] = round(avg_direct + avg_dot)
             entry["observed_casts"] = max(direct_casts, entry["dot_casts"])
 
+    # A cast and the damage it does often log under DIFFERENT spell ids:
+    # the interruptible channel Fel Missiles is 1216571 while every tick
+    # of its damage is 1216570 (confirmed 2026-09-06: 124 completed
+    # channels across 17 runs, zero damage ever attributed to 1216571).
+    # They share a name, so when the kicked id itself has no damage on
+    # record, borrow the best-observed same-named spell's numbers.
+    by_name: dict[tuple[str, str], tuple[int, dict[str, Any]]] = {}
+    for kind, obs in (("dmg", stats.enemy_cast_observations),
+                      ("heal", stats.enemy_heal_observations)):
+        for sid, entry in obs.items():
+            if not entry.get("avg"):
+                continue
+            key = (kind, str(entry.get("name", "")).casefold())
+            if key not in by_name or entry["observed_casts"] > by_name[key][1]["observed_casts"]:
+                by_name[key] = (sid, entry)
+
     for ev in stats.interrupt_events:
         spell_id = ev.get("interrupted_spell_id")
         dmg = stats.enemy_cast_observations.get(spell_id) if spell_id else None
         heal = stats.enemy_heal_observations.get(spell_id) if spell_id else None
-        ev["estimated_prevented_damage"] = (dmg["avg"] or None) if dmg else None
-        ev["estimated_prevented_healing"] = (heal["avg"] or None) if heal else None
+        name_key = str(ev.get("interrupted_spell") or "").casefold()
+        if name_key and not (dmg and dmg["avg"]):
+            linked = by_name.get(("dmg", name_key))
+            if linked and linked[0] != spell_id:
+                dmg = linked[1]
+                ev["estimate_linked_spell_id"] = linked[0]
+        if name_key and not (heal and heal["avg"]):
+            linked = by_name.get(("heal", name_key))
+            if linked and linked[0] != spell_id:
+                heal = linked[1]
+                ev["estimate_linked_spell_id"] = linked[0]
+        est_damage = (dmg["avg"] or None) if dmg else None
+        est_healing = (heal["avg"] or None) if heal else None
         ev["prevented_dot_damage"] = dmg["avg_dot"] if dmg else 0
         ev["observed_casts"] = (dmg or heal or {}).get("observed_casts", 0)
         # a zero-damage debuff (CC, snare, heal absorb...): no number to put
@@ -990,10 +1035,25 @@ def _estimate_kick_value(stats: RunStats) -> None:
             dmg["aura_applications"]
             if dmg and not dmg["avg"] and dmg["aura_applications"] else 0
         )
+        ev["estimate_source"] = "observed" if (est_damage or est_healing) else None
+        if (not est_damage and not est_healing
+                and not ev["prevented_debuff_applications"] and spell_id):
+            for label, data in fallbacks or []:
+                found = data.estimate(spell_id, keystone_level,
+                                      name=ev.get("interrupted_spell")) if data else None
+                if found and (found["damage"] or found["healing"]):
+                    est_damage = found["damage"] or None
+                    est_healing = found["healing"] or None
+                    ev["estimate_source"] = label
+                    ev["estimate_level"] = found["level"]
+                    ev["estimate_samples"] = found["casts"]
+                    break
+        ev["estimated_prevented_damage"] = est_damage
+        ev["estimated_prevented_healing"] = est_healing
         player = stats.players.get(ev.get("player_guid", ""))
         if player is not None:
-            player.kick_prevented_damage += (dmg or {}).get("avg") or 0
-            player.kick_prevented_healing += (heal or {}).get("avg") or 0
+            player.kick_prevented_damage += est_damage or 0
+            player.kick_prevented_healing += est_healing or 0
 
 
 def _finish_pull_stats(

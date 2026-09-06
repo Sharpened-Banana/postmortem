@@ -171,8 +171,16 @@ does this in CI for both platforms on every tag push.
   healing) it prevented, based on the average amount per completed cast of
   that spell observed elsewhere in the same run — the up-front hit plus its
   periodic (DoT/HoT) component per application — with per-player totals.
-  Zero-damage debuffs (CC, curses) are reported as prevented applications;
-  spells that never landed in the run honestly get no number.
+  Zero-damage debuffs (CC, curses) are reported as prevented applications.
+  A spell that never landed this run (kicked every time — the kicks that
+  mattered most) falls back to this account's own past runs, then to a
+  bundled community dataset sampled from public Warcraft Logs reports
+  across key levels (`postmortem build-spell-damage`, needs a Warcraft
+  Logs API client; see `docs/THIRD_PARTY_NOTICES.md`), at the nearest
+  key level with data, and the report says which source each number
+  came from. A cast whose damage logs under a sibling spell id (Fel
+  Missiles) is matched by name. The desktop app keeps the history file
+  automatically; the bare CLI only does with `--spell-damage-history`.
 - **Timelines** — bloodlust, battle resses, kicks and dispels; the full
   per-cast timeline is included in the JSON report.
 - **Kick efficiency** — every enemy hard-cast is tracked from

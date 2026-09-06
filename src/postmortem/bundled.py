@@ -36,6 +36,7 @@ from pathlib import Path
 
 DUNGEON_DATA_FILENAME = "dungeon_data.json"
 INTERRUPT_DATA_FILENAME = "interrupt_data.json"
+SPELL_DAMAGE_FILENAME = "spell_damage.json"
 
 
 def bundled_dungeon_data_path() -> Path:
@@ -50,3 +51,12 @@ def bundled_interrupt_data_path() -> Path:
     exist in a source checkout that never had it copied in -- callers
     treat a missing file as "no data", never as an error)."""
     return Path(__file__).resolve().parent / "data" / INTERRUPT_DATA_FILENAME
+
+
+def bundled_spell_damage_path() -> Path:
+    """Path to the packaged community per-spell damage-per-cast data
+    (built from public Warcraft Logs reports by ``postmortem
+    build-spell-damage`` -- see analysis/spell_damage.py). Optional in
+    every sense: may not exist, and callers treat that as "no community
+    fallback", never as an error."""
+    return Path(__file__).resolve().parent / "data" / SPELL_DAMAGE_FILENAME

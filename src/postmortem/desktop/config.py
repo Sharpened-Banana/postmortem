@@ -201,6 +201,19 @@ def resolve_learned_interrupts_path(settings: dict[str, Any]) -> Path:
     return config_dir() / LEARNED_INTERRUPTS_FILENAME
 
 
+LEARNED_SPELL_DAMAGE_FILENAME = "learned_spell_damage.json"
+
+
+def resolve_learned_spell_damage_path(settings: dict[str, Any]) -> Path:
+    """Where this account's own per-spell damage-per-cast history lives
+    (see analysis/spell_damage.py). Like the learned-interrupts path,
+    always a real path: it is written as well as read."""
+    configured = settings.get("learned_spell_damage_path")
+    if configured:
+        return Path(configured)
+    return config_dir() / LEARNED_SPELL_DAMAGE_FILENAME
+
+
 STEALABLE_FILENAME = "stealable_spells.json"
 
 

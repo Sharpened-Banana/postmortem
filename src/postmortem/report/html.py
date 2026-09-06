@@ -484,8 +484,12 @@ function utility() {
     }
     if (i.estimated_prevented_healing) est.push(`~${num(i.estimated_prevented_healing)} healing`);
     if (i.prevented_debuff_applications) est.push(`a debuff (seen ${i.prevented_debuff_applications}x, no dmg)`);
+    const borrowed = i.estimate_source && i.estimate_source !== "observed";
+    const basis = borrowed
+      ? `no landed casts this run -- from ${i.estimate_source}: average of ${i.estimate_samples || "?"} casts at +${i.estimate_level}`
+      : `average per completed cast (direct + periodic) over ${i.observed_casts} observed casts in this run`;
     const suffix = est.length
-      ? ` — <span class="ok" title="average per completed cast (direct + periodic) over ${i.observed_casts} observed casts in this run">${est.join(" + ")} prevented</span>`
+      ? ` — <span class="ok" title="${basis}">${est.join(" + ")} prevented${borrowed ? ` <span class="dim">(${esc(i.estimate_source)})</span>` : ""}</span>`
       : ' — <span class="dim">no landed casts to estimate from</span>';
     rows.push([i.t, "Interrupt", `${esc(i.player)} kicked ${esc(i.interrupted_spell || "?")} on ${esc(i.target)}${suffix}`, i.pull]);
   });
