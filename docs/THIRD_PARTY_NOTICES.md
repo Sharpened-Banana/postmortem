@@ -47,10 +47,27 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-Refreshing this data for a new Mythic+ season is a manual step: download
-the latest `mplus_interrupts.json` from that repo and run
-`postmortem build-interrupt-data <path> -o interrupt_data.json`, which
-also copies the result into `src/postmortem/data/` by default. See that
+Refreshing this data for a new Mythic+ season is a manual step (last done
+2026-09-06 for Midnight Season 2, all eight dungeons):
+
+1. Rebuild `method_interrupts_source.json` by running the
+   albvar/mplus-interrupts `SKILL.md` workflow: for each dungeon on
+   https://www.method.gg/guides/dungeons, fetch both the guide page and
+   its `/ability-tracker` page, take every row flagged Interrupt (plus
+   Stop/dispel/soothe rows for context) and union them. The two pages
+   sometimes publish different ids for one ability; keep the tracker's
+   and record the guide's in `guide_spell_id`. Do not invent rows or ids.
+2. Run `postmortem build-interrupt-data src/postmortem/data/method_interrupts_source.json
+   -o interrupt_data.json --resolve-from <your real combat logs>`, which
+   also copies the result into `src/postmortem/data/` by default. Names
+   the logs have never seen are omitted with a warning; play that
+   dungeon and rerun to pick them up.
+3. Cross-check the diff against `learned_interrupts.json` in the app's
+   data directory: an added spell with `interrupted > 0` there is
+   independently confirmed, and a removed spell with only
+   `survived_attempts` was never kickable anyway.
+
+See that
 command's `--help` and `analysis/interruptibility.py`'s module docstring
 for the data's shape and its one real limitation: it only ever confirms a
 spell as interruptible, never as confirmed-uninterruptible (Method's

@@ -1,60 +1,162 @@
 {
- "source": "method.gg", "season": "Midnight (current pool)", "version": "2026-09-05",
- "dungeons": [
-  {"name": "Altar of Fangs", "abilities": [
-   {"npc_name": "Primal Serpent", "spell_name": "Piercing Hiss", "category": "interrupt"},
-   {"npc_name": "High Evolutionist", "spell_name": "Envenom", "category": "interrupt"},
-   {"npc_name": "Ula'tek's Chosen", "spell_name": "Mass Envenom", "category": "interrupt"},
-   {"npc_name": "The Writhing Coil", "spell_name": "Toxic Atrophy", "category": "interrupt"}]},
-  {"name": "Den of Nalorakk", "abilities": [
-   {"npc_name": "Earthwhisper Tender", "spell_name": "Healing Breeze", "category": "interrupt"},
-   {"npc_name": "Spirit of Hunger", "spell_name": "Feast of Misery", "category": "interrupt"},
-   {"npc_name": "Frigid Mauler", "spell_name": "Frigid Roar", "category": "interrupt"},
-   {"npc_name": "Avatar of Determination", "spell_name": "Arc Lightning", "category": "interrupt"},
-   {"npc_name": "Stormbound Mystic", "spell_name": "Arc Lightning", "category": "interrupt"},
-   {"npc_name": "Loa Speaker Nanea", "spell_name": "Lightning Bolt", "category": "interrupt"},
-   {"npc_name": "Nalorakk", "spell_name": "Echoing Maul", "category": "interrupt"}]},
-  {"name": "Kings' Rest", "abilities": [
-   {"npc_name": "Risen Hexer", "spell_name": "Hex Volley", "category": "interrupt"},
-   {"npc_name": "Seneschal M'bara", "spell_name": "Unholy Mending", "category": "interrupt"},
-   {"npc_name": "Queen Wasi", "spell_name": "Bind Soul", "category": "interrupt"},
-   {"npc_name": "Phantom Hex Priest", "spell_name": "Hex", "category": "interrupt"},
-   {"npc_name": "Half-Finished Mummy", "spell_name": "Wretched Discharge", "category": "interrupt"},
-   {"npc_name": "Reban", "spell_name": "Deathly Roar", "category": "interrupt"},
-   {"npc_name": "Phantom Hex Priest", "spell_name": "Spectral Bolt", "category": "interrupt"},
-   {"npc_name": "Everyone", "spell_name": "Poison Nova", "category": "interrupt"}]},
-  {"name": "Ruby Life Pools", "abilities": [
-   {"npc_name": "Flashfrost Chillweaver", "spell_name": "Frostbolt", "category": "interrupt"},
-   {"npc_name": "Primalist Cinderweaver", "spell_name": "Cinderbolt", "category": "interrupt"},
-   {"npc_name": "Blazebound Destroyer", "spell_name": "Fiery Blast", "category": "interrupt"},
-   {"npc_name": "Ruinous Stormbringer", "spell_name": "Storm Bolt", "category": "interrupt"},
-   {"npc_name": "Tempest Channeler", "spell_name": "Thunder Blast", "category": "interrupt"},
-   {"npc_name": "Kokia Blazehoof", "spell_name": "Blaze Volley", "category": "interrupt"},
-   {"npc_name": "Erkhart Stormvein", "spell_name": "Interrupting Cloudburst", "category": "interrupt"}]},
-  {"name": "The Blinding Vale", "abilities": [
-   {"npc_name": "Radiant Spellsower", "spell_name": "Light Bolt Volley", "category": "interrupt"},
-   {"npc_name": "Radiant Spellsower", "spell_name": "Light Bolt", "category": "interrupt"},
-   {"npc_name": "Lightfeather Petalwing", "spell_name": "Disorienting Screech", "category": "interrupt"},
-   {"npc_name": "Leafy Grovecrawler", "spell_name": "Seed Shot", "category": "interrupt"},
-   {"npc_name": "Lightblossom Trinity", "spell_name": "Light Bolt", "category": "interrupt"},
-   {"npc_name": "Ziekket", "spell_name": "Lightspore Shot", "category": "interrupt"}]},
-  {"name": "Voidscar Arena", "abilities": [
-   {"npc_name": "Dominated Brawler", "spell_name": "Demoralizing Shout", "category": "interrupt"},
-   {"npc_name": "Enthralled Shaman", "spell_name": "Lava Bolt", "category": "interrupt"},
-   {"npc_name": "Voidtouched Magi", "spell_name": "Shadowbolt Volley", "category": "interrupt"},
-   {"npc_name": "Angry Krolusk", "spell_name": "Violent Sand", "category": "interrupt"},
-   {"npc_name": "Killvore Screamer", "spell_name": "Mass Shriek", "category": "interrupt"},
-   {"npc_name": "Voidminder", "spell_name": "Mending Void", "category": "interrupt"}]},
-  {"name": "Murder Row", "abilities": [
-   {"npc_name": "Felonious Mage", "spell_name": "Fel Missiles", "category": "interrupt"},
-   {"npc_name": "Seductive Sayaad", "spell_name": "Seduction", "category": "interrupt"},
-   {"npc_name": "Massive Felwyrm", "spell_name": "Summon Wyrms", "category": "interrupt"},
-   {"npc_name": "Kystia Manaheart", "spell_name": "Mirror Images", "category": "interrupt"},
-   {"npc_name": "Unleashed Imp", "spell_name": "Felfire Burst", "category": "interrupt"},
-   {"npc_name": "Wrathguard Flayer", "spell_name": "Fel Rage", "category": "interrupt"},
-   {"npc_name": "Fel Invoker", "spell_name": "Health Funnel", "category": "interrupt"},
-   {"npc_name": "Doomguard", "spell_name": "Doom Bolt", "category": "interrupt"},
-   {"npc_name": "Lithiel Cinderfury", "spell_name": "Chaos Bolt", "category": "interrupt"},
-   {"npc_name": "Wild Imp", "spell_name": "Felfire Burst", "category": "interrupt"}]}
- ]
+  "version": "2026-09-06",
+  "source": "method.gg",
+  "season": "Midnight S2 (patch 12.1)",
+  "source_index": "https://www.method.gg/guides/dungeons",
+  "_comment": "Schema: albvar/mplus-interrupts (MIT, see docs/THIRD_PARTY_NOTICES.md). Built 2026-09-06 by running that project's SKILL.md workflow against the Season 2 pool: each dungeon's Method.gg guide page AND its /ability-tracker page were fetched and the rows unioned; where the two pages published different ids for the same ability the tracker's id is kept and the guide's recorded in 'guide_spell_id'. Only 'category': 'interrupt' rows feed build-interrupt-data, and that command resolves NAMES against real logs (--resolve-from) rather than trusting these ids -- see cli.py.",
+  "dungeons": [
+    {
+      "name": "Altar of Fangs",
+      "slug": "altar-of-fangs",
+      "url": "https://www.method.gg/guides/dungeons/altar-of-fangs",
+      "abilities": [
+        {"npc_name": "Primal Serpent", "npc_id": null, "spell_name": "Piercing Hiss", "spell_id": 1294557, "category": "interrupt", "notes": "interrupt every cast"},
+        {"npc_name": "High Evolutionist", "npc_id": null, "spell_name": "Envenom", "spell_id": 1307571, "category": "interrupt", "notes": "interrupt as many casts as possible"},
+        {"npc_name": "Ula'tek's Chosen", "npc_id": null, "spell_name": "Mass Envenom", "spell_id": 1307567, "category": "interrupt", "notes": "interrupt every cast"},
+        {"npc_name": "The Writhing Coil", "npc_id": null, "spell_name": "Toxic Atrophy", "spell_id": 1310358, "guide_spell_id": 1310974, "category": "interrupt", "notes": "boss; cast three times back-to-back, assign an order"},
+        {"npc_name": "High Evolutionist", "npc_id": null, "spell_name": "Evolve", "spell_id": 1306385, "category": "cc", "notes": "stop the channel to prevent Mass Envenom"},
+        {"npc_name": "High Evolutionist", "npc_id": null, "spell_name": "Envenom", "spell_id": 1307571, "category": "dispel-poison", "notes": "poison dispel removes the DoT"},
+        {"npc_name": "Twinfang Harrower", "npc_id": null, "spell_name": "Paralyzing Shots", "spell_id": 1294569, "category": "dispel-magic", "notes": "magic dispel or freedom effect"},
+        {"npc_name": "Ravenous Descendant", "npc_id": null, "spell_name": "Ravenous", "spell_id": 1306338, "category": "soothe", "notes": "soothe or CC to reset stacks"},
+        {"npc_name": "Ascendant Serpent", "npc_id": null, "spell_name": "Ritual Venom", "spell_id": 1300894, "category": "dispel-disease", "notes": "clear stacks before expiry"}
+      ]
+    },
+    {
+      "name": "Den of Nalorakk",
+      "slug": "den-of-nalorakk",
+      "url": "https://www.method.gg/guides/dungeons/den-of-nalorakk",
+      "abilities": [
+        {"npc_name": "Keen-Eyed Striker", "npc_id": null, "spell_name": "Scavenge", "spell_id": 1239352, "category": "interrupt", "notes": "ability tracker only"},
+        {"npc_name": "Earthwhisper Tender", "npc_id": null, "spell_name": "Healing Breeze", "spell_id": 1297696, "category": "interrupt", "notes": "heal; interrupt every cast, purge if missed"},
+        {"npc_name": "Earthwhisper Tender", "npc_id": null, "spell_name": "Earth Bolt", "spell_id": 1241214, "category": "interrupt", "notes": "spare interrupts, random target"},
+        {"npc_name": "Frigid Mauler", "npc_id": null, "spell_name": "Frigid Roar", "spell_id": 1309919, "category": "interrupt", "notes": "interrupt every cast"},
+        {"npc_name": "Sentinel of Winter", "npc_id": null, "spell_name": "Winter's Shroud", "spell_id": 1235829, "category": "interrupt", "notes": "adds from Shattering Frostspike; keep interrupts on them"},
+        {"npc_name": "Stormbound Mystic", "npc_id": null, "spell_name": "Arc Lightning", "spell_id": 1297778, "category": "interrupt", "notes": "interrupt every cast"},
+        {"npc_name": "Stormbound Mystic", "npc_id": null, "spell_name": "Lightning Bolt", "spell_id": 1246687, "category": "interrupt", "notes": "spare interrupts, random target"},
+        {"npc_name": "Loa Speaker Nanea", "npc_id": null, "spell_name": "Lightning Bolt", "spell_id": 1290205, "category": "interrupt", "notes": "boss; keep an interrupt rotation on it"},
+        {"npc_name": "Spirit of Hunger", "npc_id": null, "spell_name": "Feast of Misery", "spell_id": 1238687, "category": "dispel-curse", "notes": "curse dispel as needed"},
+        {"npc_name": "Avatar of Determination", "npc_id": null, "spell_name": "Glacial Tomb", "spell_id": 1241464, "category": "dispel-magic", "notes": "destroy the roots or freedom effect"},
+        {"npc_name": "Sentinel of Winter", "npc_id": null, "spell_name": "Glacial Torment", "spell_id": 1235548, "category": "dispel-magic", "notes": "healers dispel the DoT quickly"}
+      ]
+    },
+    {
+      "name": "Kings' Rest",
+      "slug": "kings-rest",
+      "url": "https://www.method.gg/guides/dungeons/kings-rest",
+      "abilities": [
+        {"npc_name": "Risen Hexer", "npc_id": null, "spell_name": "Hex Volley", "spell_id": 269972, "category": "interrupt", "notes": "interrupt every cast"},
+        {"npc_name": "Risen Hexer", "npc_id": null, "spell_name": "Shadowfrost Bolt", "spell_id": 1294815, "category": "interrupt", "notes": "tracker flags Interrupt; guide says dispel the debuff"},
+        {"npc_name": "Seneschal M'bara", "npc_id": null, "spell_name": "Unholy Mending", "spell_id": 270901, "category": "interrupt", "notes": "interrupt every cast, purge if it lands"},
+        {"npc_name": "Queen Wasi", "npc_id": null, "spell_name": "Bind Soul", "spell_id": 270920, "category": "interrupt", "notes": "interrupt every cast"},
+        {"npc_name": "Queen Wasi", "npc_id": null, "spell_name": "Soul Bolt", "spell_id": 1294972, "category": "interrupt", "notes": "spare interrupts, random target"},
+        {"npc_name": "Phantom Hex Priest", "npc_id": null, "spell_name": "Hex", "spell_id": 270492, "category": "interrupt", "notes": "interrupt or curse dispel"},
+        {"npc_name": "Phantom Hex Priest", "npc_id": null, "spell_name": "Spectral Bolt", "spell_id": 1295125, "category": "interrupt", "notes": "spare interrupts, random target"},
+        {"npc_name": "Half-Finished Mummy", "npc_id": null, "spell_name": "Wretched Discharge", "spell_id": 267763, "category": "interrupt", "notes": "interrupt every cast"},
+        {"npc_name": "Mchimba the Embalmer", "npc_id": null, "spell_name": "Wretched Discharge", "spell_id": 267763, "category": "interrupt", "notes": "boss; same cast as the mummies"},
+        {"npc_name": "The Council of Tribes", "npc_id": null, "spell_name": "Poison Nova", "spell_id": 267273, "category": "interrupt", "notes": "boss; make sure to interrupt it"},
+        {"npc_name": "Dazar, The First King", "npc_id": null, "spell_name": "Deathly Roar", "spell_id": 269369, "category": "interrupt", "notes": "boss; cast by Reban the raptor"},
+        {"npc_name": "Honored Raptor", "npc_id": null, "spell_name": "Hunting Leap", "spell_id": 270500, "category": "cc", "notes": "stop"},
+        {"npc_name": "Queen Patlaa", "npc_id": null, "spell_name": "Serpent Strike", "spell_id": 1306763, "category": "dispel-poison", "notes": "poison dispel or freedom on the DoT"},
+        {"npc_name": "Queen Patlaa", "npc_id": null, "spell_name": "Bestial Berserk", "spell_id": 1297763, "category": "soothe", "notes": "soothe if available"},
+        {"npc_name": "Shadow of Zul", "npc_id": null, "spell_name": "Dark Revelation", "spell_id": 1298304, "category": "dispel-magic", "notes": "purge or focus the minions"}
+      ]
+    },
+    {
+      "name": "Ruby Life Pools",
+      "slug": "ruby-life-pools",
+      "url": "https://www.method.gg/guides/dungeons/ruby-life-pools",
+      "abilities": [
+        {"npc_name": "Flashfrost Chillweaver", "npc_id": null, "spell_name": "Frostbolt", "spell_id": 371984, "category": "interrupt", "notes": "targets the tank, spare interrupts"},
+        {"npc_name": "Flashfrost Chillweaver", "npc_id": null, "spell_name": "Ice Shield", "spell_id": 372743, "category": "interrupt", "notes": "buffs a random mob; interrupt or CC"},
+        {"npc_name": "Melidrussa Chillworn", "npc_id": null, "spell_name": "Frigid Shard", "spell_id": 372808, "category": "interrupt", "notes": "boss; ability tracker only"},
+        {"npc_name": "Primalist Cinderweaver", "npc_id": null, "spell_name": "Cinderbolt", "spell_id": 384194, "category": "interrupt", "notes": "random target"},
+        {"npc_name": "Blazebound Destroyer", "npc_id": null, "spell_name": "Fiery Blast", "spell_id": 1305955, "category": "interrupt", "notes": "targets the tank, spare interrupts"},
+        {"npc_name": "Ruinous Stormbringer", "npc_id": null, "spell_name": "Storm Bolt", "spell_id": 385310, "category": "interrupt", "notes": "random target"},
+        {"npc_name": "Kokia Blazehoof", "npc_id": null, "spell_name": "Blaze Volley", "spell_id": 373017, "category": "interrupt", "notes": "boss; ability tracker only"},
+        {"npc_name": "Tempest Channeler", "npc_id": null, "spell_name": "Thunder Blast", "spell_id": 392576, "category": "interrupt", "notes": "targets the tank, spare interrupts"},
+        {"npc_name": "Ashseer Flamelasher", "npc_id": null, "spell_name": "Flaming Barrage", "spell_id": 385536, "category": "cc", "notes": "channel into the tank; stop with CC"},
+        {"npc_name": "Ashseer Flamelasher", "npc_id": null, "spell_name": "Blaze Of Glory", "spell_id": 373972, "category": "dispel-magic", "notes": "on death; purge"},
+        {"npc_name": "Infused Whelp", "npc_id": null, "spell_name": "Cold Claws", "spell_id": 1305234, "category": "dispel-magic", "notes": "tank stacks; dispel before 20"},
+        {"npc_name": "Melidrussa Chillworn", "npc_id": null, "spell_name": "Stormslam", "spell_id": 381512, "category": "dispel-magic", "notes": "magic debuff increasing damage taken"}
+      ]
+    },
+    {
+      "name": "The Blinding Vale",
+      "slug": "the-blinding-vale",
+      "url": "https://www.method.gg/guides/dungeons/the-blinding-vale",
+      "abilities": [
+        {"npc_name": "Radiant Spellsower", "npc_id": null, "spell_name": "Light Bolt Volley", "spell_id": 1301834, "category": "interrupt", "notes": "party damage"},
+        {"npc_name": "Radiant Spellsower", "npc_id": null, "spell_name": "Light Bolt", "spell_id": 1238063, "category": "interrupt", "notes": "random target, spare interrupts"},
+        {"npc_name": "Lightfeather Petalwing", "npc_id": null, "spell_name": "Disorienting Screech", "spell_id": 1238294, "category": "interrupt", "notes": "interrupt every cast"},
+        {"npc_name": "Sporeblight Belcher", "npc_id": null, "spell_name": "Disorienting Screech", "spell_id": 1238294, "category": "interrupt", "notes": "guide page only; same spell id as Petalwing"},
+        {"npc_name": "Leafy Grovecrawler", "npc_id": null, "spell_name": "Seed Shot", "spell_id": 1238232, "category": "interrupt", "notes": "random target"},
+        {"npc_name": "Kezkitt", "npc_id": null, "encounter": "Lightblossom Trinity", "spell_name": "Light Bolt", "spell_id": 1235616, "category": "interrupt", "notes": "boss; random target"},
+        {"npc_name": "Lightwarden Ruia", "npc_id": null, "spell_name": "Warden's Wrath", "spell_id": 1239821, "category": "interrupt", "notes": "boss; tank damage"},
+        {"npc_name": "Ziekket", "npc_id": null, "spell_name": "Lightspore Shot", "spell_id": 1247669, "category": "interrupt", "notes": "boss"},
+        {"npc_name": "Thorny Saptor", "npc_id": null, "spell_name": "Hunting Leap", "spell_id": 1303039, "guide_spell_id": 269231, "category": "cc", "notes": "random target frontal; stop with CC"},
+        {"npc_name": "Newborn Potadpole", "npc_id": null, "spell_name": "Potad-Toss", "spell_id": 1250829, "category": "cc", "notes": "stop"},
+        {"npc_name": "Radiant Spellsower", "npc_id": null, "spell_name": "Call The Grove", "spell_id": 1267029, "category": "cc", "notes": "CC to prevent dormant lashers waking"},
+        {"npc_name": "Ziekket", "npc_id": null, "spell_name": "Awaken The Lightbloom", "spell_id": 1246372, "category": "cc", "notes": "CC to reduce Lightspore Shots"},
+        {"npc_name": "Lasher", "npc_id": null, "spell_name": "Spore Spines", "spell_id": 1238084, "category": "dispel-magic", "notes": "magic debuff; freedom or dispel"},
+        {"npc_name": "Lightwarden Ruia", "npc_id": null, "spell_name": "Lightfire", "spell_id": 1239824, "category": "dispel-magic", "notes": "debuffs three players"},
+        {"npc_name": "Potatoad Matriarch", "npc_id": null, "spell_name": "Toxic Spew", "spell_id": 1250937, "category": "dispel-poison", "notes": "group DoT"}
+      ]
+    },
+    {
+      "name": "Voidscar Arena",
+      "slug": "voidscar-arena",
+      "url": "https://www.method.gg/guides/dungeons/voidscar-arena",
+      "abilities": [
+        {"npc_name": "Dominated Brawler", "npc_id": null, "spell_name": "Demoralizing Shout", "spell_id": 1298899, "category": "interrupt", "notes": "interrupt every cast"},
+        {"npc_name": "Enthralled Shaman", "npc_id": null, "spell_name": "Lava Bolt", "spell_id": 1228176, "category": "interrupt", "notes": "spare interrupts, random target"},
+        {"npc_name": "Voidtouched Magi", "npc_id": null, "spell_name": "Shadowbolt Volley", "spell_id": 1299938, "category": "interrupt", "notes": "interrupt every cast"},
+        {"npc_name": "Angry Krolusk", "npc_id": null, "spell_name": "Violent Sand", "spell_id": 1249621, "category": "interrupt", "notes": "guide page only; interrupt every cast"},
+        {"npc_name": "Killvore Screamer", "npc_id": null, "spell_name": "Mass Shriek", "spell_id": 1233398, "category": "interrupt", "notes": "always interrupt"},
+        {"npc_name": "Voidminder", "npc_id": null, "spell_name": "Mending Void", "spell_id": 1310324, "category": "interrupt", "notes": "heal; interrupt or CC"},
+        {"npc_name": "Longtooth Tuskarr", "npc_id": null, "spell_name": "Bolster", "spell_id": 1310319, "category": "soothe", "notes": "enrage"},
+        {"npc_name": "Raging Raptor", "npc_id": null, "spell_name": "Feral Rage", "spell_id": 1249661, "category": "soothe", "notes": "enrage"},
+        {"npc_name": "Sycophantic Tarasek", "npc_id": null, "spell_name": "Melt Armor", "spell_id": 1250043, "category": "dispel-magic", "notes": "magic dispel or defensive"},
+        {"npc_name": "Agitated Voidscythe", "npc_id": null, "spell_name": "Corrosive Essence", "spell_id": 1289265, "category": "dispel-poison", "notes": "poison dispel or defensive"}
+      ]
+    },
+    {
+      "name": "Murder Row",
+      "slug": "murder-row",
+      "url": "https://www.method.gg/guides/dungeons/murder-row",
+      "abilities": [
+        {"npc_name": "Felonious Mage", "npc_id": null, "spell_name": "Fel Missiles", "spell_id": 1216570, "category": "interrupt", "notes": "channel; guide id is the damage component, log resolves 1216571"},
+        {"npc_name": "Seductive Sayaad", "npc_id": null, "spell_name": "Seduction", "spell_id": 1201554, "category": "interrupt", "notes": "channel on a random player; interrupt or CC"},
+        {"npc_name": "Kystia Manaheart", "npc_id": null, "spell_name": "Mirror Images", "spell_id": 1264095, "category": "interrupt", "notes": "boss; interrupt or CC the images"},
+        {"npc_name": "Unleashed Imp", "npc_id": null, "spell_name": "Felfire Burst", "spell_id": 1223204, "category": "interrupt", "notes": "spare interrupts"},
+        {"npc_name": "Wild Imp", "npc_id": null, "encounter": "Lithiel Cinderfury", "spell_name": "Felfire Burst", "spell_id": 1223204, "category": "interrupt", "notes": "spare interrupts or CC during the boss"},
+        {"npc_name": "Wrathguard Flayer", "npc_id": null, "spell_name": "Fel Rage", "spell_id": 1214922, "category": "interrupt", "notes": "enrage; interrupt or soothe"},
+        {"npc_name": "Fel Invoker", "npc_id": null, "spell_name": "Health Funnel", "spell_id": 1214980, "category": "interrupt", "notes": "channel; interrupt or CC"},
+        {"npc_name": "Doomguard", "npc_id": null, "spell_name": "Doom Bolt", "spell_id": 1258420, "category": "interrupt", "notes": "ability tracker only"},
+        {"npc_name": "Lithiel Cinderfury", "npc_id": null, "spell_name": "Chaos Bolt", "spell_id": 474375, "category": "interrupt", "notes": "boss; keep an interrupt rotation on it"},
+        {"npc_name": "Felonious Mage", "npc_id": null, "spell_name": "Fel Crazed", "spell_id": 1229433, "category": "dispel-magic", "notes": "purge the buff"},
+        {"npc_name": "Massive Felwyrm", "npc_id": null, "spell_name": "Corroding Spittle", "spell_id": 1217633, "category": "dispel-magic", "notes": "magic dispel or defensive"},
+        {"npc_name": "Kystia Manaheart", "npc_id": null, "spell_name": "Corroding Spittle", "spell_id": 1228198, "category": "dispel-magic", "notes": "boss; dispel quickly"},
+        {"npc_name": "Corrupted Warlock", "npc_id": null, "spell_name": "Curse of Doom", "spell_id": 1217973, "category": "dispel-curse", "notes": "dispel or stack to split"}
+      ]
+    },
+    {
+      "name": "Temple of Sethraliss",
+      "slug": "temple-of-sethraliss",
+      "url": "https://www.method.gg/guides/dungeons/temple-of-sethraliss",
+      "abilities": [
+        {"npc_name": "Storm Adept", "npc_id": null, "spell_name": "Lightning Bolt", "spell_id": 1291262, "category": "interrupt", "notes": "random target"},
+        {"npc_name": "Imbued Stormcaller", "npc_id": null, "spell_name": "Lightning Bolt", "spell_id": 1291262, "category": "interrupt", "notes": "random target"},
+        {"npc_name": "Shrouded Fang", "npc_id": null, "spell_name": "Poisoned Cheap Shot", "spell_id": 1308100, "category": "interrupt", "notes": "interrupt or poison dispel the stun"},
+        {"npc_name": "Shrouded Fang", "npc_id": null, "spell_name": "Slither Strike", "spell_id": 1295635, "category": "interrupt", "notes": "guide page only; random target"},
+        {"npc_name": "Brood Tender", "npc_id": null, "spell_name": "Venom Bolt", "spell_id": 1310683, "category": "interrupt", "notes": "spare interrupts, random target"},
+        {"npc_name": "Faithless Subjugator", "npc_id": null, "spell_name": "Addle Mind", "spell_id": 1314082, "guide_spell_id": 1293307, "category": "interrupt", "notes": "interrupt or curse dispel"},
+        {"npc_name": "Merektha", "npc_id": null, "spell_name": "Poison Spit", "spell_id": 267027, "category": "interrupt", "notes": "boss"},
+        {"npc_name": "Temple Disruptor", "npc_id": null, "spell_name": "Essence Disruption", "spell_id": 1303535, "category": "interrupt", "notes": "channel into the nearest eye; interrupt or CC"},
+        {"npc_name": "Twisted Hexxer", "npc_id": null, "spell_name": "Flame Shock", "spell_id": 268013, "guide_spell_id": 1302158, "category": "interrupt", "notes": "random target"},
+        {"npc_name": "Avatar of Sethraliss", "npc_id": null, "encounter": "Avatar of Sethraliss", "spell_name": "Flame Shock", "spell_id": 268013, "category": "interrupt", "notes": "boss; Twisted Hexxer cast during the fight"},
+        {"npc_name": "Sandswept Hunter", "npc_id": null, "spell_name": "Arrow Barrage", "spell_id": 1308116, "category": "cc", "notes": "channel on a random player; stop with CC"},
+        {"npc_name": "Imbued Stormcaller", "npc_id": null, "spell_name": "Imbued Conduction", "spell_id": 1296052, "category": "dispel-magic", "notes": "dispel every stack"}
+      ]
+    }
+  ]
 }

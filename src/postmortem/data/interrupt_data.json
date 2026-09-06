@@ -24,16 +24,24 @@
    "name": "Toxic Atrophy",
    "interruptible": true
   },
+  "1239394": {
+   "name": "Scavenge",
+   "interruptible": true
+  },
   "1297696": {
    "name": "Healing Breeze",
    "interruptible": true
   },
-  "1238687": {
-   "name": "Feast of Misery",
+  "1241214": {
+   "name": "Earth Bolt",
    "interruptible": true
   },
   "1309919": {
    "name": "Frigid Roar",
+   "interruptible": true
+  },
+  "1235829": {
+   "name": "Winter's Shroud",
    "interruptible": true
   },
   "1297778": {
@@ -56,10 +64,6 @@
    "name": "Lightning Bolt",
    "interruptible": true
   },
-  "1242860": {
-   "name": "Echoing Maul",
-   "interruptible": true
-  },
   "269972": {
    "name": "Hex Volley",
    "interruptible": true
@@ -72,28 +76,40 @@
    "name": "Bind Soul",
    "interruptible": true
   },
+  "1294972": {
+   "name": "Soul Bolt",
+   "interruptible": true
+  },
   "270492": {
    "name": "Hex",
-   "interruptible": true
-  },
-  "267763": {
-   "name": "Wretched Discharge",
-   "interruptible": true
-  },
-  "269369": {
-   "name": "Deathly Roar",
    "interruptible": true
   },
   "1295125": {
    "name": "Spectral Bolt",
    "interruptible": true
   },
+  "267763": {
+   "name": "Wretched Discharge",
+   "interruptible": true
+  },
   "267273": {
    "name": "Poison Nova",
    "interruptible": true
   },
+  "269369": {
+   "name": "Deathly Roar",
+   "interruptible": true
+  },
   "371984": {
    "name": "Frostbolt",
+   "interruptible": true
+  },
+  "372743": {
+   "name": "Ice Shield",
+   "interruptible": true
+  },
+  "372808": {
+   "name": "Frigid Shard",
    "interruptible": true
   },
   "384194": {
@@ -108,16 +124,12 @@
    "name": "Storm Bolt",
    "interruptible": true
   },
-  "392576": {
-   "name": "Thunder Blast",
-   "interruptible": true
-  },
   "373017": {
    "name": "Blaze Volley",
    "interruptible": true
   },
-  "381516": {
-   "name": "Interrupting Cloudburst",
+  "392576": {
+   "name": "Thunder Blast",
    "interruptible": true
   },
   "1301834": {
@@ -138,6 +150,10 @@
   },
   "1238232": {
    "name": "Seed Shot",
+   "interruptible": true
+  },
+  "1239821": {
+   "name": "Warden's Wrath",
    "interruptible": true
   },
   "1247669": {
@@ -172,10 +188,6 @@
    "name": "Seduction",
    "interruptible": true
   },
-  "1258537": {
-   "name": "Summon Wyrms",
-   "interruptible": true
-  },
   "1264095": {
    "name": "Mirror Images",
    "interruptible": true
@@ -195,9 +207,33 @@
   "474375": {
    "name": "Chaos Bolt",
    "interruptible": true
+  },
+  "1308100": {
+   "name": "Poisoned Cheap Shot",
+   "interruptible": true
+  },
+  "1295610": {
+   "name": "Slither Strike",
+   "interruptible": true
+  },
+  "1310683": {
+   "name": "Venom Bolt",
+   "interruptible": true
+  },
+  "1293307": {
+   "name": "Addle Mind",
+   "interruptible": true
+  },
+  "268013": {
+   "name": "Flame Shock",
+   "interruptible": true
+  },
+  "1302158": {
+   "name": "Flame Shock",
+   "interruptible": true
   }
  },
  "source": "method.gg",
- "season": "Midnight (current pool)",
- "source_version": "2026-09-05"
+ "season": "Midnight S2 (patch 12.1)",
+ "source_version": "2026-09-06"
 }
