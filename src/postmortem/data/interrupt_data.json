@@ -4,10 +4,6 @@
    "name": "Piercing Hiss",
    "interruptible": true
   },
-  "1222795": {
-   "name": "Envenom",
-   "interruptible": true
-  },
   "1289416": {
    "name": "Envenom",
    "interruptible": true
@@ -17,10 +13,6 @@
    "interruptible": true
   },
   "1310358": {
-   "name": "Toxic Atrophy",
-   "interruptible": true
-  },
-  "1310666": {
    "name": "Toxic Atrophy",
    "interruptible": true
   },
@@ -45,10 +37,6 @@
    "interruptible": true
   },
   "1297778": {
-   "name": "Arc Lightning",
-   "interruptible": true
-  },
-  "1305810": {
    "name": "Arc Lightning",
    "interruptible": true
   },
@@ -120,10 +108,6 @@
    "name": "Fiery Blast",
    "interruptible": true
   },
-  "385310": {
-   "name": "Storm Bolt",
-   "interruptible": true
-  },
   "373017": {
    "name": "Blaze Volley",
    "interruptible": true
@@ -188,10 +172,6 @@
    "name": "Seduction",
    "interruptible": true
   },
-  "1264095": {
-   "name": "Mirror Images",
-   "interruptible": true
-  },
   "1223204": {
    "name": "Felfire Burst",
    "interruptible": true
@@ -206,14 +186,6 @@
   },
   "474375": {
    "name": "Chaos Bolt",
-   "interruptible": true
-  },
-  "1308100": {
-   "name": "Poisoned Cheap Shot",
-   "interruptible": true
-  },
-  "1295610": {
-   "name": "Slither Strike",
    "interruptible": true
   },
   "1310683": {

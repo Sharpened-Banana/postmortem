@@ -59,9 +59,15 @@ Refreshing this data for a new Mythic+ season is a manual step (last done
    and record the guide's in `guide_spell_id`. Do not invent rows or ids.
 2. Run `postmortem build-interrupt-data src/postmortem/data/method_interrupts_source.json
    -o interrupt_data.json --resolve-from <your real combat logs>`, which
-   also copies the result into `src/postmortem/data/` by default. Names
-   the logs have never seen are omitted with a warning; play that
-   dungeon and rerun to pick them up.
+   also copies the result into `src/postmortem/data/` by default. Only
+   ids the logs show being interrupted at least once are kept: a name
+   the logs have never seen, or one that was cast but never kicked, is
+   omitted with a warning. Play that dungeon, land a kick, and rerun to
+   pick it up. This matters because one guide name often maps to several
+   ids, only some of them kickable (Arc Lightning: 1297778 kicked 12
+   times, 1305810 cast 32 times and never kicked), and because guides
+   flag some casts as "interrupt" whose own prose says "use a defensive",
+   which in every observed case meant nobody has ever kicked it.
 3. Cross-check the diff against `learned_interrupts.json` in the app's
    data directory: an added spell with `interrupted > 0` there is
    independently confirmed, and a removed spell with only

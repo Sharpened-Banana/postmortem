@@ -4,7 +4,7 @@ import json
 import textwrap
 from pathlib import Path
 
-from conftest import LogBuilder, build_run_log
+from conftest import TANK, LogBuilder, build_run_log
 
 from postmortem import bundled as bundled_module
 from postmortem.analysis.interruptibility import InterruptibilityData
@@ -208,6 +208,49 @@ class TestBuildInterruptData:
             assert False, "expected SystemExit"
         except SystemExit as exc:
             assert "could not read" in str(exc)
+
+    def test_resolve_from_keeps_only_ids_the_logs_saw_interrupted(
+        self, tmp_path, capsys,
+    ):
+        """--resolve-from: a guide NAME can map to several ids in the logs,
+        and only the ones with a landed SPELL_INTERRUPT are kept. Here
+        "Surge" is cast under two ids (the guide's 388862 and a variant
+        999001) and only 999001 was ever kicked; "Never Kicked" is cast but
+        never interrupted; "Not Cast" never appears in the log at all."""
+        doc = _mplus_interrupts_source()
+        doc["dungeons"][0]["abilities"] += [
+            {"npc_name": "X", "npc_id": None, "spell_name": "Never Kicked",
+             "spell_id": 555001, "category": "interrupt"},
+            {"npc_name": "Y", "npc_id": None, "spell_name": "Not Cast",
+             "spell_id": 555002, "category": "interrupt"},
+        ]
+        source = tmp_path / "source.json"
+        source.write_text(json.dumps(doc), encoding="utf-8")
+
+        b = build_run_log()
+        mob = "Creature-0-1-2-3-4-500"
+        b.npc_cast_start(30.0, mob, "Manafiend", 388862, "Surge")
+        b.npc_cast_start(31.0, mob, "Manafiend", 999001, "Surge")
+        b.interrupt(31.5, TANK, mob, "Manafiend", 6552, "Pummel",
+                    999001, "Surge")
+        b.npc_cast_start(32.0, mob, "Manafiend", 555001, "Never Kicked")
+        log = tmp_path / "run.txt"
+        log.write_text(b.text(), encoding="utf-8")
+        output = tmp_path / "out.json"
+
+        assert main([
+            "build-interrupt-data", str(source), "-o", str(output), "--no-bundle",
+            "--resolve-from", str(log),
+        ]) == 0
+        err = capsys.readouterr().err
+        assert "Surge (388862)" in err and "never once interrupted" in err
+        assert "Never Kicked (555001)" in err
+        assert "Not Cast" in err and "omitted rather than guessed" in err
+
+        payload = json.loads(output.read_text(encoding="utf-8"))
+        assert payload["spells"] == {
+            "999001": {"name": "Surge", "interruptible": True},
+        }
 
     def test_default_behavior_also_copies_to_the_bundled_location(
         self, tmp_path, monkeypatch,

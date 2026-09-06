@@ -15,7 +15,7 @@ from .analysis.run_analyzer import analyze_run
 from .analysis.stealable import StealableData
 from .chapters import write_chapter_files
 from .clips import DEFAULT_PAD_S, FfmpegNotFoundError, clip_specs_for_chapters, cut_clips, load_chapters
-from .combatlog.events import is_hostile_npc, spell_info
+from .combatlog.events import extra_spell_info, is_hostile_npc, spell_info
 from .combatlog.parser import parse_file
 from .combatlog.segmenter import RunSegment, segment_runs
 from .mdt.decode import MDTDecodeError, decode_mdt_string
@@ -390,10 +390,29 @@ def cmd_build_interrupt_data(args: argparse.Namespace) -> int:
     # 1216570 -- the damage component -- where the interruptible cast is
     # 1216571, so a naive import silently matches nothing. Names are what
     # a guide gets reliably right; ids are what the log gets right.
+    #
+    # Resolving by name alone is not enough either. One guide name routinely
+    # maps to several ids in the logs, and only some of them are the
+    # interruptible cast: Arc Lightning resolved to 1297778 (12 kicks) AND
+    # 1305810 (32 casts, never once kicked); Envenom, Toxic Atrophy and
+    # Mirror Images likewise (2026-09-06, 17 real runs). Guides also flag
+    # things as "interrupt" whose own prose says "use a defensive", which in
+    # every observed case meant nobody has ever kicked it. So a resolved id
+    # is only accepted if the logs contain at least one SPELL_INTERRUPT that
+    # actually stopped it -- proof, the same standard interrupt_learning.py
+    # uses. An id that has never been kicked is omitted, not guessed; the
+    # analyzer's own "kicked at least once" fallback picks it up the first
+    # time somebody lands one, and the next refresh will then include it.
     name_to_ids: dict[str, set[int]] = {}
+    kicked_ids: set[int] = set()
     for log in args.resolve_from or []:
         try:
             for event in parse_file(log):
+                if event.name == "SPELL_INTERRUPT":
+                    stopped = extra_spell_info(event)
+                    if stopped is not None:
+                        kicked_ids.add(stopped.spell_id)
+                    continue
                 if event.name not in ("SPELL_CAST_START", "SPELL_CAST_SUCCESS"):
                     continue
                 if not is_hostile_npc(event.source_flags):
@@ -407,6 +426,7 @@ def cmd_build_interrupt_data(args: argparse.Namespace) -> int:
     spells: dict[str, Any] = {}
     skipped_conflicts = 0
     unresolved: list[str] = []
+    never_kicked: list[str] = []
     for dungeon in dungeons:
         if not isinstance(dungeon, dict):
             continue
@@ -418,9 +438,15 @@ def cmd_build_interrupt_data(args: argparse.Namespace) -> int:
                 # Every id this ability's NAME actually had in the logs --
                 # plural on purpose, since the same ability cast by
                 # different NPCs legitimately carries different ids.
-                resolved = sorted(name_to_ids.get(name.casefold(), ()))
-                if not resolved:
+                seen = sorted(name_to_ids.get(name.casefold(), ()))
+                if not seen:
                     unresolved.append(f"{dungeon.get('name', '?')}: {name}")
+                    continue
+                resolved = [sid for sid in seen if sid in kicked_ids]
+                for sid in seen:
+                    if sid not in kicked_ids:
+                        never_kicked.append(f"{dungeon.get('name', '?')}: {name} ({sid})")
+                if not resolved:
                     continue
             else:
                 spell_id = ability.get("spell_id")
@@ -452,6 +478,10 @@ def cmd_build_interrupt_data(args: argparse.Namespace) -> int:
     for miss in unresolved:
         print(f"warning: no spell id in the logs for {miss} -- omitted rather "
               f"than guessed", file=sys.stderr)
+    for miss in never_kicked:
+        print(f"warning: {miss} was cast in the logs but never once "
+              f"interrupted -- omitted until a kick on it is observed",
+              file=sys.stderr)
     print(f"built {len(spells)} confirmed-interruptible spells -> {args.output}"
           + (f" ({skipped_conflicts} conflicting duplicate(s) skipped)" if skipped_conflicts else ""))
 
@@ -925,7 +955,9 @@ def build_parser() -> argparse.ArgumentParser:
                          "combat logs instead of trusting the source's own "
                          "ids (strongly recommended -- guide ids often point "
                          "at an ability's damage component rather than its "
-                         "interruptible cast)")
+                         "interruptible cast). Only ids the logs show being "
+                         "interrupted at least once are kept; a name that "
+                         "was cast but never kicked is omitted with a warning")
     p.add_argument("--no-bundle", action="store_true",
                     help="don't also copy the result into this package's "
                          "own data/ folder (see bundled.py)")
