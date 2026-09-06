@@ -351,6 +351,36 @@ class TestWCLClient:
         ]
         assert fights[2]["kill"] is False
 
+    def test_listing_walks_time_windows_past_the_page_cap(self):
+        """The API allows at most 25 listing pages; after that the walk
+        restarts with endTime = oldest report seen - 1."""
+        from postmortem import wcl
+        seen = []
+        def transport(url, body, headers):
+            if url == TOKEN_URL:
+                return {"access_token": "tok"}
+            req = json.loads(body)
+            v = req["variables"]
+            seen.append((v["page"], v.get("end"), "endTime" in req["query"]))
+            page, end = v["page"], v.get("end")
+            base = 1_000_000 if end is None else int(end) - 100_000
+            return {"data": {"reportData": {"reports": {
+                "has_more_pages": True,
+                "data": [{"code": f"R{end}-{page}", "startTime": base - page * 10,
+                          "fights": [{"id": 1, "name": "D", "encounterID": 1,
+                                      "keystoneLevel": 20, "kill": True}]}],
+            }}}}
+        c = WCLClient("id", "secret", transport=transport)
+        fights = list(iter_keystone_fights(c, 45, max_pages=wcl.MAX_LISTING_PAGE + 3))
+        assert len(fights) == wcl.MAX_LISTING_PAGE + 3
+        # first window: pages 1..25 with no endTime
+        assert seen[0] == (1, None, False)
+        assert seen[wcl.MAX_LISTING_PAGE - 1] == (wcl.MAX_LISTING_PAGE, None, False)
+        # second window restarts at page 1, ending before the oldest seen
+        oldest = 1_000_000 - wcl.MAX_LISTING_PAGE * 10
+        assert seen[wcl.MAX_LISTING_PAGE] == (1, oldest - 1, True)
+        assert seen[-1][0] == 3
+
     def test_fetch_fight_tables_reads_dict_or_json_string_tables(self):
         c = WCLClient("id", "secret", transport=FakeTransport())
         t = fetch_fight_tables(c, "BBB", 3)

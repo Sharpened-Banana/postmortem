@@ -191,36 +191,69 @@ def find_mplus_zone(client: WCLClient) -> tuple[int, str]:
     return int(best["id"]), str(best.get("name") or "")
 
 
+#: The API refuses listing pages past this ("until the performance of
+#: paginated queries can be improved", live 2026-09-06), so a listing is
+#: walked in time windows: 25 pages, then a new window ending just before
+#: the oldest report seen.
+MAX_LISTING_PAGE = 25
+
+
 def iter_keystone_fights(client: WCLClient, zone_id: int,
                          max_pages: int = 10) -> Iterator[dict[str, Any]]:
     """Every keystone dungeon fight in recent public reports for the
-    zone (``max_pages`` pages of ``REPORTS_PER_PAGE``), newest first:
-    ``{"code", "fight_id", "level", "encounter_id", "encounter", "kill"}``. Fights without a keystone
-    level (raid pulls, trash) are skipped."""
-    body = (
-        f"reportData {{ reports(zoneID: $zone, limit: {REPORTS_PER_PAGE}, page: $page) {{ "
-        "has_more_pages data { code fights(killType: Encounters) { "
-        "id name encounterID keystoneLevel kill } } } }"
-    )
-    for page in range(1, max_pages + 1):
-        data = client.query(body, {"zone": ("Int", zone_id), "page": ("Int", page)})
-        reports = (data.get("reportData") or {}).get("reports") or {}
-        for report in reports.get("data") or []:
-            code = report.get("code")
-            for fight in report.get("fights") or []:
-                level = fight.get("keystoneLevel")
-                if not code or not level:
-                    continue
-                yield {
-                    "code": code,
-                    "fight_id": int(fight["id"]),
-                    "level": int(level),
-                    "encounter_id": int(fight.get("encounterID") or 0),
-                    "encounter": str(fight.get("name") or ""),
-                    "kill": bool(fight.get("kill")),
-                }
-        if not reports.get("has_more_pages"):
-            break
+    zone, newest first, scanning at most ``max_pages`` pages of
+    ``REPORTS_PER_PAGE`` reports in total across as many time windows as
+    that takes: ``{"code", "fight_id", "level", "encounter_id",
+    "encounter", "kill"}``. Fights without a keystone level (raid pulls,
+    trash) are skipped."""
+    pages_used = 0
+    end_time: Optional[float] = None
+    while pages_used < max_pages:
+        oldest: Optional[float] = None
+        exhausted = False
+        for page in range(1, MAX_LISTING_PAGE + 1):
+            if pages_used >= max_pages:
+                return
+            variables: dict[str, Any] = {"zone": ("Int", zone_id), "page": ("Int", page)}
+            window = ""
+            if end_time is not None:
+                variables["end"] = ("Float", end_time)
+                window = ", endTime: $end"
+            body = (
+                f"reportData {{ reports(zoneID: $zone, limit: {REPORTS_PER_PAGE}, "
+                f"page: $page{window}) {{ "
+                "has_more_pages data { code startTime fights(killType: Encounters) { "
+                "id name encounterID keystoneLevel kill } } } }"
+            )
+            data = client.query(body, variables)
+            pages_used += 1
+            reports = (data.get("reportData") or {}).get("reports") or {}
+            for report in reports.get("data") or []:
+                code = report.get("code")
+                try:
+                    started = float(report.get("startTime"))
+                    oldest = started if oldest is None else min(oldest, started)
+                except (TypeError, ValueError):
+                    pass
+                for fight in report.get("fights") or []:
+                    level = fight.get("keystoneLevel")
+                    if not code or not level:
+                        continue
+                    yield {
+                        "code": code,
+                        "fight_id": int(fight["id"]),
+                        "level": int(level),
+                        "encounter_id": int(fight.get("encounterID") or 0),
+                        "encounter": str(fight.get("name") or ""),
+                        "kill": bool(fight.get("kill")),
+                    }
+            if not reports.get("has_more_pages"):
+                exhausted = True
+                break
+        if exhausted or oldest is None:
+            return
+        # next window: everything that started before the oldest report seen
+        end_time = oldest - 1
 
 
 def _table_entries(table: Any) -> dict[int, tuple[str, int]]:

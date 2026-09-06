@@ -1175,7 +1175,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-level", type=int, default=2)
     p.add_argument("--max-level", type=int, default=30)
     p.add_argument("--max-pages", type=int, default=50,
-                    help="pages of 40 reports to scan at most (default 50)")
+                    help="pages of 40 reports to scan at most, across as many "
+                         "time windows as needed (default 50)")
     p.add_argument("--reserve-points", type=float, default=200,
                     help="stop when fewer than this many API points remain "
                          "this hour (default 200); rerun later to resume")
