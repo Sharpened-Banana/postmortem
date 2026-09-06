@@ -281,6 +281,38 @@ class FakeTransport:
         raise AssertionError(f"unexpected query {q}")
 
 
+class TestRetries:
+    def test_transient_failures_retry_with_backoff_then_give_up(self):
+        from postmortem.wcl import _Transient, _with_retries
+        calls, naps = [], []
+        def flaky():
+            calls.append(1)
+            if len(calls) < 3:
+                raise _Transient("timeout")
+            return {"ok": True}
+        assert _with_retries(flaky, retries=4, sleep=naps.append) == {"ok": True}
+        assert naps == [2.0, 4.0]
+        def dead():
+            raise _Transient("down")
+        try:
+            _with_retries(dead, retries=2, sleep=lambda s: None)
+            assert False
+        except WCLError as exc:
+            assert "3 attempts" in str(exc)
+
+    def test_non_transient_errors_are_not_retried(self):
+        from postmortem.wcl import _with_retries
+        n = []
+        def bad():
+            n.append(1)
+            raise WCLError("HTTP 401")
+        try:
+            _with_retries(bad, retries=3, sleep=lambda s: None)
+            assert False
+        except WCLError:
+            assert len(n) == 1
+
+
 class TestWCLClient:
     def test_requires_credentials(self):
         try:

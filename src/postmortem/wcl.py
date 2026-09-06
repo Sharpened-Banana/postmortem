@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import base64
 import json
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -59,20 +60,55 @@ class WCLError(Exception):
     ``errors`` array in an otherwise-200 response."""
 
 
-def _default_transport(url: str, body: bytes, headers: dict[str, str]) -> dict:
-    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=30, context=https_context()) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detail = ""
+#: Per-request timeout. Table queries over a long dungeon run can take a
+#: while server-side; 30 s produced a spurious "read operation timed out"
+#: mid-build on the first full live run (2026-09-06).
+REQUEST_TIMEOUT_S = 90
+#: Transient failures (timeouts, connection resets, HTTP 429/5xx) are
+#: retried this many times with a growing pause before giving up.
+RETRIES = 4
+
+
+class _Transient(Exception):
+    """A failure worth retrying, as opposed to a 4xx that won't change."""
+
+
+def _with_retries(attempt: Callable[[], dict], retries: int = RETRIES,
+                  sleep: Callable[[float], None] = time.sleep) -> dict:
+    """Call ``attempt`` until it returns, retrying only ``_Transient``
+    failures with backoff (2, 4, 8 ... seconds). Anything else propagates
+    at once."""
+    last: Optional[Exception] = None
+    for i in range(retries + 1):
         try:
-            detail = exc.read().decode("utf-8", "replace")[:300]
-        except Exception:
-            pass
-        raise WCLError(f"HTTP {exc.code} from {url}: {detail}") from exc
-    except (urllib.error.URLError, OSError, ValueError) as exc:
-        raise WCLError(f"could not reach {url}: {exc}") from exc
+            return attempt()
+        except _Transient as exc:
+            last = exc
+            if i < retries:
+                sleep(2.0 * (2 ** i))
+    raise WCLError(f"gave up after {retries + 1} attempts: {last}")
+
+
+def _default_transport(url: str, body: bytes, headers: dict[str, str]) -> dict:
+    def attempt() -> dict:
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_S,
+                                        context=https_context()) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", "replace")[:300]
+            except Exception:
+                pass
+            if exc.code == 429 or exc.code >= 500:
+                raise _Transient(f"HTTP {exc.code} from {url}: {detail}") from exc
+            raise WCLError(f"HTTP {exc.code} from {url}: {detail}") from exc
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            # includes socket timeouts and connection resets
+            raise _Transient(f"could not reach {url}: {exc}") from exc
+    return _with_retries(attempt)
 
 
 class WCLClient:
