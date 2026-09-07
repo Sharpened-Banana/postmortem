@@ -199,6 +199,17 @@ convention (same as `report/html.py`), so nothing new is loaded.
   in `site/tests/test_progression.py`). Character pages work independent
   of the accounts flag, per the decision that groupmate names link even
   without an account. Not yet exercised on the live site.
+- **Live Raider.io scores** (2026-09-07, user request: "I want a live
+  fetch"): character pages and run-page participant links now show each
+  character's *current* Mythic+ score, fetched live from Raider.io on
+  view (`site/postmortem_site/riolive.py`), not the existing --raiderio
+  snapshot taken at analyze/upload time. Realm slug resolution prefers a
+  Battle.net-verified one when any account already knows the character,
+  falling back to the same heuristic the CLI/desktop enrichment already
+  uses. Cached 10 minutes in-process to be a reasonable API citizen.
+  Talents were also asked about but scoped as separate, larger, greenfield
+  work (the combat log's `COMBATANT_INFO` talent data is parsed for spec
+  ID only today and would need new decoding infrastructure) — not started.
 - **Phase 3** built: device-code sign-in end to end. Site side —
   `POST /api/device/start`, `GET /link` (+ `/link/confirm`),
   `GET /api/device/poll`, `GET /api/whoami`, a `device_links` table, and
