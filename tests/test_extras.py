@@ -316,6 +316,33 @@ class TestRaiderIO:
         raiderio._default_fetcher("https://raider.io/api/v1/characters/profile")
         assert isinstance(seen["context"], ssl.SSLContext)
 
+    def test_default_fetcher_sends_a_real_user_agent(self, monkeypatch):
+        # Real bug (2026-09-07, confirmed live against raider.io from the
+        # deployed site): urllib's bare default User-Agent
+        # ("Python-urllib/3.x") gets a 403 from Raider.io's edge, while
+        # any real UA string succeeds against the identical URL. Because
+        # HTTPError is itself a URLError, _default_fetcher's own except
+        # clause silently turned every 403 into a plain None -- every
+        # fetch_character() call had been failing, unconditionally, with
+        # no visible error, since this module was written.
+        import io
+        import urllib.error
+        import urllib.request
+
+        from postmortem import raiderio
+
+        seen = {}
+
+        def fake_urlopen(request, timeout=None, context=None):
+            seen["user_agent"] = request.get_header("User-agent")
+            raise urllib.error.HTTPError(request.full_url, 403, "Forbidden", hdrs=None, fp=io.BytesIO(b""))
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        # still returns None (network/HTTP failures stay silent to
+        # callers) -- this test is about the request that was SENT
+        assert raiderio._default_fetcher("https://raider.io/api/v1/characters/profile") is None
+        assert seen["user_agent"] and "python-urllib" not in seen["user_agent"].lower()
+
 
 class TestRunMatching:
     """WP-C3: matching a locally-analyzed run against a player's
