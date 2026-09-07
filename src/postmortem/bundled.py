@@ -37,6 +37,7 @@ from pathlib import Path
 DUNGEON_DATA_FILENAME = "dungeon_data.json"
 INTERRUPT_DATA_FILENAME = "interrupt_data.json"
 SPELL_DAMAGE_FILENAME = "spell_damage.json"
+TALENT_DATA_FILENAME = "talent_data.json"
 
 
 def bundled_dungeon_data_path() -> Path:
@@ -51,6 +52,14 @@ def bundled_interrupt_data_path() -> Path:
     exist in a source checkout that never had it copied in -- callers
     treat a missing file as "no data", never as an error)."""
     return Path(__file__).resolve().parent / "data" / INTERRUPT_DATA_FILENAME
+
+
+def bundled_talent_data_path() -> Path:
+    """Path to the packaged talent-node -> talent-name map (built from
+    Blizzard's own talent-tree API by ``postmortem build-talent-data`` --
+    see talents.py). Optional: without it a run's logged talent picks
+    still appear, just as node ids rather than names."""
+    return Path(__file__).resolve().parent / "data" / TALENT_DATA_FILENAME
 
 
 def bundled_spell_damage_path() -> Path:

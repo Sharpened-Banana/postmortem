@@ -505,6 +505,44 @@ def cmd_build_interrupt_data(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_build_talent_data(args: argparse.Namespace) -> int:
+    """Build the talent-node -> talent-name map from Blizzard's own
+    talent-tree API and bundle it (see talents.py for what reads it).
+
+    Needs BNET_CLIENT_ID/BNET_CLIENT_SECRET in the environment. One
+    request per specialization plus one for the index -- a few dozen
+    calls, well inside Blizzard's rate limits.
+    """
+    from .blizzardapi import BlizzardApi, BlizzardApiError, build_talent_nodes, credentials_from_env
+
+    try:
+        client_id, client_secret = credentials_from_env()
+        api = BlizzardApi(client_id, client_secret, region=args.region)
+        print(f"fetching talent trees from the {args.region} Game Data API…")
+        payload = build_talent_nodes(api, echo=print)
+    except BlizzardApiError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    if not payload["nodes"]:
+        print("error: no talent nodes were returned", file=sys.stderr)
+        return 1
+
+    with open(args.output, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, indent=1, sort_keys=True)
+    choice_nodes = sum(1 for n in payload["nodes"].values() if len(n["options"]) > 1)
+    print(f"wrote {args.output}: {payload['node_count']} nodes "
+          f"({choice_nodes} of them choice nodes)")
+
+    if not args.no_bundle:
+        from .bundled import bundled_talent_data_path
+        bundled_path = bundled_talent_data_path()
+        bundled_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(args.output, bundled_path)
+        print(f"also copied to the bundled package location: {bundled_path}")
+    return 0
+
+
 def cmd_build_spell_damage(args: argparse.Namespace) -> int:
     """Sample public Warcraft Logs keystone runs for per-spell damage per
     completed cast, by key level, and bundle it -- see wcl.py for the
@@ -1166,6 +1204,23 @@ def build_parser() -> argparse.ArgumentParser:
                     help="don't also copy the result into this package's "
                          "own data/ folder (see bundled.py)")
     p.set_defaults(func=cmd_build_interrupt_data)
+
+    p = sub.add_parser(
+        "build-talent-data",
+        help="build the talent-node -> talent-name map from Blizzard's own "
+             "talent-tree API, so a run's logged talent picks can be shown "
+             "by name -- needs BNET_CLIENT_ID/BNET_CLIENT_SECRET in the "
+             "environment (see blizzardapi.py)",
+    )
+    p.add_argument("-o", "--output", default="talent_data.json")
+    p.add_argument("--region", default="us",
+                    help="Game Data API region to read the trees from "
+                         "(talent trees are identical across regions; "
+                         "default: us)")
+    p.add_argument("--no-bundle", action="store_true",
+                    help="don't also copy the result into this package's "
+                         "own data/ folder (see bundled.py)")
+    p.set_defaults(func=cmd_build_talent_data)
 
     p = sub.add_parser(
         "build-spell-damage",
