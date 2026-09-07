@@ -24,6 +24,18 @@ from typing import Any, Callable, Iterable, Iterator, Optional
 
 from .net import https_context
 
+# Real bug (2026-09-07): _default_fetcher sent no User-Agent at all, so
+# every request went out with urllib's bare default ("Python-urllib/3.x")
+# -- Raider.io's edge (Cloudflare) 403s that outright while a plain curl
+# or any real UA string succeeds against the exact same URL (confirmed
+# live from the postmortem-mplus.fly.dev machine). urllib.error.HTTPError
+# is itself a URLError, so _default_fetcher's own except clause was
+# silently swallowing it -- every fetch_character() call had been
+# returning None unconditionally, with no visible error anywhere, since
+# this module was written. keystoneguru.py already learned this lesson
+# (see its own User-Agent); this is the one client that hadn't.
+USER_AGENT = "Mozilla/5.0 (Postmortem; +https://github.com/Sharpened-Banana/postmortem)"
+
 API_URL = "https://raider.io/api/v1/characters/profile"
 # mythic_plus_recent_runs (WP-C3) is requested alongside the existing
 # fields purely additively -- one more comma-separated value in the same
@@ -48,8 +60,9 @@ def realm_slug(realm: str) -> str:
 
 
 def _default_fetcher(url: str) -> Optional[dict]:
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
-        with urllib.request.urlopen(url, timeout=6, context=https_context()) as resp:
+        with urllib.request.urlopen(request, timeout=6, context=https_context()) as resp:
             return json.load(resp)
     except (urllib.error.URLError, OSError, ValueError):
         return None
