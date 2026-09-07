@@ -173,12 +173,24 @@ convention (same as `report/html.py`), so nothing new is loaded.
 4. **Later**: Discord as a secondary login, per-group pages, e-mail
    digests of the week.
 
-## Decisions needed
+## Decisions (2026-09-06)
 
-- Battle.net as the first login provider — yes, or start with Discord?
-- Default visibility for account-owned runs: public (as today) or
-  unlisted until the owner flips it?
-- Regions to support at launch: `us` only, or `us` + `eu`?
-- Should groupmates' names on a run page link to their character pages
-  even when those characters have no account yet (they are public in the
-  report today already)?
+- **Battle.net** is the first and, for now, only login provider.
+- Account-owned runs are **public by default**; the owner can flip a run
+  to unlisted (phase 2).
+- **`us` only** at launch. `accounts.region` is stored so `eu` can follow
+  without a migration.
+- Groupmates' names on a run page **do link** to character pages, whether
+  or not that player has an account yet (the names are public in the
+  report already).
+
+## Status
+
+- Phase 1 built (`site/postmortem_site/accounts.py`, `/auth/bnet/*`,
+  `/me`, token linking, tests in `site/tests/test_accounts.py`), behind
+  the `MYTHIC_SITE_BNET_CLIENT_ID`/`_SECRET` flag. Deployment steps are in
+  `site/README.md` under "Accounts". Not yet exercised against the real
+  Blizzard endpoints — the first real sign-in is the remaining
+  verification.
+- Phase 2 (character pages, progression charts, visibility) and phase 3
+  (device-code sign-in from the app) are next.
