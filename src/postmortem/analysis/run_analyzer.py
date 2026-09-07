@@ -229,6 +229,48 @@ def _cc_summary(stats) -> dict[str, Any]:
     }
 
 
+def _builds_by_guid(stats, talent_data) -> dict[str, dict[str, Any]]:
+    """Each player's talent build and gear *for this run*, keyed by guid.
+
+    Both come from COMBATANT_INFO (see combatlog/combatant.py), so this
+    is the build they actually brought to this key -- not whatever they
+    happen to be wearing now. Talent choice nodes are settled using that
+    player's own casts in this run (see talents.py); the ones that stay
+    ambiguous say so rather than guessing.
+    """
+    from .. import talents as talents_module
+    from ..combatlog.combatant import _NO_ILVL_SLOTS
+
+    out: dict[str, dict[str, Any]] = {}
+    for player in stats.players.values():
+        if not player.talent_picks and not player.gear:
+            continue
+        build: dict[str, Any] = {}
+        if player.talent_picks:
+            spells_seen = set()
+            names_seen = set()
+            for counter in (player.casts, player.damage_by_spell, player.healing_by_spell):
+                for spell_id, name in counter:
+                    spells_seen.add(spell_id)
+                    if name:
+                        names_seen.add(name.lower())
+            picks = talent_data.decode(player.talent_picks, spells_seen, names_seen)
+            build["talents"] = talents_module.summarize(picks)
+        equipped = [g for g in player.gear if g.equipped]
+        if equipped:
+            levels = [
+                g.item_level for g in equipped
+                if g.item_level and g.slot not in _NO_ILVL_SLOTS
+            ]
+            build["gear"] = {
+                "average_item_level": round(sum(levels) / len(levels), 1) if levels else None,
+                "items": [g.summary() for g in equipped],
+            }
+        if build:
+            out[player.guid] = build
+    return out
+
+
 def _unplanned_pulls_summary(comparison: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
     """Actual pulls that included enemies not part of the pasted route --
     surfaced directly rather than requiring a reader to dig through every
@@ -304,6 +346,7 @@ def analyze_run(
     par_ms: Optional[int] = None,
     spell_damage_history_path: Optional[str | Path] = None,
     community_spell_damage: Optional[SpellDamageData] = None,
+    talent_data_path: Optional[str | Path] = None,
 ) -> dict[str, Any]:
     """Analyze one M+ run; returns a JSON-ready report dict.
 
@@ -425,6 +468,21 @@ def analyze_run(
         uptimes = stats.buff_uptimes.get(player["guid"])
         if uptimes:
             player["buff_uptimes"] = uptimes
+
+    # Talent build + gear as logged for this run. Talent names need the
+    # bundled node map (see talents.py); without it the picks are still
+    # reported, just unnamed -- same graceful degradation as a run
+    # analyzed with no dungeon data.
+    from .. import talents as talents_module
+    from ..bundled import bundled_talent_data_path
+    talent_data = talents_module.TalentData.load(
+        talent_data_path or bundled_talent_data_path()
+    )
+    builds = _builds_by_guid(stats, talent_data)
+    for player in report["players"]:
+        build = builds.get(player["guid"])
+        if build:
+            player["build"] = build
 
     if avoidable is not None:
         report["avoidable_damage"] = _avoidable_damage_summary(stats, avoidable)

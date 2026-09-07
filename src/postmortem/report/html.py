@@ -228,6 +228,7 @@ function playersTable() {
       ${(p.buff_uptimes||[]).length ? `<div class="dim">Buff uptime: ${(p.buff_uptimes||[]).slice(0,10).map(b => `${esc(b.name)} ${b.uptime_pct}%`).join(" · ")}</div>` : ""}
       ${(p.damage_to_bosses ? `<div class="dim">Boss damage: ${num(p.damage_to_bosses)} (${p.damage_done ? Math.round(100*p.damage_to_bosses/p.damage_done) : 0}% of total)</div>` : "")}
       ${(p.potions_used || p.healthstones_used || p.distance_traveled) ? `<div class="dim">${p.potions_used ? p.potions_used + " potions · " : ""}${p.healthstones_used ? p.healthstones_used + " healthstones · " : ""}${p.distance_traveled ? "~" + num(p.distance_traveled) + " yd traveled" : ""}</div>` : ""}
+      ${buildDetail(p)}
       </details></td></tr>`).join("");
   return `<h2>Players</h2><div class="wrap"><table>
     <tr><th>Player</th><th>Spec</th><th class="num">DPS</th><th class="num">HPS</th>
@@ -238,6 +239,38 @@ function playersTable() {
     <th class="num" title="killing blows">KB</th>
     <th class="num" title="casts per minute">CPM</th>
     <th class="num">Deaths</th></tr>${rows}</table></div>`;
+}
+
+// The talent build and gear this player brought to THIS run, read from
+// the log's own COMBATANT_INFO -- not their current armory state. A
+// choice node the run couldn't settle (neither option's spell ever
+// showed up) is printed as "A / B" rather than guessed at.
+function buildDetail(p) {
+  const b = p.build;
+  if (!b) return "";
+  let out = "";
+  const t = b.talents;
+  if (t && (t.picks||[]).length) {
+    const named = t.picks.filter(x => x.name)
+      .map(x => esc(x.name) + (x.rank > 1 ? ` <span class="dim">×${x.rank}</span>` : ""));
+    const unsure = t.picks.filter(x => x.options)
+      .map(x => `<span class="dev-late">${x.options.map(esc).join(" / ")}</span>`);
+    out += `<div class="dim">Talents (${t.named_count}/${t.total_count} identified`
+      + (t.ambiguous_count ? `, ${t.ambiguous_count} either-or` : "") + `): `
+      + named.join(" · ") + (unsure.length ? " · " + unsure.join(" · ") : "") + `</div>`;
+  }
+  const g = b.gear;
+  if (g && (g.items||[]).length) {
+    const items = g.items.map(i => {
+      const marks = [];
+      if ((i.enchants||[]).length) marks.push("ench");
+      if ((i.gems||[]).length) marks.push(`${i.gems.length}g`);
+      return `${esc(i.slot)} ${i.item_level}${marks.length ? " (" + marks.join(",") + ")" : ""}`;
+    });
+    out += `<div class="dim">Gear${g.average_item_level ? ` (avg ${g.average_item_level})` : ""}: `
+      + items.join(" · ") + `</div>`;
+  }
+  return out;
 }
 
 function avoidableDamage() {

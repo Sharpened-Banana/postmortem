@@ -25,6 +25,7 @@ from ..combatlog.events import (
     to_int,
     unquote,
 )
+from ..combatlog.combatant import parse_combatant_info
 from ..combatlog.guid import parse_guid
 from ..mdt.dungeon_data import DungeonData
 from .avoidable import AvoidableData
@@ -90,6 +91,13 @@ class PlayerStats:
     distance_traveled: float = 0.0
     avoidable_damage_taken: int = 0  # see avoidable.py; 0 unless --avoidable-data used
     avoidable_hits: int = 0
+    # Straight from COMBATANT_INFO (see combatlog/combatant.py): the
+    # talent picks and equipped gear this player brought to *this* run.
+    # Talents stay as logged -- (node, entry, rank) -- and are decoded to
+    # names later, where the run's own casts are available to settle
+    # choice nodes (see talents.py).
+    talent_picks: list[tuple[int, int, int]] = field(default_factory=list)
+    gear: list[Any] = field(default_factory=list)
     casts: Counter = field(default_factory=Counter)  # (spell_id, spell_name) -> n
     damage_by_spell: Counter = field(default_factory=Counter)
     healing_by_spell: Counter = field(default_factory=Counter)
@@ -392,14 +400,19 @@ def compute_stats(
             # 21 players parsed as spec=None; keying on the first "[" or
             # "(" param gets all 21 right, in both the bracketed and the
             # older bare-paren layouts.
-            spec_id = None
-            for i, p in enumerate(params):
-                if i > 1 and p[:1] in ("[", "("):
-                    spec_id = to_int(params[i - 1]) or None
-                    break
+            info = parse_combatant_info(params)
             player = get_player(guid)
-            if spec_id:
-                player.spec_id = spec_id
+            if info is not None:
+                if info.spec_id:
+                    player.spec_id = info.spec_id
+                # Only ever fill these in -- a log can carry more than one
+                # COMBATANT_INFO for the same player (a re-log mid-key,
+                # say), and a later line that happens to be in an older
+                # layout must not wipe a build an earlier one gave us.
+                if info.talents:
+                    player.talent_picks = info.talents
+                if info.gear:
+                    player.gear = info.gear
             continue
 
         if name == "ENCOUNTER_START" and params:
