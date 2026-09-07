@@ -188,7 +188,9 @@ does this in CI for both platforms on every tag push.
   mid-cast; per-spell table plus an overall efficiency percentage. A
   bundled, community-sourced interruptibility database (see
   `src/postmortem/data/interrupt_data.json`, refreshed each season with
-  `postmortem build-interrupt-data`; used automatically, no flag needed
+  `postmortem build-interrupt-data` — or with everything else at once via
+  `./scripts/update-for-patch.sh`, see `docs/PATCH_UPDATE.md`; used
+  automatically, no flag needed
   outside the bare CLI) marks confirmed-interruptible spells so they
   count toward efficiency even if never kicked this run, instead of
   looking invisible; anything it has no data for falls back to counting
