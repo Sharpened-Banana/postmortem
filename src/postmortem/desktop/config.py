@@ -115,6 +115,14 @@ def resolve_output_dir(settings: dict[str, Any], subdir: str) -> Path:
     return config_dir() / subdir
 
 
+def watch_log_folder(path: str | Path) -> Path:
+    """The WoW ``Logs`` folder a Watch Live path refers to: the path itself
+    when it is a folder (what the "Choose Logs folder…" pickers store),
+    otherwise the folder containing the given log file."""
+    p = Path(path)
+    return p if p.is_dir() else p.parent
+
+
 def resolve_watch_log_path(folder: str | Path) -> Path:
     """The combat log to watch inside a WoW ``Logs`` folder: the most
     recently modified ``WoWCombatLog*.txt`` file, or ``folder /

@@ -11,6 +11,7 @@ from typing import Any, Iterable, Optional
 
 from .analysis.avoidable import AvoidableData
 from .analysis.interruptibility import InterruptibilityData
+from .analysis.pulls import DEFAULT_PULL_GAP_S
 from .analysis.run_analyzer import analyze_run
 from .analysis.stealable import StealableData
 from .chapters import write_chapter_files
@@ -926,7 +927,7 @@ def cmd_index(args: argparse.Namespace) -> int:
 
 
 def _write_recorded_reports(
-    run, route, store, pull_gap_seconds: float = 5.0, avoidable=None,
+    run, route, store, pull_gap_seconds: float = DEFAULT_PULL_GAP_S, avoidable=None,
     interrupt_data=None, stealable=None, learned_path=None, enrich=None,
     spell_damage_history_path=None,
 ) -> Optional[dict]:
@@ -1256,8 +1257,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--format", default="text",
                    help="comma-separated: text,json,html (default: text)")
     p.add_argument("--out", help="directory to write reports into (default: stdout/cwd)")
-    p.add_argument("--pull-gap", type=float, default=5.0,
-                   help="seconds of no-combat that separates two pulls (default 5)")
+    p.add_argument("--pull-gap", type=float, default=DEFAULT_PULL_GAP_S,
+                   help="seconds with no enemy engaged that separates two pulls "
+                        f"(default {DEFAULT_PULL_GAP_S})")
     p.add_argument("--no-cast-timeline", action="store_true",
                    help="omit the full per-cast timeline from JSON output")
     p.add_argument("--death-penalty", type=float, default=15.0,
@@ -1319,7 +1321,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="auto-analyze each run when it completes")
     p.add_argument("--from-start", action="store_true",
                    help="also process runs already in the log, not just new ones")
-    p.add_argument("--pull-gap", type=float, default=5.0)
+    p.add_argument("--pull-gap", type=float, default=DEFAULT_PULL_GAP_S)
     p.add_argument("--on-run-start", metavar="CMD",
                    help="shell command to run when a key starts (e.g. "
                         "'obs-cmd recording start' for video capture); "

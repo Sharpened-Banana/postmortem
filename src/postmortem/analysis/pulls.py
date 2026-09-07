@@ -26,6 +26,37 @@ _INTERACTION_SUBSTRINGS = ("_DAMAGE", "_MISSED", "_INTERRUPT", "_DISPEL",
                            "_AURA_APPLIED", "_AURA_REFRESH", "_CAST_SUCCESS",
                            "_HEAL", "_ENERGIZE", "_LEECH", "_DRAIN")
 
+# How long after the last engaged enemy died (or went quiet) a NEW enemy
+# may still start and be counted as the same pull. Overlapping engagements
+# always merge regardless -- a pack chained while the previous one is still
+# alive, mid-fight adds, boss summons -- so this only decides what happens
+# across a moment with nothing at all engaged. It used to be 5s, which on a
+# real Ruby Life Pools key (2026-09-03) fused a 13-pull route into 4
+# "pulls" of 5-6 minutes each: a group that runs straight from one dead
+# pack to the next leaves gaps of 1.6-4.4s, never 5. Members of a single
+# pack are all interacting within a second of each other (they aggro
+# together and start swinging/casting), so a stretch with no live enemy at
+# all longer than this is a genuine boundary between pulls.
+DEFAULT_PULL_GAP_S = 1.5
+
+# An enemy that was never killed and was in contact with the group for
+# less than this is not something the group fought: a bystander clipped by
+# one AoE tick, a stealth-detector that yelped once. Real case (Murder Row,
+# 2026-09-06): four 0.0s "pulls" of one Row Snitch each once the pull gap
+# stopped hiding them inside their neighbours. Killed enemies always count.
+DEFAULT_MIN_ENGAGEMENT_S = 1.0
+
+# NPCs the season's affix drops into every key regardless of dungeon. They
+# interact with the group (auras, damage) and so look like an engaged
+# enemy, but they are not part of any pull: no MDT dungeon has them, no
+# route can plan them, and they showed up as an unnamed "untracked" add in
+# every single pull of every real report (2026-09-06). Excluded from pull
+# detection entirely; their damage still counts in the stats, which read
+# the event stream directly.
+AFFIX_NPC_IDS: dict[int, str] = {
+    230937: "Xal'atath",  # Xal'atath's Bargain (Midnight Season 2)
+}
+
 
 @dataclass
 class UnitEngagement:
@@ -126,7 +157,7 @@ def collect_engagements(events: Iterable[Event]) -> dict[str, UnitEngagement]:
         if enemy_guid is None:
             continue
         g = parse_guid(enemy_guid)
-        if not g.is_npc:
+        if not g.is_npc or g.npc_id in AFFIX_NPC_IDS:
             continue
 
         # The advanced block describes ONE unit per line -- the source for
@@ -185,14 +216,15 @@ def _encounter_windows(events: Iterable[Event]) -> list[tuple[float, float, int,
 
 def detect_pulls(
     events: list[Event],
-    gap_seconds: float = 5.0,
-    min_engagement_seconds: float = 0.0,
+    gap_seconds: float = DEFAULT_PULL_GAP_S,
+    min_engagement_seconds: float = DEFAULT_MIN_ENGAGEMENT_S,
 ) -> list[ActualPull]:
     """Group enemy engagements into pulls.
 
     ``gap_seconds``: a new engagement starting within this many seconds of
-    the previous pull's combat end is merged into that pull (covers chained
-    packs and mid-fight adds).
+    the previous pull's combat end (the last of its enemies dying or going
+    quiet) is merged into that pull. Anything starting while an enemy is
+    still engaged merges regardless -- see DEFAULT_PULL_GAP_S.
     """
     engagements = collect_engagements(events)
     ordered = sorted(engagements.values(), key=lambda e: e.first_ts)

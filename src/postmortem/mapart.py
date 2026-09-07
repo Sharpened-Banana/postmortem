@@ -50,7 +50,8 @@ def mdt_dir_from_log_path(log_path: str | Path) -> Optional[Path]:
     log path the same way ``addon_results.addon_dir_from_log_path``
     finds our own addon: ``<flavor>/Logs/<log>`` -> ``<flavor>/Interface/
     AddOns/MythicDungeonTools``. None when it isn't there."""
-    logs_dir = Path(log_path).parent
+    log_path = Path(log_path)
+    logs_dir = log_path if log_path.name == "Logs" else log_path.parent
     if logs_dir.name != "Logs":
         return None
     mdt = logs_dir.parent / "Interface" / "AddOns" / MDT_ADDON_DIRNAME

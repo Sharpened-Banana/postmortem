@@ -26,6 +26,28 @@ The DP's result is only used when it strictly reduces the total deviation
 count; otherwise the greedy result stands unchanged. This means an
 already-clean run (zero deviations) is untouched — greedy is trivially
 optimal whenever every unit already matched its immediate primary pull.
+
+Two refinements sit on top of the per-unit assignment, both driven by real
+reports (2026-09-03..06):
+
+* **Chained plan pulls.** A group that runs the route in order but takes
+  two or three planned packs in one go (tank chains into the next pack
+  while the current one is dying) is not deviating from the route -- it
+  is executing it faster. When an actual pull is the *only* consumer of a
+  planned pull adjacent (in plan order) to its primary, that planned pull
+  is recorded as ``chained`` and its units are neither "early" nor "late".
+  A pack that was skipped entirely, or split between two actual pulls,
+  breaks the chain and its units stay deviations.
+
+* **Extra units.** Units of a planned NPC beyond the number the route
+  planned -- boss adds, a mage boss's mirror images, whelps hatching mid
+  fight -- were reported as "off-route" (one real boss pull read
+  "off-route: 15x Kystia Manaheart"). The route can only be blamed for
+  units that could have come from clones MDT knows about and the route
+  left out, so per npc the run gets at most (dungeon clones − planned
+  clones) off-route units; anything past that, and anything spawned in
+  quantity during a boss encounter, is ``extra``: shown, but not a
+  deviation.
 """
 
 from __future__ import annotations
@@ -54,9 +76,15 @@ class PullMatch:
     late: Counter = field(default_factory=Counter)       # npc -> n (leftovers from earlier)
     off_route: Counter = field(default_factory=Counter)  # in dungeon data, not in plan
     untracked: Counter = field(default_factory=Counter)  # not in dungeon data (summons)
+    # Planned npc, but more units than the route (or the dungeon data)
+    # accounts for -- boss adds, images, hatchlings. Not a deviation.
+    extra: Counter = field(default_factory=Counter)
+    # Planned pulls, adjacent to primary_plan_pull in plan order, that this
+    # actual pull consumed in full (in plan order, primary excluded).
+    chained: list[int] = field(default_factory=list)
     # Fraction of this pull's matched units (excluding off-route/untracked)
-    # that went to primary_plan_pull. None when nothing matched at all (a
-    # pull that's purely off-route/untracked).
+    # that went to primary_plan_pull or a chained plan pull. None when
+    # nothing matched at all (a pull that's purely off-route/untracked).
     match_confidence: Optional[float] = None
 
     @property
@@ -76,16 +104,20 @@ class RouteComparison:
     actual_forces: float
     required_forces: Optional[float]
     adherence_pct: Optional[float]
+    # npc_id -> unit name as the combat log itself wrote it; fills in for
+    # NPCs the dungeon data has no name for (summons, affix adds).
+    npc_names: dict[int, str] = field(default_factory=dict)
 
     def summary(self, data: Optional[DungeonData]) -> dict[str, Any]:
         def npc_list(counter: Counter) -> list[dict[str, Any]]:
             out = []
             for npc_id, n in sorted(counter.items()):
                 entry = {"npc_id": npc_id, "n": n}
-                if data is not None:
-                    name = data.npc_name(npc_id)
-                    if name:
-                        entry["name"] = name
+                name = data.npc_name(npc_id) if data is not None else None
+                if not name:
+                    name = self.npc_names.get(npc_id)
+                if name:
+                    entry["name"] = name
                 out.append(entry)
             return out
 
@@ -102,9 +134,11 @@ class RouteComparison:
                         str(plan_idx): npc_list(counter)
                         for plan_idx, counter in sorted(m.matched.items())
                     },
+                    "chained": list(m.chained),
                     "pulled_early": npc_list(m.early),
                     "picked_up_late": npc_list(m.late),
                     "off_route": npc_list(m.off_route),
+                    "extra": npc_list(m.extra),
                     "untracked": npc_list(m.untracked),
                     "deviations": m.deviation_count,
                     "match_confidence": m.match_confidence,
@@ -131,20 +165,56 @@ def compare_route(
     plan_order = [idx for idx, _ in plan_counters]
     plan_counter_list = [c for _, c in plan_counters]  # position-aligned with plan_order
     plan_npcs: set[int] = set()
+    planned_units: Counter = Counter()  # npc -> units planned across the route
     for c in plan_counter_list:
         plan_npcs.update(c)
+        planned_units.update(c)
     dungeon_npcs = {e.npc_id for e in data.enemies}
+
+    # How many units of each npc the route could legitimately be blamed
+    # for pulling beyond its plan: the clones MDT marks for that npc that
+    # the route didn't include. Anything past this can't be a pack the
+    # group walked into -- it was spawned -- and is "extra", not off-route.
+    clone_counts: dict[int, int] = {}
+    for enemy in data.enemies:
+        clone_counts[enemy.npc_id] = clone_counts.get(enemy.npc_id, 0) + len(enemy.clones)
+    # Dungeon data with no clone positions at all (older extractions) gives
+    # nothing to bound against: every unplanned unit stays off-route.
+    off_route_budget_initial: dict[int, Optional[int]] = {
+        npc_id: (max(0, clones - planned_units.get(npc_id, 0)) if clones else None)
+        for npc_id, clones in clone_counts.items()
+    }
+    # npc -> distinct units engaged over the whole run. An npc engaged in
+    # greater numbers than MDT has dots for is one that spawns/respawns.
+    guid_counts: dict[int, set[str]] = {}
+    for pull in actual_pulls:
+        for unit in pull.units:
+            if unit.npc_id is not None:
+                guid_counts.setdefault(unit.npc_id, set()).add(unit.guid)
+
+    def spawns_in_quantity(npc_id: int) -> bool:
+        """More distinct units engaged than MDT has dots for -- the npc
+        spawns/respawns, so its dots say nothing about how many the group
+        should have met. Needs clone data to judge at all."""
+        clones = clone_counts.get(npc_id, 0)
+        return clones > 0 and len(guid_counts.get(npc_id, ())) > clones
+
+    boss_npcs = {e.npc_id for e in data.enemies if e.is_boss}
 
     # Each actual pull's trackable npc multiset, and the total killed forces
     # (which doesn't depend on matching at all) — computed once and shared
-    # between the greedy and DP matching attempts below.
+    # between the greedy and DP matching attempts below. Names come along
+    # so the report can label NPCs the dungeon data doesn't know.
     actual_counters: list[Counter] = []
     actual_forces = 0.0
+    npc_names: dict[int, str] = {}
     for pull in actual_pulls:
         counter: Counter = Counter()
         for unit in pull.units:
             if unit.npc_id is None:
                 continue
+            if unit.name and unit.npc_id not in npc_names:
+                npc_names[unit.npc_id] = unit.name
             if count_engaged_only_if_killed and not unit.killed:
                 continue
             counter[unit.npc_id] += 1
@@ -162,6 +232,7 @@ def compare_route(
         remaining: dict[int, Counter] = {
             idx: Counter(c) for idx, c in zip(plan_order, plan_counter_list)
         }
+        off_route_budget = dict(off_route_budget_initial)
 
         def next_open(after: int = -1) -> Optional[int]:
             for pos, idx in enumerate(plan_order):
@@ -169,11 +240,28 @@ def compare_route(
                     return pos
             return None
 
-        matches: list[PullMatch] = []
-        cursor = next_open()  # position in plan_order of the first unconsumed pull
+        def unplanned(match: PullMatch, npc_id: int, is_boss_pull: bool) -> None:
+            """A trackable unit no plan pull has room for: off-route while
+            the route left clones of this npc unplanned, extra past that.
+            Never off-route: an npc that spawns in quantity (its dots can't
+            say which units the group walked into), and a boss -- every key
+            kills every boss, so a route that leaves one out (common for the
+            final boss) just didn't bother writing it down."""
+            if npc_id in boss_npcs or spawns_in_quantity(npc_id):
+                match.extra[npc_id] += 1
+                return
+            budget = off_route_budget.get(npc_id, 0)
+            if budget is None:
+                match.off_route[npc_id] += 1
+            elif budget > 0:
+                off_route_budget[npc_id] = budget - 1
+                match.off_route[npc_id] += 1
+            else:
+                match.extra[npc_id] += 1
 
-        total_matched_units = 0
-        total_off_route_units = 0
+        matches: list[PullMatch] = []
+        unit_positions: list[Counter] = []  # per match: (npc, plan position) -> n
+        cursor = next_open()  # position in plan_order of the first unconsumed pull
 
         for i, pull in enumerate(actual_pulls):
             counter = actual_counters[i]
@@ -182,43 +270,123 @@ def compare_route(
                 pull_cursor = cursor_hints[i]
 
             match = PullMatch(actual_pull=pull.index, primary_plan_pull=None, matched={})
-            matched_positions: list[int] = []
             per_unit_pos: Counter = Counter()  # (npc, plan position) usage
 
-            for npc_id, n in counter.items():
+            def consume(npc_id: int, n: int, cursor_pos: Optional[int]) -> None:
                 for _ in range(n):
-                    if npc_id not in dungeon_npcs:
-                        match.untracked[npc_id] += 1
-                        continue
-                    if npc_id not in plan_npcs:
-                        match.off_route[npc_id] += 1
-                        continue
-                    pos = _find_plan_pull(npc_id, remaining, plan_order, pull_cursor)
+                    pos = _find_plan_pull(npc_id, remaining, plan_order, cursor_pos)
                     if pos is None:
-                        match.off_route[npc_id] += 1
+                        unplanned(match, npc_id, pull.is_boss)
                         continue
                     plan_idx = plan_order[pos]
                     remaining[plan_idx][npc_id] -= 1
                     if remaining[plan_idx][npc_id] <= 0:
                         del remaining[plan_idx][npc_id]
                     match.matched.setdefault(plan_idx, Counter())[npc_id] += 1
-                    matched_positions.append(pos)
                     per_unit_pos[(npc_id, pos)] += 1
 
-            if matched_positions:
-                primary_pos = Counter(matched_positions).most_common(1)[0][0]
+            def primary_pos_of(counter_: Counter) -> Optional[int]:
+                by_pos: Counter = Counter()
+                for (_npc, pos), n2 in counter_.items():
+                    by_pos[pos] += n2
+                return by_pos.most_common(1)[0][0] if by_pos else None
+
+            # Two passes. NPCs the run engaged in greater numbers than MDT
+            # has dots for (Thunderclouds, whelps, images -- things that
+            # spawn mid-fight) are matched last, and steered toward the
+            # plan pull the *other* units already identified: their sheer
+            # count otherwise decides which planned pack a pull "was" and
+            # spills them across three plan pulls' quotas (a real Ruby Life
+            # Pools report had 13 Primal Thunderclouds outvote 5 Storm
+            # Warriors and a Tempest Channeler).
+            deferred: list[tuple[int, int]] = []
+            for npc_id, n in counter.items():
+                if npc_id not in dungeon_npcs:
+                    match.untracked[npc_id] += n
+                    continue
+                if npc_id not in plan_npcs:
+                    for _ in range(n):
+                        unplanned(match, npc_id, pull.is_boss)
+                    continue
+                if spawns_in_quantity(npc_id):
+                    deferred.append((npc_id, n))
+                    continue
+                consume(npc_id, n, pull_cursor)
+            anchor_pos = primary_pos_of(per_unit_pos)
+            for npc_id, n in deferred:
+                consume(npc_id, n, anchor_pos if anchor_pos is not None else pull_cursor)
+
+            primary_pos = anchor_pos if anchor_pos is not None else primary_pos_of(per_unit_pos)
+            if primary_pos is not None:
                 match.primary_plan_pull = plan_order[primary_pos]
-                at_primary = sum(1 for p in matched_positions if p == primary_pos)
-                match.match_confidence = round(at_primary / len(matched_positions), 3)
-                for (npc_id, pos), n2 in per_unit_pos.items():
-                    if pos > primary_pos:
-                        match.early[npc_id] += n2
-                    elif pos < primary_pos:
-                        match.late[npc_id] += n2
-                total_matched_units += len(matched_positions)
-            total_off_route_units += sum(match.off_route.values())
             matches.append(match)
-            cursor = next_open()
+            unit_positions.append(per_unit_pos)
+            # Advance to the first plan pull, from this pull's primary on,
+            # with anything left. NOT "the earliest plan pull with anything
+            # left": one straggler never engaged in plan pull 2 pinned the
+            # cursor there for the rest of a real run, so every later pack's
+            # units were matched by "first plan pull that has this npc",
+            # spilling a 4-Storm-Warrior pack across three plan pulls
+            # (Ruby Life Pools, 2026-09-03). Earlier leftovers are still
+            # reachable -- _find_plan_pull searches backwards after forwards.
+            if primary_pos is not None:
+                cursor = next_open(after=primary_pos - 1)
+            else:
+                cursor = next_open()
+
+        # Which actual pulls took anything from each plan position. A plan
+        # pull with exactly one consumer, adjacent to that consumer's
+        # primary, was chained -- taken whole, in route order -- and is not
+        # a deviation (see the module docstring). Missed units have no
+        # consumer, so a pack with a straggler left behind still chains.
+        # Spawning npcs don't count as consumers (or as deviations, below):
+        # where their surplus landed is an artefact of quota-filling, not
+        # evidence of which pack the group was fighting.
+        consumers: dict[int, set[int]] = {}
+        for i, per_unit_pos in enumerate(unit_positions):
+            for (npc_id, pos) in per_unit_pos:
+                if not spawns_in_quantity(npc_id):
+                    consumers.setdefault(pos, set()).add(i)
+
+        total_matched_units = 0
+        total_off_route_units = 0
+        n_plan = len(plan_order)
+        for i, (match, per_unit_pos) in enumerate(zip(matches, unit_positions)):
+            total_off_route_units += sum(match.off_route.values())
+            if not per_unit_pos:
+                continue
+            primary_pos = plan_order.index(match.primary_plan_pull)
+            on_plan_positions = {primary_pos}
+            pos = primary_pos + 1
+            while pos < n_plan and consumers.get(pos) == {i}:
+                on_plan_positions.add(pos)
+                pos += 1
+            pos = primary_pos - 1
+            while pos >= 0 and consumers.get(pos) == {i}:
+                on_plan_positions.add(pos)
+                pos -= 1
+            match.chained = [
+                plan_order[p] for p in sorted(on_plan_positions) if p != primary_pos
+            ]
+            matched_units = 0
+            on_plan_units = 0
+            voting_units = 0
+            for (npc_id, pos), n2 in per_unit_pos.items():
+                matched_units += n2
+                if spawns_in_quantity(npc_id):
+                    continue  # counted as matched, never as a deviation
+                voting_units += n2
+                if pos in on_plan_positions:
+                    on_plan_units += n2
+                elif pos > primary_pos:
+                    match.early[npc_id] += n2
+                else:
+                    match.late[npc_id] += n2
+            if voting_units:
+                match.match_confidence = round(on_plan_units / voting_units, 3)
+            else:
+                match.match_confidence = 1.0
+            total_matched_units += matched_units
 
         missed = {
             idx: Counter(c) for idx, c in remaining.items() if sum(c.values()) > 0
@@ -228,7 +396,10 @@ def compare_route(
     matches, missed, total_matched_units, total_off_route_units = run_matching(None)
     best_deviation = sum(m.deviation_count for m in matches)
 
-    dp_hints = _dp_alignment(actual_counters, plan_counter_list, plan_npcs)
+    spawning_npcs = {npc_id for npc_id in guid_counts if spawns_in_quantity(npc_id)}
+    dp_hints = _dp_alignment(
+        actual_counters, plan_counter_list, plan_npcs, ignore_npcs=spawning_npcs,
+    )
     if dp_hints is not None:
         dp_matches, dp_missed, dp_matched_units, dp_off_route_units = run_matching(dp_hints)
         dp_deviation = sum(m.deviation_count for m in dp_matches)
@@ -239,9 +410,10 @@ def compare_route(
 
     plan_forces = route.total_forces(data)
     required = data.total_count.get("normal")
-    # An "on plan" unit matched its actual pull's primary planned pull; the
-    # denominator is every engaged unit the route could have known about
-    # (matched anywhere + off-route packs; untracked summons excluded).
+    # An "on plan" unit matched its actual pull's primary planned pull (or
+    # one chained to it); the denominator is every engaged unit the route
+    # could have known about (matched anywhere + off-route packs; untracked
+    # summons and extra spawns excluded).
     denom = total_matched_units + total_off_route_units
     adherence = None
     if denom > 0:
@@ -257,6 +429,7 @@ def compare_route(
         actual_forces=actual_forces,
         required_forces=required,
         adherence_pct=adherence,
+        npc_names=npc_names,
     )
 
 
@@ -284,6 +457,7 @@ def _dp_alignment(
     plan_counter_list: list[Counter],
     plan_npcs: set[int],
     window: int = _DP_WINDOW,
+    ignore_npcs: Optional[set[int]] = None,
 ) -> Optional[list[int]]:
     """Find a good (not necessarily perfectly optimal) assignment of each
     actual pull to a preferred plan-pull *position* (an index into
@@ -313,6 +487,12 @@ def _dp_alignment(
     fine, but the window costs nothing and scales better for pathological
     inputs.
 
+    ``ignore_npcs`` are left out of the cost entirely: npcs that spawn in
+    quantity mid-fight (see compare_route) say nothing about which planned
+    pack a pull was, and their excess otherwise dominates the cost -- ten
+    Thunderclouds made a pull that was exactly plan pull 10 look like plan
+    pull 12 in a real report.
+
     Returns ``None`` when there's nothing to align (no actual pulls or no
     planned pulls), or if the banded search failed to reach a full
     assignment (shouldn't normally happen — the caller falls back to greedy
@@ -322,13 +502,14 @@ def _dp_alignment(
     m = len(plan_counter_list)
     if n == 0 or m == 0:
         return None
+    ignore = ignore_npcs or set()
 
     def cost(i: int, j: int) -> int:
         actual = actual_counters[i]
         plan = plan_counter_list[j]
         total = 0
         for npc_id, cnt in actual.items():
-            if npc_id not in plan_npcs:
+            if npc_id not in plan_npcs or npc_id in ignore:
                 continue  # can't belong to any plan pull; irrelevant to j
             total += max(0, cnt - plan.get(npc_id, 0))
         return total

@@ -12,7 +12,7 @@ from .avoidable import AvoidableData
 from .compare import compare_route
 from .interruptibility import KNOWN_UNINTERRUPTIBLE_SPELL_IDS, InterruptibilityData
 from .mapping import build_map_report, collect_map_bounds
-from .pulls import detect_pulls
+from .pulls import DEFAULT_PULL_GAP_S, detect_pulls
 from .spell_damage import SpellDamageData, update_from_stats
 from .stats import PET_BUCKET, compute_stats
 from .stealable import StealableData
@@ -298,7 +298,7 @@ def analyze_run(
     avoidable: Optional[AvoidableData] = None,
     interrupt_data: Optional[InterruptibilityData] = None,
     stealable: Optional[StealableData] = None,
-    pull_gap_seconds: float = 5.0,
+    pull_gap_seconds: float = DEFAULT_PULL_GAP_S,
     full_cast_timeline: bool = True,
     death_penalty_s: float = 15.0,
     par_ms: Optional[int] = None,

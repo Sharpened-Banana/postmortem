@@ -804,6 +804,28 @@ class TestWatchMode:
 
         api.stop_watch()
 
+    def test_a_logs_folder_as_log_path_watches_the_log_that_appears_in_it(
+        self, api, events, tmp_path,
+    ):
+        # The "Choose Logs folder…" pickers store the folder itself (since
+        # 2026-09-06); start_watch resolves it to the live log. Nothing
+        # logged yet -> waits on the plain name inside that folder.
+        from conftest import build_run_log
+
+        logs = tmp_path / "Logs"
+        logs.mkdir()
+        result = api.start_watch({
+            "log_path": str(logs), "site_url": "https://example.test",
+            "out_dir": str(tmp_path / "watch-runs"),
+        })
+        assert result == {"ok": True}
+        waiting_event = self._wait_for(events, "waiting_for_log")
+        assert waiting_event["log_path"] == str(logs / "WoWCombatLog.txt")
+
+        (logs / "WoWCombatLog.txt").write_text(build_run_log().text(), encoding="utf-8")
+        assert self._wait_for(events, "run_complete")["zone"] == "Murder Row"
+        api.stop_watch()
+
     def test_interrupt_data_is_loaded_and_reaches_the_written_report(
         self, api, events, tmp_path, monkeypatch,
     ):

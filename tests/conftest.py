@@ -295,6 +295,10 @@ def build_run_log() -> LogBuilder:
     b.player_damage(60, TANK, dB, "Duskblade", 31935, "Avenger's Shield", 30000)
     b.player_damage(61, DPS1, sh, "Shadeling", 133, "Fireball", 30000)
     b.player_damage(62, DPS1, add, "Summoned Thing", 133, "Fireball", 10000)
+    # ...which fights back for a couple of seconds (an enemy touched once
+    # and never again is a bystander, not an engaged add -- see
+    # pulls.DEFAULT_MIN_ENGAGEMENT_S)
+    b.npc_debuff(64, add, "Summoned Thing", TANK, 777003, "Summoned Sting")
     # a pure-DoT spell: one application on the tank, three 15k ticks;
     # the healer kicks its next cast -> ~45k DoT damage prevented
     b.npc_cast_start(62.0, sh, "Shadeling", 777001, "Creeping Rot")

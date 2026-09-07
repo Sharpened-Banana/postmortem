@@ -262,7 +262,11 @@ function comparison() {
     if (m.pulled_early.length) dev.push(`<span class="dev-early">early: ${npcs(m.pulled_early)}</span>`);
     if (m.picked_up_late.length) dev.push(`<span class="dev-late">late: ${npcs(m.picked_up_late)}</span>`);
     if (m.off_route.length) dev.push(`<span class="dev-off">off-route: ${npcs(m.off_route)}</span>`);
-    if (m.untracked.length) dev.push(`<span class="dim">adds: ${npcs(m.untracked)}</span>`);
+    const notes = [];
+    if ((m.chained || []).length) notes.push(`<span class="ok">chained with #${m.chained.join(", #")}</span>`);
+    if ((m.extra || []).length) notes.push(`<span class="dim">also engaged: ${npcs(m.extra)}</span>`);
+    if (m.untracked.length) notes.push(`<span class="dim">adds: ${npcs(m.untracked)}</span>`);
+    dev.push(...notes);
     return `<tr><td class="num">${m.actual_pull}</td>
       <td class="num">${m.primary_plan_pull ?? '<span class="dev-off">—</span>'}</td>
       <td class="txt">${Object.entries(m.matched).map(([k, v]) => `<span class="pk"><b>#${k}</b>${npcs(v)}</span>`).join("") || '<span class="dim">nothing matched</span>'}</td>

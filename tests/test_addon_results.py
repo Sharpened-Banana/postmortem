@@ -141,6 +141,14 @@ class TestAddonDirDerivation:
         log = flavor / "Logs" / "WoWCombatLog.txt"
         assert addon_dir_from_log_path(log) == addon
 
+    def test_accepts_the_logs_folder_itself(self, tmp_path):
+        # the desktop app's "Choose Logs folder…" pickers store the folder
+        flavor = tmp_path / "World of Warcraft" / "_retail_"
+        (flavor / "Logs").mkdir(parents=True)
+        addon = flavor / "Interface" / "AddOns" / "Postmortem"
+        addon.mkdir(parents=True)
+        assert addon_dir_from_log_path(flavor / "Logs") == addon
+
     def test_returns_none_when_addon_not_installed(self, tmp_path):
         flavor = tmp_path / "World of Warcraft" / "_retail_"
         (flavor / "Logs").mkdir(parents=True)

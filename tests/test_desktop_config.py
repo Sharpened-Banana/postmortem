@@ -226,6 +226,20 @@ class TestResolveDefaultRoute:
         assert got is None
 
 
+class TestWatchLogFolder:
+    """The Watch Live path may be the Logs folder itself (what the
+    "Choose Logs folder…" pickers store since 2026-09-06) or a file in it."""
+
+    def test_folder_is_returned_as_is(self, tmp_path):
+        assert config.watch_log_folder(tmp_path) == tmp_path
+
+    def test_file_yields_its_folder(self, tmp_path):
+        assert config.watch_log_folder(tmp_path / "WoWCombatLog-x.txt") == tmp_path
+
+    def test_missing_path_is_treated_as_a_file(self, tmp_path):
+        assert config.watch_log_folder(tmp_path / "gone" / "WoWCombatLog.txt") == tmp_path / "gone"
+
+
 class TestResolveWatchLogPath:
     """Some WoW installs never write a stable "WoWCombatLog.txt" -- every
     session's log gets a timestamp appended instead (confirmed real

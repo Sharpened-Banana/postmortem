@@ -619,6 +619,10 @@ class MapTransform:
     ty: float
     anchor_count: int = 0
     residual: Optional[float] = None
+    # True when the fit was bootstrapped from a calibrated neighbour's
+    # scale and multi-clone mobs (see _extend_single_anchor_maps) rather
+    # than from unambiguous single-clone anchors alone.
+    extended: bool = False
 
     def apply(self, wx: float, wy: float) -> Point:
         ux, uy = _map_normalized(self.bounds, wx, wy)
@@ -652,6 +656,7 @@ class MapCalibration:
                     "residual": round(t.residual, 2) if t.residual is not None else None,
                     "scale": round(t.scale, 4),
                     "translation": {"x": round(t.tx, 2), "y": round(t.ty, 2)},
+                    **({"extended": True} if t.extended else {}),
                 }
                 for t in self.transforms.values()
             }
@@ -833,10 +838,171 @@ def calibrate_maps(
             anchor_count=n, residual=rms,
         )
     if result.transforms:
+        _extend_single_anchor_maps(result, pulls, data, map_bounds, anchors_by_map)
         result.ok = True
     else:
         result.reason = "insufficient anchors"
     return result
+
+
+# --- Rescuing a sub-map with a single anchor ------------------------------
+#
+# A sub-map the group crosses to fight one boss and a few trash packs has
+# exactly one unambiguous anchor (the boss), and a scale + translation
+# needs two. Real cases: Altar of Fangs' middle map (2589: The Writhing
+# Coil plus Bloodletters/High Evolutionists/Rattling Writhes, all
+# multi-clone), Murder Row's "The Illicit Rain" (2435: Zaen Bladesorrow
+# plus Warehouse Workers and Keen Taskmasters). The multi-clone mobs carry
+# plenty of position information -- the problem is only knowing WHICH dot
+# each unit stands for. A calibrated neighbour supplies a starting scale
+# (sub-maps of one dungeon are pasted at broadly similar scales: 0.93/0.96
+# in Altar of Fangs, 0.83/1.20 in Murder Row), the single anchor supplies
+# the translation for that scale, and from there each multi-clone unit is
+# assigned its nearest same-npc dot, one-to-one, and the fit re-solved --
+# ICP, exactly as the legacy global path does. The result has to clear the
+# same residual gate as a normal fit, so a wrong bootstrap (an anchor that
+# had wandered, a neighbour scale far off) leaves the sub-map uncalibrated
+# rather than drawing paths in the wrong place.
+
+# Nearest-dot assignment radius while the scale is still the borrowed
+# guess (the first ICP round); tightens to MAP_INLIER_DIST once refit.
+EXTEND_SEED_DIST = 90.0
+# A rescued fit must rest on the anchor plus at least this many
+# multi-clone correspondences: two units give a 2-anchor-style fit that a
+# single wrong assignment can still masquerade through.
+EXTEND_MIN_EXTRA = 2
+EXTEND_MAX_ITER = 8
+# The refit scale may not stray too far from the seed -- a rescued fit
+# whose scale moved by more than this is following a wrong assignment.
+EXTEND_SCALE_TOLERANCE = 0.35
+
+
+def _multi_clone_units(
+    pulls: list[ActualPull], data: DungeonData, ui_map_id: int,
+) -> list[tuple[int, Point]]:
+    """``(npc_id, world_pos)`` for every positioned unit on ``ui_map_id``
+    whose npc has two or more MDT dots and does not spawn in quantity
+    (more distinct units engaged than dots -- see _seed_anchors_by_map)."""
+    guid_counts = _guid_counts(pulls)
+    out: list[tuple[int, Point]] = []
+    for pull in pulls:
+        for unit in pull.units:
+            if unit.npc_id is None or unit.first_pos is None or unit.first_map_id != ui_map_id:
+                continue
+            enemy = data.enemy_by_npc_id(unit.npc_id)
+            if enemy is None or len(enemy.clones) < 2:
+                continue
+            if guid_counts.get(unit.npc_id, 0) > len(enemy.clones):
+                continue
+            out.append((unit.npc_id, unit.first_pos))
+    return out
+
+
+def _assign_nearest_clones(
+    units: list[tuple[int, Point]],
+    data: DungeonData,
+    s: float, tx: float, ty: float,
+    max_dist: float,
+) -> list[tuple[Point, Point]]:
+    """One-to-one nearest-dot assignment: every (unit, same-npc clone) pair
+    within ``max_dist`` of the unit's predicted canvas position, taken in
+    order of increasing distance, each unit and each dot used at most
+    once. Returns (normalized_world, canvas) pairs."""
+    candidates: list[tuple[float, int, tuple[int, int], Point, Point]] = []
+    for ui, (npc_id, u) in enumerate(units):
+        enemy = data.enemy_by_npc_id(npc_id)
+        if enemy is None:
+            continue
+        px, py = s * u[0] + tx, s * u[1] + ty
+        for ci, clone in enumerate(enemy.clones):
+            d = math.dist((px, py), (clone.x, clone.y))
+            if d <= max_dist:
+                candidates.append((d, ui, (npc_id, ci), u, (clone.x, clone.y)))
+    candidates.sort(key=lambda c: c[0])
+    used_units: set[int] = set()
+    used_clones: set[tuple[int, int]] = set()
+    pairs: list[tuple[Point, Point]] = []
+    for _d, ui, clone_key, u, c in candidates:
+        if ui in used_units or clone_key in used_clones:
+            continue
+        used_units.add(ui)
+        used_clones.add(clone_key)
+        pairs.append((u, c))
+    return pairs
+
+
+def _extend_single_anchor_maps(
+    result: MapCalibration,
+    pulls: list[ActualPull],
+    data: DungeonData,
+    map_bounds: dict[int, MapBounds],
+    anchors_by_map: dict[Optional[int], list[tuple[Point, Point]]],
+) -> None:
+    """Try to calibrate every sub-map that has bounds and exactly one
+    anchor (see the section comment above). Mutates ``result``: a rescued
+    sub-map gains a MapTransform (``extended=True``) and leaves
+    ``skipped``; anything that doesn't clear the gates keeps its
+    'insufficient anchors' entry."""
+    seed_scales = sorted({round(t.scale, 6) for t in result.transforms.values() if not t.extended})
+    if not seed_scales:
+        return
+    for ui_map_id, anchors in anchors_by_map.items():
+        if ui_map_id is None or ui_map_id in result.transforms or len(anchors) != 1:
+            continue
+        bounds = map_bounds.get(ui_map_id)
+        if bounds is None:
+            continue
+        units = [(npc, _map_normalized(bounds, *w)) for npc, w in _multi_clone_units(pulls, data, ui_map_id)]
+        if len(units) < EXTEND_MIN_EXTRA:
+            continue
+        anchor_world, anchor_canvas = anchors[0]
+        anchor = (_map_normalized(bounds, *anchor_world), anchor_canvas)
+
+        best: Optional[tuple[int, float, float, float, float]] = None  # (n, rms, s, tx, ty)
+        for seed in seed_scales:
+            s = seed
+            tx = anchor[1][0] - s * anchor[0][0]
+            ty = anchor[1][1] - s * anchor[0][1]
+            prev_pairs: Optional[list[tuple[Point, Point]]] = None
+            fit: Optional[tuple[float, float, float, float]] = None
+            pairs: list[tuple[Point, Point]] = []
+            for it in range(EXTEND_MAX_ITER):
+                radius = EXTEND_SEED_DIST if it == 0 else MAP_INLIER_DIST
+                pairs = _assign_nearest_clones(units, data, s, tx, ty, radius)
+                if len(pairs) < EXTEND_MIN_EXTRA:
+                    fit = None
+                    break
+                refit = _fit_scale_translation([anchor] + pairs)
+                if refit is None or refit[0] <= 0:
+                    fit = None
+                    break
+                s, tx, ty, _rms = refit
+                fit = refit
+                if prev_pairs == pairs:
+                    break
+                prev_pairs = pairs
+            if fit is None:
+                continue
+            s, tx, ty, rms = fit
+            if abs(s - seed) / seed > EXTEND_SCALE_TOLERANCE or rms > MAP_MAX_RESIDUAL:
+                continue
+            # the anchor itself has to be an inlier of the fit it seeded
+            if math.dist((s * anchor[0][0] + tx, s * anchor[0][1] + ty), anchor[1]) > MAP_INLIER_DIST:
+                continue
+            n = 1 + len(pairs)
+            if best is None or (n, -rms) > (best[0], -best[1]):
+                best = (n, rms, s, tx, ty)
+        if best is None:
+            result.skipped[ui_map_id] = (
+                f"insufficient anchors (1); {len(units)} multi-clone mobs gave no consistent fit"
+            )
+            continue
+        n, rms, s, tx, ty = best
+        result.transforms[ui_map_id] = MapTransform(
+            ui_map_id=ui_map_id, bounds=bounds, scale=s, tx=tx, ty=ty,
+            anchor_count=n, residual=rms, extended=True,
+        )
+        result.skipped.pop(ui_map_id, None)
 
 
 # --- Part 1: planned-map geometry (zero coordinate risk) -----------------
