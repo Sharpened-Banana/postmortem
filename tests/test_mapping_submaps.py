@@ -219,6 +219,77 @@ class TestCalibrateMaps:
         assert result.transforms[MAP_A].residual < 1e-6
 
 
+class TestExtendSingleAnchorSubmap:
+    """A sub-map with one boss anchor and several multi-clone packs (Altar
+    of Fangs' 2589, Murder Row's 2435 -- real, 2026-09-04) is rescued by
+    borrowing a calibrated neighbour's scale, seeding the translation from
+    the lone anchor and ICP-assigning each unit to its nearest same-npc
+    dot; it must clear the normal residual gate or stay uncalibrated."""
+
+    MULTI = 9150  # a multi-clone npc on map B
+
+    def _dungeon_and_pull(self, jitter=0.0, break_anchor=False):
+        anchors = dict(ANCHORS)
+        del anchors[9102]  # map B: only the boss anchor 9101 remains
+        dungeon = _dungeon(anchors)
+        # five dots of one npc spread over map B, each engaged at its spot
+        spots = [(1400.0, -100.0), (1450.0, -300.0), (1600.0, -420.0), (1650.0, -150.0), (1520.0, -220.0)]
+        dungeon.enemies.append(Enemy(
+            enemy_idx=99, npc_id=self.MULTI, name="Pack Mob", count=1,
+            clones=[EnemyClone(x=_canvas_for(MAP_B, *w)[0], y=_canvas_for(MAP_B, *w)[1], sublevel=1, idx=i + 1)
+                    for i, w in enumerate(spots)],
+        ))
+        dungeon.__post_init__()
+        pull = _pull(anchors)
+        if break_anchor:
+            for u in pull.units:
+                if u.npc_id == 9101:
+                    u.first_pos = (1700.0, -50.0)  # boss engaged far from its dot
+        for i, w in enumerate(spots):
+            pull.units.append(_unit(self.MULTI, (w[0] + jitter, w[1] - jitter), MAP_B, spawn=f"{i:04d}"))
+        return dungeon, pull
+
+    def test_rescues_the_single_anchor_submap(self):
+        dungeon, pull = self._dungeon_and_pull()
+        result = calibrate_maps([pull], dungeon, BOUNDS)
+        assert MAP_B in result.transforms
+        t = result.transforms[MAP_B]
+        assert t.extended is True
+        assert t.anchor_count == 6  # boss + five pack mobs
+        assert t.scale == pytest.approx(PLACEMENT[MAP_B][0], rel=1e-4)
+        assert (t.tx, t.ty) == pytest.approx(PLACEMENT[MAP_B][1:], abs=1e-3)
+        assert MAP_B not in result.skipped
+        assert result.summary()["maps"][str(MAP_B)]["extended"] is True
+        assert "extended" not in result.summary()["maps"][str(MAP_A)]
+
+    def test_tolerates_real_world_jitter(self):
+        dungeon, pull = self._dungeon_and_pull(jitter=6.0)
+        result = calibrate_maps([pull], dungeon, BOUNDS)
+        assert MAP_B in result.transforms
+        assert result.transforms[MAP_B].residual < MAP_MAX_RESIDUAL
+
+    def test_a_wandering_anchor_leaves_the_submap_uncalibrated(self):
+        dungeon, pull = self._dungeon_and_pull(break_anchor=True)
+        result = calibrate_maps([pull], dungeon, BOUNDS)
+        assert MAP_B not in result.transforms
+        assert result.skipped[MAP_B].startswith("insufficient anchors (1)")
+
+    def test_needs_a_calibrated_neighbour_to_borrow_from(self):
+        dungeon, pull = self._dungeon_and_pull()
+        pull.units = [u for u in pull.units if u.first_map_id == MAP_B]
+        result = calibrate_maps([pull], dungeon, BOUNDS)
+        assert result.ok is False
+        assert result.skipped[MAP_B] == "insufficient anchors (1)"
+
+    def test_spawning_multi_clone_mobs_are_not_used(self):
+        dungeon, pull = self._dungeon_and_pull()
+        # a sixth distinct unit of a five-dot npc: the npc spawns, so none
+        # of its units can be trusted to stand for a dot
+        pull.units.append(_unit(self.MULTI, (1500.0, -200.0), MAP_B, spawn="9999"))
+        result = calibrate_maps([pull], dungeon, BOUNDS)
+        assert MAP_B not in result.transforms
+
+
 class TestEntranceAnchor:
     def test_pairs_entrance_poi_with_earliest_early_sample(self):
         dungeon = _dungeon(ANCHORS, entrance=(120.0, -514.0))

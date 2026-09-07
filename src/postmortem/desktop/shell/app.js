@@ -298,7 +298,7 @@ async function onAnalyze() {
   const params = {
     log_path: logPath,
     run_selector: na.runSelect.value || "last",
-    pull_gap_seconds: parseFloatOr(na.pullGap.value, 5.0),
+    pull_gap_seconds: parseFloatOr(na.pullGap.value, 1.5),
     death_penalty_s: parseFloatOr(na.deathPenalty.value, 15.0),
   };
   const route = na.routeText.value.trim();
@@ -454,18 +454,19 @@ async function onPickWatchLog() {
 }
 
 async function onPickWatchLogFolder() {
-  // Not all WoW installs reuse one stable "WoWCombatLog.txt" for the log
-  // actively being written this session -- some always append a session
-  // timestamp instead (e.g. "WoWCombatLog-083126_225023.txt"), so we
-  // can't just guess the plain name and rely on Recorder.watch()'s
-  // "wait for it to appear" fallback. resolve_wow_log_path() picks the
-  // most recently modified WoWCombatLog*.txt already in the folder (the
-  // one actually being written to right now), falling back to the plain
-  // name only when nothing's been logged yet this session.
+  // The field keeps the FOLDER the user picked. Not all WoW installs reuse
+  // one stable "WoWCombatLog.txt" for the log actively being written this
+  // session -- some always append a session timestamp instead (e.g.
+  // "WoWCombatLog-083126_225023.txt") -- so start_watch() resolves the
+  // folder to whichever WoWCombatLog*.txt is newest at the moment Start is
+  // clicked (see config.resolve_watch_log_path). Showing the resolved file
+  // here instead used to freeze one session's filename into the field (and
+  // into Settings), which is exactly the stale path the resolution exists
+  // to avoid.
   hideBanner(wt.errorBanner);
   try {
     const folder = await api().pick_folder("Choose your WoW Logs folder");
-    if (folder) wt.logPath.value = await api().resolve_wow_log_path(folder);
+    if (folder) wt.logPath.value = folder;
   } catch (e) {
     showBanner(wt.errorBanner, "Could not open the folder picker: " + describeError(e));
   } finally {
@@ -865,11 +866,11 @@ async function onPickSettingsWowLog() {
 }
 
 async function onPickSettingsWowLogFolder() {
-  // See onPickWatchLogFolder's comment -- same "find the log actually
-  // being written to, don't guess a plain filename" resolution.
+  // See onPickWatchLogFolder's comment -- the saved default is the folder
+  // itself; Watch Live resolves it to the live log each time it starts.
   try {
     const folder = await api().pick_folder("Choose your WoW Logs folder");
-    if (folder) set.wowLogPath.value = await api().resolve_wow_log_path(folder);
+    if (folder) set.wowLogPath.value = folder;
   } catch (e) {
     showBanner(set.errorBanner, "Could not open the folder picker: " + describeError(e));
   }

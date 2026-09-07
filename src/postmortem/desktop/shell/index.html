@@ -160,8 +160,8 @@
           <div class="two-col">
             <div class="field">
               <label>Pull-gap seconds</label>
-              <input type="number" id="na-pull-gap" value="5" min="0" step="0.5">
-              <div class="help">Gap between combat clusters that counts as a new pull.</div>
+              <input type="number" id="na-pull-gap" value="1.5" min="0" step="0.5">
+              <div class="help">Seconds with no enemy engaged that count as a new pull. Overlapping packs always merge.</div>
             </div>
             <div class="field">
               <label>Death penalty (seconds)</label>
@@ -192,13 +192,13 @@
         <fieldset id="watch-setup-fields">
           <legend>1. Combat log</legend>
           <div class="field">
-            <label>Combat log file</label>
+            <label>Combat log file or Logs folder</label>
             <div class="field-row">
-              <input type="text" id="watch-log-path" class="log-path-display" readonly placeholder="No file selected">
+              <input type="text" id="watch-log-path" class="log-path-display" readonly placeholder="No file or folder selected">
               <button type="button" class="btn" id="watch-pick-log-btn">Choose file…</button>
               <button type="button" class="btn" id="watch-pick-log-folder-btn">Choose Logs folder…</button>
             </div>
-            <div class="help">Hasn't started this session yet? Use "Choose Logs folder…" and pick your WoW <code>Logs</code> folder instead — we'll watch for <code>WoWCombatLog.txt</code> and pick it up the moment your first key starts, even though it doesn't exist yet. Set a default in Settings to have this pre-filled.</div>
+            <div class="help">Pick your WoW <code>Logs</code> folder with "Choose Logs folder…" and we'll watch whichever combat log WoW is writing this session — the newest <code>WoWCombatLog*.txt</code> when you press Start, or the file WoW creates the moment your first key starts. Set a default in Settings to have this pre-filled.</div>
           </div>
         </fieldset>
 
@@ -372,13 +372,13 @@
         </div>
 
         <div class="field">
-          <label>Combat log file (for Watch Live)</label>
+          <label>Combat log file or Logs folder (for Watch Live)</label>
           <div class="field-row">
             <input type="text" id="set-wow-log-path" placeholder="e.g. …/World of Warcraft/_retail_/Logs/WoWCombatLog.txt">
             <button type="button" class="btn" id="set-wow-log-pick-btn">Choose file…</button>
             <button type="button" class="btn" id="set-wow-log-folder-pick-btn">Choose Logs folder…</button>
           </div>
-          <div class="help">Pre-fills Watch Live's log path so you don't have to pick it every session. If <code>WoWCombatLog.txt</code> doesn't exist yet this session, use "Choose Logs folder…" and pick the <code>Logs</code> folder itself instead.</div>
+          <div class="help">Pre-fills Watch Live's log path so you don't have to pick it every session. Prefer "Choose Logs folder…": the <code>Logs</code> folder stays valid across sessions, and Watch Live finds the log WoW is actually writing each time it starts.</div>
         </div>
 
         <div class="field">

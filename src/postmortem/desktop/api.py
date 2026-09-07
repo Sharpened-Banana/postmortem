@@ -42,6 +42,7 @@ from types import SimpleNamespace
 from typing import Any, Optional
 
 from .. import cli as _cli
+from ..analysis.pulls import DEFAULT_PULL_GAP_S
 from ..combatlog.parser import parse_file
 from ..combatlog.segmenter import segment_runs
 from ..mdt.decode import MDTDecodeError, decode_mdt_string
@@ -146,7 +147,7 @@ class DesktopAPI:
         - ``expansion_id`` (int, optional) -- only used together with
           ``raiderio_region``, for a live Raider.io static-data par-time
           fetch.
-        - ``pull_gap_seconds`` (float, default 5.0).
+        - ``pull_gap_seconds`` (float, default analysis.pulls.DEFAULT_PULL_GAP_S).
         - ``death_penalty_s`` (float, default 15.0).
         - ``full_cast_timeline`` (bool, default True) -- include the
           full per-cast timeline in the report (CLI default; the CLI's
@@ -252,7 +253,7 @@ class DesktopAPI:
             avoidable=avoidable,
             interrupt_data=interrupt_data,
             stealable=stealable,
-            pull_gap_seconds=float(params.get("pull_gap_seconds", 5.0)),
+            pull_gap_seconds=float(params.get("pull_gap_seconds", DEFAULT_PULL_GAP_S)),
             full_cast_timeline=bool(params.get("full_cast_timeline", True)),
             death_penalty_s=float(params.get("death_penalty_s", 15.0)),
             par_ms=par_ms,
@@ -482,16 +483,18 @@ class DesktopAPI:
         log_path = params.get("log_path")
         if not log_path:
             return {"ok": False, "error": "log_path is required"}
-        # Re-resolve against the *current* newest log in that folder
-        # rather than trusting the exact filename as saved: a path picked
-        # (or auto-started) in an earlier WoW session can point at a
-        # filename that will never be written to again on installs that
-        # timestamp every session's log instead of reusing a stable
-        # "WoWCombatLog.txt" -- see config.resolve_watch_log_path. This
-        # is what makes watch_auto_start actually zero-click session over
-        # session on those installs instead of silently waiting forever
-        # on a stale path (confirmed real 2026-09-01).
-        log_path = str(_config.resolve_watch_log_path(Path(log_path).parent))
+        # ``log_path`` may be the WoW ``Logs`` folder itself (what the
+        # "Choose Logs folder…" pickers store since 2026-09-06) or a log
+        # file inside it. Either way, re-resolve against the *current*
+        # newest log in that folder rather than trusting a saved filename:
+        # a path picked (or auto-started) in an earlier WoW session can
+        # point at a filename that will never be written to again on
+        # installs that timestamp every session's log instead of reusing
+        # a stable "WoWCombatLog.txt" -- see config.resolve_watch_log_path.
+        # This is what makes watch_auto_start actually zero-click session
+        # over session on those installs instead of silently waiting
+        # forever on a stale path (confirmed real 2026-09-01).
+        log_path = str(_config.resolve_watch_log_path(_config.watch_log_folder(log_path)))
 
         settings = _config.load_settings()
         site_url = params.get("site_url") or settings.get("site_url")

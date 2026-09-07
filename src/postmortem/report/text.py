@@ -116,6 +116,8 @@ def render_text(report: dict[str, Any]) -> str:
             plan = m["primary_plan_pull"]
             label = f"Pull {m['actual_pull']:>3}"
             plan_label = f"plan #{plan}" if plan is not None else "not in route"
+            if m.get("chained"):
+                plan_label += " (+ chained #" + ", #".join(str(c) for c in m["chained"]) + ")"
             flags = []
             if m["pulled_early"]:
                 flags.append("EARLY: " + _npcs(m["pulled_early"]))
@@ -123,11 +125,15 @@ def render_text(report: dict[str, Any]) -> str:
                 flags.append("LATE: " + _npcs(m["picked_up_late"]))
             if m["off_route"]:
                 flags.append("OFF-ROUTE: " + _npcs(m["off_route"]))
-            if m["untracked"]:
-                flags.append("ADDS: " + _npcs(m["untracked"]))
             marker = "  " if not flags else "! "
+            notes = []
+            if m.get("extra"):
+                notes.append("ALSO: " + _npcs(m["extra"]))
+            if m["untracked"]:
+                notes.append("ADDS: " + _npcs(m["untracked"]))
+            parts = flags + notes
             add(f"{marker}{label} -> {plan_label}"
-                + ("  |  " + "  |  ".join(flags) if flags else ""))
+                + ("  |  " + "  |  ".join(parts) if parts else ""))
         if comparison.get("missed"):
             add("  Never engaged (planned but not pulled):")
             for plan_idx, entries in comparison["missed"].items():

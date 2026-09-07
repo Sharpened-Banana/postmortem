@@ -33,6 +33,7 @@ class TestLocate:
         mdt, _ = _fake_mdt(tmp_path)
         log = tmp_path / "World of Warcraft" / "_retail_" / "Logs" / "WoWCombatLog-x.txt"
         assert mapart.mdt_dir_from_log_path(log) == mdt
+        assert mapart.mdt_dir_from_log_path(log.parent) == mdt  # the Logs folder itself
         assert mapart.mdt_dir_from_log_path(tmp_path / "elsewhere" / "log.txt") is None
 
     def test_texture_dir_resolves_the_in_game_path(self, tmp_path):

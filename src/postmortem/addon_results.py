@@ -179,8 +179,10 @@ def addon_dir_from_log_path(log_path: str | Path) -> Optional[Path]:
     quietly rather than creating stray folders.
     """
     log_path = Path(log_path)
-    # <flavor>/Logs/WoWCombatLog.txt -> parents[0]=Logs, parents[1]=<flavor>
-    logs_dir = log_path.parent
+    # <flavor>/Logs/WoWCombatLog.txt -> parents[0]=Logs, parents[1]=<flavor>;
+    # the configured path may also be the Logs folder itself (what the
+    # desktop app's "Choose Logs folder…" pickers store).
+    logs_dir = log_path if log_path.name == "Logs" else log_path.parent
     if logs_dir.name != "Logs":
         return None
     flavor_dir = logs_dir.parent
