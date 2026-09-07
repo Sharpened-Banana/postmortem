@@ -3,10 +3,12 @@ __pycache__/
 *.egg-info/
 build/*
 !build/postmortem.spec
+!build/postmortem.iss
 !build/entry.py
 !build/postmortem.icns
 !build/postmortem.ico
 dist/
+installer/
 .pytest_cache/
 mdt_data.json
 runs/

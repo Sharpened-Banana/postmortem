@@ -1,5 +1,16 @@
 # Builds the Postmortem desktop app for macOS and Windows and
-# attaches both to a GitHub Release whenever a tag is pushed.
+# attaches them to a GitHub Release whenever a tag is pushed.
+#
+# Three assets per release:
+#   Postmortem-macos.zip          -- the .app bundle
+#   Postmortem-windows.zip        -- portable onedir folder
+#   Postmortem-Setup-windows.exe  -- ordinary Windows installer
+#
+# Both Windows assets are published on purpose. The installer is the
+# normal way to install (Start Menu entry, uninstaller, no UAC prompt --
+# see build/postmortem.iss); the zip stays because desktop/updater.py's
+# in-app self-update downloads and swaps it in place, which an installer
+# can't do while the app it would overwrite is running.
 #
 # Why a build matrix instead of one job: PyInstaller is NOT a
 # cross-compiler -- it can only produce a native build for the OS it
@@ -69,12 +80,31 @@ jobs:
 
       # Windows: the spec builds a onedir (COLLECT) layout rather than
       # --onefile, so zip the whole dist/Postmortem/ folder as the
-      # single downloadable artifact.
+      # single downloadable artifact. Kept alongside the installer below
+      # -- a portable copy is genuinely useful (a USB stick, a
+      # locked-down machine) and some people would simply rather unzip.
       - name: Package Windows build
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           Compress-Archive -Path dist/Postmortem/* -DestinationPath Postmortem-windows.zip
+
+      # ...and the ordinary path: a real installer. Inno Setup is
+      # preinstalled on GitHub's windows-latest image (ISCC.exe under
+      # %ProgramFiles(x86)%\Inno Setup 6); choco covers the case where a
+      # future image drops it, rather than failing the release.
+      - name: Build Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress -y
+          }
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found after install" }
+          & $iscc "/DAppVersion=$env:GITHUB_REF_NAME" build\postmortem.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed ($LASTEXITCODE)" }
+          Move-Item installer\Postmortem-Setup.exe Postmortem-Setup-windows.exe
 
       # softprops/action-gh-release creates the tag's release on first
       # call and appends to it on subsequent calls, so both matrix jobs
@@ -86,4 +116,6 @@ jobs:
       - name: Publish release asset
         uses: softprops/action-gh-release@v2
         with:
-          files: Postmortem-*.zip
+          files: |
+            Postmortem-*.zip
+            Postmortem-Setup-*.exe
