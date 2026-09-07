@@ -186,11 +186,17 @@ convention (same as `report/html.py`), so nothing new is loaded.
 
 ## Status
 
-- Phase 1 built (`site/postmortem_site/accounts.py`, `/auth/bnet/*`,
-  `/me`, token linking, tests in `site/tests/test_accounts.py`), behind
-  the `MYTHIC_SITE_BNET_CLIENT_ID`/`_SECRET` flag. Deployment steps are in
-  `site/README.md` under "Accounts". Not yet exercised against the real
-  Blizzard endpoints — the first real sign-in is the remaining
-  verification.
-- Phase 2 (character pages, progression charts, visibility) and phase 3
-  (device-code sign-in from the app) are next.
+- **Phase 1**: deployed and verified against real Blizzard/Battle.net
+  (2026-09-07) — sign-in, `/me`, character list, and run matching by
+  character all confirmed working on the live site. One bug found and
+  fixed in the process: real combat logs write players as
+  `Name-Realm-XX` (a trailing region code), not the bare `Name-Realm` the
+  code assumed, so no account ever matched a real run until
+  `accounts.split_log_name` was fixed to strip it.
+- **Phase 2** built (`site/postmortem_site/progression.py`, `/c/{region}/
+  {realm}/{name}` + its JSON API, "also in this run" links on every run
+  page, the `run_visibility` table and owner-only unlisted toggle, tests
+  in `site/tests/test_progression.py`). Character pages work independent
+  of the accounts flag, per the decision that groupmate names link even
+  without an account. Not yet exercised on the live site.
+- **Phase 3** (device-code sign-in from the desktop app) is next.
