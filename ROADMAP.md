@@ -27,6 +27,10 @@ Next steps:
       anyone else overwrite it. Static index stays the default for local
       use — `postmortem analyze --upload <url>` opts in to the
       hosted variant per run.
+- [ ] Accounts and per-character progression history on the hosted site —
+      proposal in `ACCOUNTS_AND_PROGRESSION_PLAN.md` (Battle.net login,
+      character pages with key-level/timed-rate/DPS trends, device-code
+      sign-in from the desktop app).
 
 ## Raider.io integration
 
