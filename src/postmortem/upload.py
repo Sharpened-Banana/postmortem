@@ -14,10 +14,12 @@ attribute runs from the same install without asking for an account.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import secrets
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Optional
@@ -161,3 +163,101 @@ def upload_report(
         # A 2xx response whose body wasn't valid JSON/UTF-8, or some
         # other low-level I/O hiccup not already covered above.
         return {"ok": False, "error": str(exc)}
+
+
+# -- device-code sign-in (phase 3 of ACCOUNTS_AND_PROGRESSION_PLAN.md) ------
+#
+# Links this install's own upload token (see load_or_create_token above)
+# to a Postmortem account without the app ever touching Battle.net or a
+# password: the site mints a short code, the app shows it and opens the
+# confirmation page in the user's browser, and the app polls until the
+# person confirms it there while already signed in. Same never-raises,
+# always-a-plain-dict posture as upload_report -- every failure path
+# (network error, site has accounts disabled, bad response) is
+# ``{"ok": False, "error": "..."}`` (poll_device_link's non-ok shape is
+# ``{"status": "error", "error": "..."}``, matching the site's own
+# ``{"status": ...}`` success shape instead of adding a second key).
+
+
+def _get_json(endpoint: str, *, headers: Optional[dict[str, str]] = None, timeout: float = 15.0) -> Any:
+    request = urllib.request.Request(
+        endpoint, headers={"User-Agent": USER_AGENT, **(headers or {})},
+    )
+    with urllib.request.urlopen(request, timeout=timeout, context=https_context()) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def start_device_link(
+    url: str, *, token: Optional[str] = None, label: Optional[str] = None, timeout: float = 15.0,
+) -> dict[str, Any]:
+    """Ask ``url`` to start a device-link handshake for this install's
+    upload token. On success: ``{"ok": True, "code", "poll_token",
+    "verify_url", "expires_in"}`` -- show ``code``, open ``verify_url``
+    in the user's browser, then hand ``poll_token`` to
+    ``poll_device_link``. Never raises; every failure (network error,
+    the site has accounts disabled, an unparseable response) is
+    ``{"ok": False, "error": "..."}``."""
+    if token is None:
+        token = load_or_create_token()
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    endpoint = f"{site_base_url(url)}/api/device/start"
+    payload = json.dumps({"token_hash": token_hash, "label": label}).encode("utf-8")
+    request = urllib.request.Request(
+        endpoint, data=payload, method="POST",
+        headers={"Content-Type": "application/json", "User-Agent": USER_AGENT},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout, context=https_context()) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        try:
+            return json.loads(exc.read().decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            return {"ok": False, "error": f"HTTP {exc.code}: {exc.reason}"}
+    except urllib.error.URLError as exc:
+        return {"ok": False, "error": str(exc.reason)}
+    except (ValueError, OSError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def poll_device_link(url: str, poll_token: str, timeout: float = 15.0) -> dict[str, Any]:
+    """Check the status of a code started with ``start_device_link``.
+    Returns ``{"status": "pending"}``, ``{"status": "approved",
+    "display_name": "..."}``, or ``{"status": "expired"}`` on success;
+    ``{"status": "error", "error": "..."}`` on any request failure.
+    Never raises -- meant to be called on a short timer until the status
+    stops being ``"pending"``."""
+    endpoint = f"{site_base_url(url)}/api/device/poll?" + urllib.parse.urlencode({"poll_token": poll_token})
+    try:
+        return _get_json(endpoint, timeout=timeout)
+    except urllib.error.HTTPError as exc:
+        try:
+            body = json.loads(exc.read().decode("utf-8"))
+            if isinstance(body, dict) and "status" in body:
+                return body
+        except (ValueError, UnicodeDecodeError):
+            pass
+        return {"status": "error", "error": f"HTTP {exc.code}: {exc.reason}"}
+    except urllib.error.URLError as exc:
+        return {"status": "error", "error": str(exc.reason)}
+    except (ValueError, OSError) as exc:
+        return {"status": "error", "error": str(exc)}
+
+
+def whoami(url: str, *, token: Optional[str] = None, timeout: float = 15.0) -> dict[str, Any]:
+    """Whether this install's upload token is linked to a Postmortem
+    account. Returns ``{"linked": bool, "display_name": Optional[str]}``
+    on success, ``{"linked": False, "error": "..."}`` on any request
+    failure -- treated the same as "not linked" by callers, with the
+    error available for a diagnostic message. Never raises."""
+    if token is None:
+        token = load_or_create_token()
+    endpoint = f"{site_base_url(url)}/api/whoami"
+    try:
+        return _get_json(endpoint, headers={"X-Upload-Token": token}, timeout=timeout)
+    except urllib.error.HTTPError as exc:
+        return {"linked": False, "error": f"HTTP {exc.code}: {exc.reason}"}
+    except urllib.error.URLError as exc:
+        return {"linked": False, "error": str(exc.reason)}
+    except (ValueError, OSError) as exc:
+        return {"linked": False, "error": str(exc)}

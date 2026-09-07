@@ -749,6 +749,13 @@ function initSettings() {
   set.defaultOutputDirPickBtn = document.getElementById("set-default-output-dir-pick-btn");
   set.historyDbPath = document.getElementById("set-history-db-path");
   set.siteUrl = document.getElementById("set-site-url");
+  set.accountLinked = document.getElementById("set-account-linked");
+  set.accountName = document.getElementById("set-account-name");
+  set.accountUnlinked = document.getElementById("set-account-unlinked");
+  set.accountLinkBtn = document.getElementById("set-account-link-btn");
+  set.accountPending = document.getElementById("set-account-pending");
+  set.accountCode = document.getElementById("set-account-code");
+  set.accountOpenLink = document.getElementById("set-account-open-link");
   set.wowLogPath = document.getElementById("set-wow-log-path");
   set.wowLogPickBtn = document.getElementById("set-wow-log-pick-btn");
   set.wowLogFolderPickBtn = document.getElementById("set-wow-log-folder-pick-btn");
@@ -773,6 +780,8 @@ function initSettings() {
   set.wowLogPickBtn.addEventListener("click", onPickSettingsWowLog);
   set.wowLogFolderPickBtn.addEventListener("click", onPickSettingsWowLogFolder);
   set.saveBtn.addEventListener("click", onSaveSettings);
+  set.accountLinkBtn.addEventListener("click", onStartAccountLink);
+  refreshAccountStatus();
 
   set.defaultRoutesList = document.getElementById("set-default-routes-list");
   set.defaultRoutesEmpty = document.getElementById("set-default-routes-empty");
@@ -1010,6 +1019,93 @@ async function onSaveSettings() {
     setBusy(set.busyOverlay, false);
     set.saveBtn.disabled = false;
   }
+}
+
+// -- account linking (phase 3): device-code sign-in, no Battle.net or
+// password ever touches the app -- see api.py's start_device_link/
+// poll_device_link and the site's /link confirmation page.
+
+let accountPollTimer = null;
+
+function stopAccountPoll() {
+  if (accountPollTimer) {
+    clearTimeout(accountPollTimer);
+    accountPollTimer = null;
+  }
+}
+
+function showAccountLinked(displayName) {
+  stopAccountPoll();
+  set.accountPending.hidden = true;
+  set.accountUnlinked.hidden = true;
+  set.accountName.textContent = displayName || "your account";
+  set.accountLinked.hidden = false;
+}
+
+function showAccountUnlinked() {
+  stopAccountPoll();
+  set.accountLinked.hidden = true;
+  set.accountPending.hidden = true;
+  set.accountUnlinked.hidden = false;
+}
+
+async function refreshAccountStatus() {
+  try {
+    const result = await api().account_status();
+    if (result && result.ok && result.linked) {
+      showAccountLinked(result.display_name);
+    } else {
+      showAccountUnlinked();
+    }
+  } catch (e) {
+    // best-effort on load -- leave the unlinked/default state showing
+  }
+}
+
+async function onStartAccountLink() {
+  hideBanner(set.errorBanner);
+  set.accountLinkBtn.disabled = true;
+  try {
+    const result = await api().start_device_link();
+    if (!result || !result.ok) {
+      showBanner(set.errorBanner, (result && result.error) || "Could not start linking.");
+      return;
+    }
+    set.accountCode.textContent = result.code;
+    set.accountOpenLink.onclick = (e) => { e.preventDefault(); api().open_url(result.verify_url); };
+    set.accountUnlinked.hidden = true;
+    set.accountPending.hidden = false;
+    api().open_url(result.verify_url);
+    pollAccountLink(result.poll_token, Date.now() + result.expires_in * 1000);
+  } catch (e) {
+    showBanner(set.errorBanner, "Unexpected error while starting: " + describeError(e));
+  } finally {
+    set.accountLinkBtn.disabled = false;
+  }
+}
+
+async function pollAccountLink(pollToken, deadline) {
+  if (Date.now() > deadline) {
+    showBanner(set.errorBanner, "That code expired. Click the button to get a new one.");
+    showAccountUnlinked();
+    return;
+  }
+  try {
+    const result = await api().poll_device_link({ poll_token: pollToken });
+    if (result && result.status === "approved") {
+      showAccountLinked(result.display_name);
+      return;
+    }
+    if (result && (result.status === "expired")) {
+      showBanner(set.errorBanner, "That code expired. Click the button to get a new one.");
+      showAccountUnlinked();
+      return;
+    }
+    // "pending" (or a transient "error" -- keep trying until it expires)
+  } catch (e) {
+    // transient network hiccup -- keep polling until the deadline
+  }
+  accountPollTimer = setTimeout(() => pollAccountLink(pollToken, deadline), 3000);
 }
 
 async function onPickExtractOutputFolder() {

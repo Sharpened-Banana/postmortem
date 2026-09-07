@@ -1468,3 +1468,87 @@ class TestAutoUpdate:
 
         failed = self._wait_for(events, "failed")
         assert "disk full" in failed["error"]
+
+
+class TestAccountLinking:
+    """start_device_link/poll_device_link/account_status/open_url (phase 3
+    of ACCOUNTS_AND_PROGRESSION_PLAN.md) -- device-code sign-in that never
+    touches Battle.net or a password from inside the app. The site calls
+    themselves are postmortem.upload's job (see test_upload.py); these
+    just check api.py wires site_url from settings and never raises."""
+
+    def test_start_device_link_needs_a_site_url(self, api):
+        result = api.start_device_link()
+        assert result == {"ok": False, "error": "no site URL configured -- set one in Settings first"}
+
+    def test_start_device_link_uses_the_saved_site_url_and_a_host_label(self, api, monkeypatch):
+        from postmortem import upload as _upload
+
+        api.save_settings({"site_url": "https://example.test"})
+        seen = {}
+
+        def fake(url, *, label=None):
+            seen["url"] = url
+            seen["label"] = label
+            return {"ok": True, "code": "ABCD-1234", "poll_token": "poll-1",
+                    "verify_url": "https://example.test/link?code=ABCD-1234", "expires_in": 600}
+
+        monkeypatch.setattr(_upload, "start_device_link", fake)
+        result = api.start_device_link()
+        assert result["ok"] is True and result["code"] == "ABCD-1234"
+        assert seen["url"] == "https://example.test"
+        assert "desktop app on" in seen["label"]
+
+    def test_start_device_link_param_site_url_overrides_the_saved_one(self, api, monkeypatch):
+        from postmortem import upload as _upload
+
+        api.save_settings({"site_url": "https://saved.test"})
+        seen = {}
+        monkeypatch.setattr(_upload, "start_device_link",
+                             lambda url, **kw: seen.setdefault("url", url) or {"ok": True})
+        api.start_device_link({"site_url": "https://override.test"})
+        assert seen["url"] == "https://override.test"
+
+    def test_poll_device_link_requires_a_poll_token(self, api):
+        assert api.poll_device_link({}) == {"status": "error", "error": "poll_token is required"}
+
+    def test_poll_device_link_requires_a_site_url(self, api):
+        result = api.poll_device_link({"poll_token": "poll-1"})
+        assert result == {"status": "error", "error": "no site URL configured"}
+
+    def test_poll_device_link_passes_through_the_sites_response(self, api, monkeypatch):
+        from postmortem import upload as _upload
+
+        api.save_settings({"site_url": "https://example.test"})
+        monkeypatch.setattr(
+            _upload, "poll_device_link",
+            lambda url, poll_token: {"status": "approved", "display_name": "Zebra#1234"},
+        )
+        result = api.poll_device_link({"poll_token": "poll-1"})
+        assert result == {"status": "approved", "display_name": "Zebra#1234"}
+
+    def test_account_status_with_no_site_url_is_simply_not_linked(self, api):
+        assert api.account_status() == {"ok": True, "linked": False}
+
+    def test_account_status_reflects_whoami(self, api, monkeypatch):
+        from postmortem import upload as _upload
+
+        api.save_settings({"site_url": "https://example.test"})
+        monkeypatch.setattr(
+            _upload, "whoami", lambda url: {"linked": True, "display_name": "Zebra#1234"},
+        )
+        assert api.account_status() == {
+            "ok": True, "linked": True, "display_name": "Zebra#1234",
+        }
+
+    def test_open_url_rejects_non_http_schemes(self, api):
+        result = api.open_url("file:///etc/passwd")
+        assert result == {"ok": False, "error": "only http(s) URLs may be opened"}
+
+    def test_open_url_opens_http_and_https(self, api, monkeypatch):
+        import webbrowser
+        seen = []
+        monkeypatch.setattr(webbrowser, "open", lambda url: seen.append(url))
+        assert api.open_url("https://example.test/link?code=X") == {"ok": True}
+        assert api.open_url("http://example.test") == {"ok": True}
+        assert seen == ["https://example.test/link?code=X", "http://example.test"]

@@ -4,6 +4,7 @@ upload-token file and POSTing a report to a public postmortem site.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import ssl
@@ -271,3 +272,121 @@ class TestCLIUploadFlag:
 
         monkeypatch.setattr("postmortem.upload.upload_report", boom)
         assert main(["analyze", str(log_file)]) == 0
+
+
+class TestStartDeviceLink:
+    """start_device_link (phase 3): begins a device-code link to a
+    Postmortem account -- posts this install's token *hash*, never the
+    raw token, and never raises."""
+
+    def test_success_returns_the_sites_response(self, monkeypatch):
+        response_body = {"ok": True, "code": "ABCD-1234", "poll_token": "poll-1",
+                          "verify_url": "https://example.com/link?code=ABCD-1234",
+                          "expires_in": 600}
+
+        def fake_urlopen(request, timeout=None, context=None):
+            assert request.get_header("Content-type") == "application/json"
+            body = json.loads(request.data.decode("utf-8"))
+            assert body["token_hash"] == hashlib.sha256(b"tok-123").hexdigest()
+            assert body["label"] == "my label"
+            return _FakeHTTPResponse(json.dumps(response_body).encode("utf-8"))
+
+        monkeypatch.setattr(upload.urllib.request, "urlopen", fake_urlopen)
+        result = upload.start_device_link(
+            "https://example.com", token="tok-123", label="my label",
+        )
+        assert result == response_body
+
+    def test_default_token_loads_or_creates_one(self, monkeypatch, isolated_config_dir):
+        seen = {}
+
+        def fake_urlopen(request, timeout=None, context=None):
+            seen["hash"] = json.loads(request.data.decode("utf-8"))["token_hash"]
+            return _FakeHTTPResponse(json.dumps({"ok": True}).encode())
+
+        monkeypatch.setattr(upload.urllib.request, "urlopen", fake_urlopen)
+        upload.start_device_link("https://example.com")
+        token = upload.load_or_create_token()
+        assert seen["hash"] == hashlib.sha256(token.encode()).hexdigest()
+
+    def test_accounts_disabled_404_comes_back_as_the_sites_error_body(self, monkeypatch):
+        error_body = {"error": "accounts are not enabled on this site"}
+
+        def fake_urlopen(request, timeout=None, context=None):
+            raise urllib.error.HTTPError(
+                request.full_url, 404, "Not Found", hdrs=None,
+                fp=io.BytesIO(json.dumps(error_body).encode("utf-8")),
+            )
+
+        monkeypatch.setattr(upload.urllib.request, "urlopen", fake_urlopen)
+        result = upload.start_device_link("https://example.com", token="tok")
+        assert result == error_body
+
+    def test_network_failure_never_raises(self, monkeypatch):
+        def fake_urlopen(request, timeout=None, context=None):
+            raise urllib.error.URLError("no route to host")
+
+        monkeypatch.setattr(upload.urllib.request, "urlopen", fake_urlopen)
+        result = upload.start_device_link("https://example.com", token="tok")
+        assert result == {"ok": False, "error": "no route to host"}
+
+
+class TestPollDeviceLink:
+    def test_pending_and_approved_pass_through(self, monkeypatch):
+        def fake_urlopen(request, timeout=None, context=None):
+            assert "poll_token=poll-1" in request.full_url
+            return _FakeHTTPResponse(json.dumps(
+                {"status": "approved", "display_name": "Zebra#1234"}
+            ).encode())
+
+        monkeypatch.setattr(upload.urllib.request, "urlopen", fake_urlopen)
+        result = upload.poll_device_link("https://example.com", "poll-1")
+        assert result == {"status": "approved", "display_name": "Zebra#1234"}
+
+    def test_expired_404_body_passes_through(self, monkeypatch):
+        def fake_urlopen(request, timeout=None, context=None):
+            raise urllib.error.HTTPError(
+                request.full_url, 404, "Not Found", hdrs=None,
+                fp=io.BytesIO(json.dumps({"status": "expired"}).encode()),
+            )
+
+        monkeypatch.setattr(upload.urllib.request, "urlopen", fake_urlopen)
+        result = upload.poll_device_link("https://example.com", "poll-1")
+        assert result == {"status": "expired"}
+
+    def test_network_failure_is_a_status_error_not_an_exception(self, monkeypatch):
+        def fake_urlopen(request, timeout=None, context=None):
+            raise urllib.error.URLError("timed out")
+
+        monkeypatch.setattr(upload.urllib.request, "urlopen", fake_urlopen)
+        result = upload.poll_device_link("https://example.com", "poll-1")
+        assert result == {"status": "error", "error": "timed out"}
+
+
+class TestWhoami:
+    def test_linked_account_passes_through(self, monkeypatch):
+        def fake_urlopen(request, timeout=None, context=None):
+            assert request.get_header("X-upload-token") == "tok-123"
+            return _FakeHTTPResponse(
+                json.dumps({"linked": True, "display_name": "Zebra#1234"}).encode()
+            )
+
+        monkeypatch.setattr(upload.urllib.request, "urlopen", fake_urlopen)
+        result = upload.whoami("https://example.com", token="tok-123")
+        assert result == {"linked": True, "display_name": "Zebra#1234"}
+
+    def test_not_linked(self, monkeypatch):
+        def fake_urlopen(request, timeout=None, context=None):
+            return _FakeHTTPResponse(json.dumps({"linked": False}).encode())
+
+        monkeypatch.setattr(upload.urllib.request, "urlopen", fake_urlopen)
+        assert upload.whoami("https://example.com", token="tok") == {"linked": False}
+
+    def test_network_failure_is_treated_as_not_linked(self, monkeypatch):
+        def fake_urlopen(request, timeout=None, context=None):
+            raise urllib.error.URLError("nope")
+
+        monkeypatch.setattr(upload.urllib.request, "urlopen", fake_urlopen)
+        result = upload.whoami("https://example.com", token="tok")
+        assert result["linked"] is False
+        assert "nope" in result["error"]

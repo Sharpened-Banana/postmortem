@@ -1036,6 +1036,92 @@ class DesktopAPI:
         from ._version import VERSION
         return {"ok": True, "version": VERSION}
 
+    # -- account linking (phase 3 of ACCOUNTS_AND_PROGRESSION_PLAN.md) ------
+    #
+    # The app never touches Battle.net or a password: it asks the site for
+    # a short code (start_device_link), shows it and opens the site's own
+    # confirmation page in the user's browser, then polls
+    # (poll_device_link) until they confirm it there while already signed
+    # in. account_status is the passive check (e.g. on Settings load) for
+    # whether that has already happened.
+
+    def open_url(self, url: str) -> dict:
+        """Open ``url`` in the system's default browser (used to send the
+        user to the site's device-link confirmation page -- a pywebview
+        window is not a normal browser tab, so a plain link/JS navigation
+        would hijack the app's own UI instead). ``http(s)://`` only, to
+        avoid the bridge being used to launch an arbitrary local scheme.
+        Returns ``{"ok": True}`` or ``{"ok": False, "error": "..."}``.
+        Never raises.
+        """
+        if not isinstance(url, str) or not url.lower().startswith(("http://", "https://")):
+            return {"ok": False, "error": "only http(s) URLs may be opened"}
+        try:
+            import webbrowser
+            webbrowser.open(url)
+            return {"ok": True}
+        except Exception as exc:  # pragma: no cover -- platform browser launch
+            return {"ok": False, "error": str(exc)}
+
+    def start_device_link(self, params: Optional[dict] = None) -> dict:
+        """Begin linking this install's upload token to a Postmortem
+        account. ``params``: ``site_url`` (str, optional -- defaults to
+        the saved Settings value).
+
+        Returns ``{"ok": True, "code", "verify_url", "poll_token",
+        "expires_in"}`` -- show ``code``, open ``verify_url``, then poll
+        with ``poll_device_link(poll_token)`` -- or ``{"ok": False,
+        "error": "..."}`` if no site URL is configured or the site
+        doesn't answer. Never raises.
+        """
+        settings = _config.load_settings()
+        site_url = ((params or {}).get("site_url") or settings.get("site_url"))
+        if not site_url:
+            return {"ok": False, "error": "no site URL configured -- set one in Settings first"}
+        import socket
+
+        from .. import upload as _upload
+        label = f"desktop app on {socket.gethostname()}"
+        return _upload.start_device_link(site_url, label=label)
+
+    def poll_device_link(self, params: dict) -> dict:
+        """Check a code started with ``start_device_link``. ``params``:
+        ``poll_token`` (str, required), ``site_url`` (str, optional).
+
+        Returns ``{"status": "pending"}``, ``{"status": "approved",
+        "display_name": "..."}``, ``{"status": "expired"}``, or
+        ``{"status": "error", "error": "..."}``. Never raises -- meant
+        to be polled on a short timer (e.g. every few seconds) until the
+        status stops being ``"pending"``.
+        """
+        params = params or {}
+        poll_token = params.get("poll_token")
+        if not poll_token:
+            return {"status": "error", "error": "poll_token is required"}
+        site_url = params.get("site_url") or _config.load_settings().get("site_url")
+        if not site_url:
+            return {"status": "error", "error": "no site URL configured"}
+        from .. import upload as _upload
+        return _upload.poll_device_link(site_url, poll_token)
+
+    def account_status(self) -> dict:
+        """Whether this install's upload token is already linked to a
+        Postmortem account (e.g. shown once in Settings on load).
+
+        Returns ``{"ok": True, "linked": bool, "display_name":
+        Optional[str]}``. With no site URL configured yet, this is
+        always ``{"ok": True, "linked": False}`` rather than an error --
+        "no account linked" is simply true in that case, same as before
+        any site existed. Never raises.
+        """
+        site_url = _config.load_settings().get("site_url")
+        if not site_url:
+            return {"ok": True, "linked": False}
+        from .. import upload as _upload
+        result = _upload.whoami(site_url)
+        return {"ok": True, "linked": bool(result.get("linked")),
+                "display_name": result.get("display_name")}
+
     def get_settings(self) -> dict:
         """Return persisted desktop settings (see ``desktop/config.py``),
         merged with defaults for any field never saved. Always succeeds

@@ -199,4 +199,13 @@ convention (same as `report/html.py`), so nothing new is loaded.
   in `site/tests/test_progression.py`). Character pages work independent
   of the accounts flag, per the decision that groupmate names link even
   without an account. Not yet exercised on the live site.
-- **Phase 3** (device-code sign-in from the desktop app) is next.
+- **Phase 3** built: device-code sign-in end to end. Site side —
+  `POST /api/device/start`, `GET /link` (+ `/link/confirm`),
+  `GET /api/device/poll`, `GET /api/whoami`, a `device_links` table, and
+  `next=` redirect preservation through Battle.net sign-in so `/link`
+  survives a login round-trip. App side — `DesktopAPI.start_device_link/
+  poll_device_link/account_status/open_url` (`postmortem.upload`'s
+  stdlib-only client functions), and a Settings → "Postmortem account"
+  section that shows the code, opens the confirmation page, polls, and
+  shows "Linked as ..." once done. Not yet exercised against the live
+  site or a packaged app build.

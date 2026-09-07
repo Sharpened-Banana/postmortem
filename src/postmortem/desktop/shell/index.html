@@ -372,6 +372,19 @@
         </div>
 
         <div class="field">
+          <label>Postmortem account</label>
+          <div id="set-account-linked" hidden>Linked as <strong id="set-account-name"></strong></div>
+          <div id="set-account-unlinked">
+            <button type="button" class="btn" id="set-account-link-btn">Link this app to your account</button>
+          </div>
+          <div id="set-account-pending" class="banner banner-hint" hidden>
+            Enter this code on the page that opened in your browser: <code id="set-account-code"></code>
+            <div class="dim" style="margin-top:6px;">Didn't open? <a href="#" id="set-account-open-link">Open it manually</a>.</div>
+          </div>
+          <div class="help">Links this app's uploads (past and future) to a Postmortem account so they show up on your character pages. Needs the site URL above set first.</div>
+        </div>
+
+        <div class="field">
           <label>Combat log file or Logs folder (for Watch Live)</label>
           <div class="field-row">
             <input type="text" id="set-wow-log-path" placeholder="e.g. …/World of Warcraft/_retail_/Logs/WoWCombatLog.txt">
