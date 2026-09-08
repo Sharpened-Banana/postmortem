@@ -49,3 +49,22 @@ class TestLoadDotnet:
     def test_the_explanation_points_at_the_desktop_runtime(self):
         assert "Desktop Runtime" in app.DOTNET_MESSAGE
         assert app.DOTNET_DOWNLOAD_URL.startswith("https://dotnet.microsoft.com/")
+
+
+class TestPreloadAssemblies:
+    def test_loads_what_exists_and_skips_what_does_not(self):
+        class FakeClr:
+            missing = {"Microsoft.Win32.Registry", "System.Drawing.Common"}
+            def __init__(self): self.refs = []
+            def AddReference(self, name):
+                if name in self.missing:
+                    raise Exception(f"Could not load file or assembly '{name}'")
+                self.refs.append(name)
+
+        clr = FakeClr()
+        loaded = app.preload_desktop_assemblies(clr)
+        assert "Microsoft.Win32.SystemEvents" in loaded  # the one that bit on 2026-09-08
+        assert "System.Windows.Forms" in loaded
+        assert not (set(loaded) & clr.missing)
+        assert loaded == clr.refs
+
