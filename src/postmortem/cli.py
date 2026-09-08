@@ -25,6 +25,7 @@ from .mdt.extract import LuaLiteralParser, LuaParseError, _find_assignment, writ
 from .mdt.route import Route
 from .recorder import Recorder
 from .report.html import render_html
+from .console import make_streams_safe, safe_print
 from .report.text import render_text
 
 
@@ -1036,9 +1037,11 @@ def _write_recorded_reports(
                                     encoding="utf-8")
     Path(f"{base}.html").write_text(render_html(report), encoding="utf-8")
     write_chapter_files(report, run.started_at, base)
-    print(render_text(report))
-    print(f"wrote {base}.json / {base}.html / {base}.chapters.json / {base}.vtt",
-          file=sys.stderr)
+    # never let a console that can't show "≈" fail a run whose reports are
+    # already on disk (see postmortem.console)
+    safe_print(render_text(report))
+    safe_print(f"wrote {base}.json / {base}.html / {base}.chapters.json / {base}.vtt",
+               file=sys.stderr)
     return report
 
 
@@ -1451,6 +1454,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    make_streams_safe()
     parser = build_parser()
     args = parser.parse_args(argv)
     return args.func(args)

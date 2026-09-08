@@ -249,6 +249,9 @@ def main() -> None:
     style.css/app.js alongside it) -- no ``http_server=True`` or manual
     URI conversion needed.
     """
+    from ..console import make_streams_safe
+
+    make_streams_safe()  # a run's report text must never fail on a cp1252 console
     if sys.platform == "win32":
         _load_dotnet_or_explain()
 
