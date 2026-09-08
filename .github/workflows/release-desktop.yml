@@ -65,6 +65,14 @@ jobs:
       - name: Install package + build tooling
         run: pip install ".[dev,desktop]"
 
+      # Windows: pywebview's folder picker reflects on .NET Framework
+      # internals at import time and kills the whole window backend
+      # under modern .NET -- see build/patch_pywebview.py. Patched in
+      # site-packages before PyInstaller freezes it.
+      - name: Patch pywebview for modern .NET
+        if: runner.os == 'Windows'
+        run: python build/patch_pywebview.py
+
       - name: Build with PyInstaller
         run: pyinstaller build/postmortem.spec
 
