@@ -485,16 +485,19 @@ class TestEnemyCastSummary:
         pulls = detect_pulls(run_segment.events)
         return compute_stats(run_segment.events, pulls, dungeon)
 
-    def test_no_interrupt_data_matches_old_heuristic(self, stats):
-        """Regression guard: interrupt_data=None (or omitted) must produce
-        byte-for-byte the same spells/kick_efficiency_pct the pre-existing
-        heuristic produced, plus only the new interruptible: None field on
-        every spell. This is the path every existing caller that doesn't
-        pass --interrupt-data still takes."""
+    def test_no_interrupt_data_counts_every_player_kick(self, stats):
+        """interrupt_data=None (or omitted): the path every caller that
+        doesn't pass --interrupt-data takes.
+
+        Every kick the players table counts must appear here too -- the
+        players table is the source of truth for kicks (2026-09-08). The
+        fixture has two kicks on casts the log never gave a
+        SPELL_CAST_START for (Mystery Bolt, Nasty Hex); before this they
+        bumped the kicker's count but vanished from this table, so the
+        two disagreed (3 here vs 5 there)."""
         result = _enemy_cast_summary(stats)
-        assert result["kick_efficiency_pct"] == 42.9
         by_name = {s["name"]: s for s in result["spells"]}
-        assert len(by_name) == 3
+        assert len(by_name) == 5
         assert by_name["Dark Bolt"] == {
             "spell_id": 1216538, "name": "Dark Bolt", "kicked": 1,
             "got_through": 2, "expired": 0, "interruptible": None,
@@ -510,6 +513,41 @@ class TestEnemyCastSummary:
             "got_through": 1, "expired": 1, "interruptible": None,
             "stealable": False,
         }
+        # the two untracked kicks, named from the SPELL_INTERRUPT event itself
+        assert by_name["Mystery Bolt"]["kicked"] == 1 and by_name["Mystery Bolt"]["got_through"] == 0
+        assert by_name["Nasty Hex"]["kicked"] == 1 and by_name["Nasty Hex"]["got_through"] == 0
+        # 5 kicked / (5 kicked + 4 got through)
+        assert result["kick_efficiency_pct"] == 55.6
+        assert result["kicked_total"] == 5
+
+    def test_kicked_total_matches_players_table(self, stats):
+        """The invariant the report shows: kicks in the enemy-casts table
+        sum to the kicks in the players table."""
+        result = _enemy_cast_summary(stats)
+        players_total = sum(p.interrupts for p in stats.players.values())
+        assert players_total == 5
+        assert result["kicked_total"] == players_total
+        assert sum(s["kicked"] for s in result["spells"]) == players_total
+
+    def test_kicked_spell_survives_uninterruptible_lists(self):
+        """A spell that was actually kicked this run is shown even if a
+        list claims it can't be -- the log is the evidence, and hiding it
+        would make the two tables disagree again."""
+        from postmortem.analysis.interruptibility import KNOWN_UNINTERRUPTIBLE_SPELL_IDS
+        affix = next(iter(KNOWN_UNINTERRUPTIBLE_SPELL_IDS))
+        stats = RunStats(enemy_cast_outcomes={
+            affix: {"name": "Affix Mechanic", "kicked": 1, "landed": 3, "expired": 0},
+            222: {"name": "Listed Uninterruptible", "kicked": 2, "landed": 0, "expired": 0},
+            333: {"name": "Listed Uninterruptible Never Kicked", "kicked": 0, "landed": 4, "expired": 0},
+        })
+        data = InterruptibilityData(spells={
+            222: {"name": "Listed Uninterruptible", "interruptible": False},
+            333: {"name": "Listed Uninterruptible Never Kicked", "interruptible": False},
+        })
+        result = _enemy_cast_summary(stats, data)
+        names = {s["name"] for s in result["spells"]}
+        assert names == {"Affix Mechanic", "Listed Uninterruptible"}
+        assert result["kicked_total"] == 3
 
     def test_confirmed_uninterruptible_spell_excluded(self):
         """known is False (addon confirmed genuinely uninterruptible): the
@@ -593,7 +631,7 @@ class TestEnemyCastSummary:
         assert by_name["Dark Bolt"]["kicked"] == 1
         # unchanged from the interrupt_data=None case, since none of this
         # run's spells are in the loaded (unrelated) interrupt_data
-        assert result["kick_efficiency_pct"] == 42.9
+        assert result["kick_efficiency_pct"] == 55.6
 
 
 class TestChanneledEnemyCasts:
@@ -902,7 +940,7 @@ class TestAnalyzeRun:
         assert hex_obs["avg_per_cast"] == 0
         assert hex_obs["debuff_applications"] == 1
         # new run-level sections
-        assert payload["enemy_casts"]["kick_efficiency_pct"] == 42.9
+        assert payload["enemy_casts"]["kick_efficiency_pct"] == 55.6
         through = {s["name"]: s for s in payload["enemy_casts"]["spells"]}
         assert through["Dark Bolt"]["got_through"] == 2
         # no --interrupt-data passed to analyze_run(): every spell falls
@@ -969,7 +1007,7 @@ class TestAnalyzeRun:
         assert "~45.0k dmg (45.0k of it DoT) prevented" in text
         assert "a debuff application (seen 1x elsewhere, no damage)" in text
         assert "never landed" in text  # Mystery Bolt kick has no estimate
-        assert "Kick efficiency: 42.9%" in text
+        assert "Kick efficiency: 55.6%" in text
         assert "ENEMY CASTS THAT GOT THROUGH" in text
         assert "Death cost: 1 deaths" in text
         assert "CONSUMABLES" in text

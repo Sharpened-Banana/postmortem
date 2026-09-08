@@ -430,14 +430,18 @@ function pullsTable() {
 }
 
 function enemyCasts() {
-  const spells = ((R.enemy_casts||{}).spells||[]).filter(s => s.got_through + s.kicked > 0);
-  if (!spells.length) return "";
-  spells.sort((a, b) => b.got_through - a.got_through);
+  const all = ((R.enemy_casts||{}).spells||[]).filter(s => s.got_through + s.kicked > 0);
+  if (!all.length) return "";
+  all.sort((a, b) => (b.got_through + b.kicked) - (a.got_through + a.kicked) || b.got_through - a.got_through);
+  // Top 15 by volume, plus EVERY spell that was kicked at all -- so the
+  // kicked column always sums to the players table's kick counts.
+  const spells = all.filter((s, i) => i < 15 || s.kicked > 0);
+  const kickedTotal = spells.reduce((n, s) => n + s.kicked, 0);
   const anyStealable = spells.some(s => s.stealable);
-  return `<h2>Enemy casts — kicked vs got through</h2><div class="wrap"><table>
+  return `<h2>Enemy casts — kicked vs got through <span class="dim" style="font-weight:400;font-size:13px">(${kickedTotal} kick${kickedTotal === 1 ? "" : "s"} total)</span></h2><div class="wrap"><table>
     <tr><th>Spell</th><th class="num">Got through</th><th class="num">Kicked</th>
     <th class="num">Died mid-cast</th><th>Kick rate</th></tr>
-    ${spells.slice(0, 15).map(s => {
+    ${spells.map(s => {
       const total = s.got_through + s.kicked;
       const pct = total ? Math.round(100 * s.kicked / total) : 0;
       const cls = pct >= 70 ? "ok" : pct >= 30 ? "dev-early" : "dev-off";
