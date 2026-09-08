@@ -1,0 +1,95 @@
+# Keeps this repo and the tracker site (the private postmortem-site
+# repo, which installs this package and runs its analysis pipeline)
+# from going stale on each other.
+#
+# Every push and PR runs the analyzer's own suite, then -- when the
+# SITE_REPO_TOKEN secret is set -- checks out the site and runs *its*
+# suite against this exact checkout. The site's tests build their
+# fixture reports through the real analyze_run() pipeline and post them
+# through the real upload endpoint, so a change here that breaks the
+# site's contract (report shape, upload handshake, device sign-in) fails
+# right here, before it's merged. On a push to main it also pings the
+# site repo (repository_dispatch) so the site re-tests against the new
+# main straight away rather than waiting for its daily run.
+#
+# SITE_REPO_TOKEN: a fine-grained personal access token scoped to the
+# postmortem-site repo with Contents: read & write (write is what
+# repository_dispatch needs). Set it with
+#   gh secret set SITE_REPO_TOKEN -R Sharpened-Banana/postmortem
+# Without it the site job is skipped, not failed -- pull requests from
+# forks never see the secret, and that's fine: the site repo's own daily
+# run still catches anything that lands on main.
+
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  analyzer:
+    name: Analyzer tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e . pytest
+      - name: Test
+        run: python -m pytest tests -q
+
+  site:
+    name: Site tests against this checkout
+    needs: analyzer
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for the site repo token
+        id: tok
+        env:
+          TOKEN: ${{ secrets.SITE_REPO_TOKEN }}
+        run: |
+          if [ -n "$TOKEN" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"
+          else echo "ok=false" >> "$GITHUB_OUTPUT"; echo "::notice::SITE_REPO_TOKEN not set; skipping the site's tests"; fi
+      - uses: actions/checkout@v4
+        if: steps.tok.outputs.ok == 'true'
+        with:
+          path: postmortem
+      - uses: actions/checkout@v4
+        if: steps.tok.outputs.ok == 'true'
+        with:
+          repository: Sharpened-Banana/postmortem-site
+          token: ${{ secrets.SITE_REPO_TOKEN }}
+          path: postmortem-site
+      - uses: actions/setup-python@v5
+        if: steps.tok.outputs.ok == 'true'
+        with:
+          python-version: "3.12"
+      - name: Install
+        if: steps.tok.outputs.ok == 'true'
+        run: |
+          pip install -e postmortem pytest
+          pip install -r postmortem-site/requirements.txt
+      - name: Site tests
+        if: steps.tok.outputs.ok == 'true'
+        env:
+          POSTMORTEM_REPO: ${{ github.workspace }}/postmortem
+        run: python -m pytest postmortem-site/tests -q
+
+  notify-site:
+    name: Tell the site repo main moved
+    needs: [analyzer, site]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: repository_dispatch -> postmortem-site
+        env:
+          GH_TOKEN: ${{ secrets.SITE_REPO_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then echo "::notice::SITE_REPO_TOKEN not set; the site will re-test on its daily schedule"; exit 0; fi
+          gh api repos/Sharpened-Banana/postmortem-site/dispatches \
+            -f event_type=analyzer-updated \
+            -f "client_payload[sha]=${GITHUB_SHA}"

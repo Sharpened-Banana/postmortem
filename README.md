@@ -287,4 +287,7 @@ page — a plain file picker in the browser, no install of anything at
 all. It runs this same analysis pipeline (`combatlog`/`analysis`) on the
 server. The site's own source is a separate, private repository; this
 package, the desktop app and the addon only ever talk to it over its
-public HTTP endpoints (see `src/postmortem/upload.py`).
+public HTTP endpoints (see `src/postmortem/upload.py`). CI keeps the two
+in step: every change here also runs the site's test suite against it
+(`.github/workflows/tests.yml`), and the site re-tests against this
+repo's `main` daily and whenever it moves.
