@@ -1,0 +1,121 @@
+{
+ "spells": {
+  "1307571": {
+   "name": "Envenom",
+   "school": "poison",
+   "note": "poison dispel removes the DoT",
+   "seen_dispelled": true
+  },
+  "1294569": {
+   "name": "Paralyzing Shots",
+   "school": "magic",
+   "note": "magic dispel or freedom effect",
+   "seen_dispelled": true
+  },
+  "1300894": {
+   "name": "Ritual Venom",
+   "school": "disease",
+   "note": "clear stacks before expiry",
+   "seen_dispelled": false
+  },
+  "1238687": {
+   "name": "Feast of Misery",
+   "school": "curse",
+   "note": "curse dispel as needed",
+   "seen_dispelled": false
+  },
+  "1241464": {
+   "name": "Glacial Tomb",
+   "school": "magic",
+   "note": "destroy the roots or freedom effect",
+   "seen_dispelled": false
+  },
+  "1235549": {
+   "name": "Glacial Torment",
+   "school": "magic",
+   "note": "healers dispel the DoT quickly",
+   "seen_dispelled": true
+  },
+  "1306763": {
+   "name": "Serpent Strike",
+   "school": "poison",
+   "note": "poison dispel or freedom on the DoT",
+   "seen_dispelled": true
+  },
+  "1298304": {
+   "name": "Dark Revelation",
+   "school": "magic",
+   "note": "purge or focus the minions",
+   "seen_dispelled": false
+  },
+  "1305234": {
+   "name": "Cold Claws",
+   "school": "magic",
+   "note": "tank stacks; dispel before 20",
+   "seen_dispelled": true
+  },
+  "381515": {
+   "name": "Stormslam",
+   "school": "magic",
+   "note": "magic debuff increasing damage taken",
+   "seen_dispelled": true
+  },
+  "1238084": {
+   "name": "Spore Spines",
+   "school": "magic",
+   "note": "magic debuff; freedom or dispel",
+   "seen_dispelled": true
+  },
+  "1239825": {
+   "name": "Lightfire",
+   "school": "magic",
+   "note": "debuffs three players",
+   "seen_dispelled": false
+  },
+  "1250937": {
+   "name": "Toxic Spew",
+   "school": "poison",
+   "note": "group DoT",
+   "seen_dispelled": true
+  },
+  "1250043": {
+   "name": "Melt Armor",
+   "school": "magic",
+   "note": "magic dispel or defensive",
+   "seen_dispelled": true
+  },
+  "1289258": {
+   "name": "Corrosive Essence",
+   "school": "poison",
+   "note": "poison dispel or defensive",
+   "seen_dispelled": true
+  },
+  "1217633": {
+   "name": "Corroding Spittle",
+   "school": "magic",
+   "note": "magic dispel or defensive",
+   "seen_dispelled": true
+  },
+  "1228198": {
+   "name": "Corroding Spittle",
+   "school": "magic",
+   "note": "magic dispel or defensive",
+   "seen_dispelled": true
+  },
+  "1217973": {
+   "name": "Curse of Doom",
+   "school": "curse",
+   "note": "dispel or stack to split",
+   "seen_dispelled": true
+  },
+  "1296052": {
+   "name": "Imbued Conduction",
+   "school": "magic",
+   "note": "dispel every stack",
+   "seen_dispelled": true
+  }
+ },
+ "source": "method.gg",
+ "season": "Midnight S2 (patch 12.1)",
+ "source_version": "2026-09-06"
+}

@@ -39,6 +39,15 @@ INTERRUPT_DATA_FILENAME = "interrupt_data.json"
 SPELL_DAMAGE_FILENAME = "spell_damage.json"
 TALENT_DATA_FILENAME = "talent_data.json"
 AVOIDABLE_DATA_FILENAME = "avoidable_spells.json"
+DISPEL_DATA_FILENAME = "dispel_data.json"
+
+
+def bundled_dispel_data_path() -> Path:
+    """Path to the packaged dispellable-debuff list (built from the
+    Method.gg-derived source by ``postmortem build-dispel-data`` -- see
+    analysis/dispels.py). Optional: may not exist, and callers treat that
+    as "no dispel section", never as an error."""
+    return Path(__file__).resolve().parent / "data" / DISPEL_DATA_FILENAME
 
 
 def bundled_avoidable_data_path() -> Path:

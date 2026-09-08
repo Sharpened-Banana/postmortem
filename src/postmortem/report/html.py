@@ -144,6 +144,7 @@ function render() {
   html += mapSection();
   html += pullsTable();
   html += enemyCasts();
+  html += dispelEfficiency();
   html += encounters();
   html += deaths();
   html += closeCalls();
@@ -452,6 +453,31 @@ function enemyCasts() {
         <td><span class="${cls}">${pct}%</span></td></tr>`;
     }).join("")}</table></div>${anyStealable
       ? `<div class="legend"><i style="background:var(--steal)"></i>★ worth Spellstealing</div>` : ""}`;
+}
+
+function dispelEfficiency() {
+  const d = R.dispel_efficiency;
+  if (!d || !(d.schools||[]).length) return "";
+  const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+  const pctCls = p => p == null ? "dim" : p >= 80 ? "ok" : p >= 50 ? "dev-early" : "dev-off";
+  const blocks = d.schools.map(s => {
+    const who = s.dispellers.length
+      ? s.dispellers.map(p => `${esc(p.name)} <span class="dim">(${esc([p.spec, p.class].filter(Boolean).join(" "))}${p.dispels ? ", " + p.dispels + " dispel" + (p.dispels === 1 ? "" : "s") : ""})</span>`).join(", ")
+      : `<span class="dim">nobody in the group can dispel ${esc(s.school)} — not scored</span>`;
+    const eff = s.efficiency_pct == null ? "—" : `${s.efficiency_pct}%`;
+    const rows = s.spells.map(sp => `<tr><td>${esc(sp.name)}</td>
+      <td class="num">${sp.applied}</td><td class="num">${sp.dispelled}</td>
+      <td class="num${sp.expired && s.dispellers.length ? " dev-off" : ""}">${sp.expired}</td>
+      <td class="num">${sp.avg_time_to_dispel_s != null ? sp.avg_time_to_dispel_s + "s" : '<span class="dim">—</span>'}</td></tr>`).join("");
+    return `<h3 style="margin:14px 0 6px;font-size:14px">${esc(cap(s.school))}
+      <span class="${pctCls(s.efficiency_pct)}" style="margin-left:8px">${eff}</span>
+      <span class="dim" style="font-weight:400;font-size:12.5px;margin-left:8px">${s.dispelled} dispelled / ${s.expired} ran out${s.avg_time_to_dispel_s != null ? ` · avg ${s.avg_time_to_dispel_s}s to dispel` : ""}</span></h3>
+      <div class="dim" style="font-size:12.5px;margin-bottom:6px">Can dispel: ${who}</div>
+      <div class="wrap"><table><tr><th>Debuff</th><th class="num">Applied</th><th class="num">Dispelled</th>
+      <th class="num">Ran out</th><th class="num">Avg time to dispel</th></tr>${rows}</table></div>`;
+  }).join("");
+  const overall = d.overall_efficiency_pct == null ? "" : ` <span class="${pctCls(d.overall_efficiency_pct)}" style="font-size:14px;margin-left:8px">${d.overall_efficiency_pct}% overall</span>`;
+  return `<h2>Dispel efficiency${overall}</h2>${blocks}`;
 }
 
 function encounters() {

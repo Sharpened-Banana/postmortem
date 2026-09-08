@@ -167,6 +167,14 @@ not the SDK) if the app tells you it's missing.
 - **Crowd control uptime** — hard-CC landed on enemies (polymorph, traps,
   stuns, fears, banishes, ...) with real duration, not just a cast count:
   per-caster and per-type totals plus a full timeline.
+- **Dispel efficiency** — every dispellable enemy debuff that landed on
+  the group (magic / poison / curse / disease, tagged by a bundled list
+  built from Method.gg's dungeon guides via `build-dispel-data`): applied
+  vs dispelled vs ran out, average time to dispel, and who did it — scored
+  only for schools someone in the group can actually dispel (by spec kit,
+  or because they were seen doing it), so a group with no poison dispel
+  isn't blamed for poisons. `analyze --dispel-data FILE` overrides the
+  bundled list.
 - **Avoidable damage** — each player's damage taken from "stand in the
   fire" mechanics, with hit counts. The spell list is Blizzard's own: the
   addon reads the built-in damage meter's avoidable classification at the

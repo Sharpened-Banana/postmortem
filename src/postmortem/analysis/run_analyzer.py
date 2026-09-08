@@ -9,6 +9,8 @@ from ..combatlog.segmenter import RunSegment
 from ..mdt.dungeon_data import DungeonData, DungeonDataStore
 from ..mdt.route import Route
 from .avoidable import AvoidableData
+from .dispels import DispelData, capable_schools
+from .gamedata import spec_info
 from .compare import compare_route
 from .interruptibility import KNOWN_UNINTERRUPTIBLE_SPELL_IDS, InterruptibilityData
 from .mapping import build_map_report, collect_map_bounds
@@ -160,6 +162,86 @@ def _enemy_cast_summary(
                 "kicked at least once this run",
         "kick_efficiency_pct": efficiency,
         "spells": spells,
+    }
+
+
+def _dispel_summary(stats) -> dict[str, Any]:
+    """Dispel efficiency per school: tagged dispellable debuffs that landed
+    on the group (applied), how many got dispelled vs ran out (expired),
+    how fast, and by whom -- but only scored when someone in the group
+    could dispel that school (see dispels.py). A school nobody present
+    can dispel is listed with ``dispellers: []`` and no efficiency, so a
+    group without a poison dispel isn't blamed for poisons.
+
+    "Could dispel" = baseline kit per DISPEL_CAPABILITIES, OR the player
+    was actually seen dispelling that school this run (covers talents
+    and pet abilities the table doesn't assume)."""
+    players = [(p.name or guid, p) for guid, p in stats.players.items()
+               if not guid.startswith("_")]
+    seen_dispelling: dict[str, set[str]] = {}
+    for name, p in players:
+        for school in p.dispels_by_school:
+            seen_dispelling.setdefault(school, set()).add(name)
+
+    by_school: dict[str, dict[str, Any]] = {}
+    for spell_id, entry in stats.dispel_outcomes.items():
+        school = entry["school"]
+        bucket = by_school.setdefault(school, {
+            "school": school, "applied": 0, "dispelled": 0, "expired": 0,
+            "time_to_dispel_s": [], "spells": [],
+        })
+        bucket["applied"] += entry["applied"]
+        bucket["dispelled"] += entry["dispelled"]
+        bucket["expired"] += entry["expired"]
+        bucket["time_to_dispel_s"].extend(entry["time_to_dispel_s"])
+        times = entry["time_to_dispel_s"]
+        bucket["spells"].append({
+            "spell_id": spell_id, "name": entry["name"],
+            "applied": entry["applied"], "dispelled": entry["dispelled"],
+            "expired": entry["expired"],
+            "avg_time_to_dispel_s": round(sum(times) / len(times), 1) if times else None,
+        })
+
+    schools = []
+    for school, bucket in by_school.items():
+        dispellers = []
+        for name, p in players:
+            cls, spec, _role = spec_info(p.spec_id)
+            if school in capable_schools(cls, spec) or name in seen_dispelling.get(school, ()):
+                dispellers.append({
+                    "name": name, "class": cls, "spec": spec,
+                    "dispels": int(p.dispels_by_school.get(school, 0)),
+                })
+        dispellers.sort(key=lambda d: -d["dispels"])
+        times = bucket["time_to_dispel_s"]
+        scored = bucket["dispelled"] + bucket["expired"]
+        efficiency = (round(100.0 * bucket["dispelled"] / scored, 1)
+                      if dispellers and scored else None)
+        bucket["spells"].sort(key=lambda sp: -(sp["applied"]))
+        schools.append({
+            "school": school,
+            "applied": bucket["applied"],
+            "dispelled": bucket["dispelled"],
+            "expired": bucket["expired"],
+            "avg_time_to_dispel_s": round(sum(times) / len(times), 1) if times else None,
+            "dispellers": dispellers,
+            "efficiency_pct": efficiency,
+            "spells": bucket["spells"],
+        })
+    schools.sort(key=lambda s: -s["applied"])
+
+    scored_schools = [s for s in schools if s["efficiency_pct"] is not None]
+    total_d = sum(s["dispelled"] for s in scored_schools)
+    total_e = sum(s["expired"] for s in scored_schools)
+    overall = round(100.0 * total_d / (total_d + total_e), 1) if (total_d + total_e) else None
+    return {
+        "note": "tagged dispellable enemy debuffs (see build-dispel-data) that "
+                "landed on group players; 'expired' = removed by anything other "
+                "than a dispel (ran out, death). Efficiency is only scored for "
+                "schools someone in the group can dispel -- by spec kit, or "
+                "because they were seen dispelling it this run.",
+        "overall_efficiency_pct": overall,
+        "schools": schools,
     }
 
 
@@ -353,8 +435,14 @@ def analyze_run(
     spell_damage_history_path: Optional[str | Path] = None,
     community_spell_damage: Optional[SpellDamageData] = None,
     talent_data_path: Optional[str | Path] = None,
+    dispel_data: Optional[DispelData] = None,
 ) -> dict[str, Any]:
     """Analyze one M+ run; returns a JSON-ready report dict.
+
+    ``dispel_data`` tags dispellable enemy debuffs (see dispels.py); when
+    omitted the bundled list is used, so every consumer gets the dispel
+    section with no wiring. Pass an explicit (possibly empty) DispelData
+    to override.
 
     ``spell_damage_history_path`` is this account's accumulated per-spell
     damage-per-cast file (see analysis/spell_damage.py): read first as a
@@ -377,11 +465,14 @@ def analyze_run(
     if community_spell_damage:
         fallbacks.append(("community", community_spell_damage))
 
+    if dispel_data is None:
+        dispel_data = DispelData.load_bundled()
+
     pulls = detect_pulls(segment.events, gap_seconds=pull_gap_seconds)
     stats = compute_stats(
         segment.events, pulls, data, full_cast_timeline=full_cast_timeline,
         avoidable=avoidable, spell_damage_fallbacks=fallbacks or None,
-        keystone_level=segment.keystone_level,
+        keystone_level=segment.keystone_level, dispel_data=dispel_data,
     )
     if spell_damage_history_path:
         try:
@@ -492,6 +583,8 @@ def analyze_run(
 
     if avoidable is not None:
         report["avoidable_damage"] = _avoidable_damage_summary(stats, avoidable)
+    if dispel_data is not None and stats.dispel_outcomes:
+        report["dispel_efficiency"] = _dispel_summary(stats)
 
     if par_ms is not None:
         report["timer"] = _timer_summary(par_ms, segment.duration_ms)

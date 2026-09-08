@@ -90,9 +90,14 @@ if [[ -n "$INTERRUPTS_SOURCE" && -f "$INTERRUPTS_SOURCE" ]]; then
   if [[ ${#logs[@]} -gt 0 ]]; then
     pm build-interrupt-data "$INTERRUPTS_SOURCE" --resolve-from "${logs[@]}"
     ok "interrupt_data.json rebuilt, ids resolved from ${#logs[@]} log(s)"
+    # same source file, its dispel-* rows: the dispel-efficiency list
+    pm build-dispel-data "$INTERRUPTS_SOURCE" -o "$DATA_DIR/dispel_data.json" --resolve-from "${logs[@]}"
+    ok "dispel_data.json rebuilt, ids resolved from ${#logs[@]} log(s)"
   else
     pm build-interrupt-data "$INTERRUPTS_SOURCE"
     ok "interrupt_data.json rebuilt (no logs found to resolve ids against)"
+    pm build-dispel-data "$INTERRUPTS_SOURCE" -o "$DATA_DIR/dispel_data.json"
+    ok "dispel_data.json rebuilt (no logs found to resolve ids against)"
   fi
 else
   skip "no --interrupts-source FILE (see docs/PATCH_UPDATE.md for where to get one)"

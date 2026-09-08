@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 
 from .analysis.avoidable import AvoidableData
+from .analysis.dispels import SCHOOLS as DISPEL_SCHOOLS, DispelData
 from .analysis.interruptibility import InterruptibilityData
 from .analysis.pulls import DEFAULT_PULL_GAP_S
 from .analysis.run_analyzer import analyze_run
@@ -63,6 +64,18 @@ def _load_avoidable(path: Optional[str]) -> Optional[AvoidableData]:
         return AvoidableData.load(path)
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
         raise SystemExit(f"error: could not load avoidable-damage data {path}: {exc}")
+
+
+def _load_dispel(path: Optional[str]) -> Optional[DispelData]:
+    """Load --dispel-data (same posture as --avoidable-data: a typed path
+    that fails to load is a clear error; None means "use the bundled
+    list", which analyze_run resolves itself)."""
+    if not path:
+        return None
+    try:
+        return DispelData.load(path)
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"error: could not load dispel data {path}: {exc}")
 
 
 def _load_interruptibility(path: Optional[str]) -> Optional[InterruptibilityData]:
@@ -676,6 +689,112 @@ def cmd_build_interrupt_data(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_build_dispel_data(args: argparse.Namespace) -> int:
+    """Build the dispellable-debuff list (analysis/dispels.py) from the
+    same Method.gg-derived source file build-interrupt-data reads: its
+    ``dispel-<school>`` rows. Like that command, ``--resolve-from`` real
+    logs resolves each ability's NAME to the id(s) that actually landed
+    on group players as a DEBUFF -- Method's published ids often point at
+    the damage component, not the debuff -- and, when logs are given,
+    only names seen in them are kept. Without logs the published ids are
+    used as-is. Bundled unless --no-bundle."""
+    try:
+        with open(args.source, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"error: could not read {args.source}: {exc}")
+    dungeons = payload.get("dungeons") if isinstance(payload, dict) else None
+    if not isinstance(dungeons, list):
+        raise SystemExit(f"error: {args.source} has no 'dungeons' list")
+
+    from .combatlog.events import is_group_player
+    name_to_ids: dict[str, set[int]] = {}
+    dispelled_ids: set[int] = set()
+    for log in args.resolve_from or []:
+        try:
+            for event in parse_file(log):
+                if event.name == "SPELL_DISPEL":
+                    removed = extra_spell_info(event)
+                    if removed is not None and not is_hostile_npc(event.dest_flags):
+                        dispelled_ids.add(removed.spell_id)
+                    continue
+                if event.name != "SPELL_AURA_APPLIED":
+                    continue
+                if not is_hostile_npc(event.source_flags) or not is_group_player(event.dest_flags):
+                    continue
+                if len(event.params) <= 11 or event.params[11] != "DEBUFF":
+                    continue
+                sp = spell_info(event)
+                if sp is not None:
+                    name_to_ids.setdefault(sp.spell_name.casefold(), set()).add(sp.spell_id)
+        except OSError as exc:
+            print(f"warning: skipping {log}: {exc}", file=sys.stderr)
+
+    spells: dict[str, Any] = {}
+    unresolved: list[str] = []
+    for dungeon in dungeons:
+        if not isinstance(dungeon, dict):
+            continue
+        for ability in dungeon.get("abilities", []) or []:
+            if not isinstance(ability, dict):
+                continue
+            category = str(ability.get("category") or "")
+            if not category.startswith("dispel-"):
+                continue
+            school = category[len("dispel-"):].lower()
+            if school not in DISPEL_SCHOOLS:
+                continue
+            name = ability.get("spell_name") or ""
+            if name_to_ids:
+                resolved = sorted(name_to_ids.get(name.casefold(), ()))
+                if not resolved:
+                    unresolved.append(f"{dungeon.get('name', '?')}: {name}")
+                    continue
+            else:
+                spell_id = ability.get("spell_id")
+                if not isinstance(spell_id, int):
+                    continue
+                resolved = [spell_id]
+            for spell_id in resolved:
+                key = str(spell_id)
+                if key in spells and spells[key]["school"] != school:
+                    print(f"warning: spell {spell_id} ({name}) tagged as both "
+                          f"{spells[key]['school']} and {school} -- keeping the first",
+                          file=sys.stderr)
+                    continue
+                spells.setdefault(key, {
+                    "name": name or f"spell:{spell_id}", "school": school,
+                    "note": ability.get("notes"),
+                    "seen_dispelled": spell_id in dispelled_ids,
+                })
+
+    out_payload = {
+        "spells": spells,
+        "source": payload.get("source"),
+        "season": payload.get("season"),
+        "source_version": payload.get("version"),
+    }
+    with open(args.output, "w", encoding="utf-8") as fh:
+        json.dump(out_payload, fh, indent=1)
+    for miss in unresolved:
+        print(f"warning: no debuff named {miss} landed on a player in the logs "
+              "-- omitted rather than guessed", file=sys.stderr)
+    by_school = {}
+    for e in spells.values():
+        by_school[e["school"]] = by_school.get(e["school"], 0) + 1
+    print(f"built {len(spells)} dispellable debuffs -> {args.output} "
+          + ", ".join(f"{n} {sch}" for sch, n in sorted(by_school.items())))
+
+    if not args.no_bundle:
+        from .bundled import bundled_dispel_data_path
+        bundled_path = bundled_dispel_data_path()
+        bundled_path.parent.mkdir(parents=True, exist_ok=True)
+        if Path(args.output).resolve() != bundled_path.resolve():
+            shutil.copyfile(args.output, bundled_path)
+        print(f"also copied to the bundled package location: {bundled_path}")
+    return 0
+
+
 def cmd_build_talent_data(args: argparse.Namespace) -> int:
     """Build the talent-node -> talent-name map from Blizzard's own
     talent-tree API and bundle it (see talents.py for what reads it).
@@ -965,6 +1084,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     avoidable = _load_avoidable(args.avoidable_data) or AvoidableData.load_bundled()
     interrupt_data = _load_interruptibility(args.interrupt_data)
     stealable = _load_stealable(args.stealable_data)
+    dispel_data = _load_dispel(getattr(args, "dispel_data", None))
     # Stream segments directly into _pick_run rather than list(...)-ing them
     # all up front — for a numeric --run it stops parsing once the wanted
     # run is found, and never retains other runs' event lists either way.
@@ -979,6 +1099,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         avoidable=avoidable,
         interrupt_data=interrupt_data,
         stealable=stealable,
+        dispel_data=dispel_data,
         pull_gap_seconds=args.pull_gap,
         full_cast_timeline=not args.no_cast_timeline,
         death_penalty_s=args.death_penalty,
@@ -1382,6 +1503,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_extract_avoidable)
 
     p = sub.add_parser(
+        "build-dispel-data",
+        help="build the dispellable-debuff list (dispel efficiency) from the "
+             "same Method.gg-derived source file as build-interrupt-data, "
+             "and bundle it",
+    )
+    p.add_argument("source", help="the mplus-interrupts-schema source JSON")
+    p.add_argument("-o", "--output", default="dispel_data.json")
+    p.add_argument("--resolve-from", nargs="+", metavar="LOG",
+                   help="combat logs to resolve ability names to the debuff "
+                        "ids that actually landed on players")
+    p.add_argument("--no-bundle", action="store_true",
+                   help="don't also copy the result into the package's bundled "
+                        "data folder")
+    p.set_defaults(func=cmd_build_dispel_data)
+
+    p = sub.add_parser(
         "build-interrupt-data",
         help="convert a community mechanics source (albvar/mplus-interrupts "
              "schema) into interrupt-data JSON, and bundle it into this "
@@ -1488,6 +1625,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="which run in the log: a number from `runs`, or 'last' (default)")
     p.add_argument("--route", help="MDT export string or file with one (intended route)")
     p.add_argument("--dungeon-data", help="extracted dungeon data JSON (see extract-data)")
+    p.add_argument("--dispel-data",
+                   help="JSON file tagging dispellable enemy debuffs by school "
+                        "(see build-dispel-data); default: the bundled list")
     p.add_argument("--avoidable-data",
                    help="JSON file tagging avoidable-damage spell ids (community/"
                         "user-maintained; see docs/avoidable_spells.example.json) "
