@@ -619,14 +619,36 @@ def compute_stats(
             source_player = resolve_source(src_guid, src_name, src_flags)
             if source_player is not None:
                 source_player.interrupts += 1
-                if not close_enemy_cast(dst_guid, "kicked"):
-                    # not a hard cast -- a channel, then (see
-                    # open_enemy_channels); this is what proves the spell
-                    # is both a channel and interruptible.
-                    channel = open_enemy_channels.pop(dst_guid, None)
-                    if channel is not None:
-                        channel_kicked[channel[0]] += 1
                 extra = extra_spell_info(event)
+                # The players table's kick count (interrupts above) is the
+                # source of truth; every one of those kicks must also show
+                # up in the enemy-casts table, so the two agree. The event
+                # itself names the interrupted spell, so count the kick
+                # against THAT -- not only against a cast this loop
+                # happened to have open. Before 2026-09-08 a kick landed
+                # on a cast that was never tracked (started before the
+                # run window, a caster whose earlier cast was already
+                # closed by another event, a spell the log never gave a
+                # SPELL_CAST_START for) bumped the player's count but
+                # vanished from the table, so the two columns disagreed.
+                cast = open_enemy_casts.pop(dst_guid, None)
+                channel = open_enemy_channels.pop(dst_guid, None)
+                kicked_id = extra.spell_id if extra and extra.spell_id else (
+                    cast[0] if cast else channel[0] if channel else 0)
+                kicked_name = (extra.spell_name if extra and extra.spell_name else
+                               cast[1] if cast else channel[1] if channel else
+                               "unknown spell")
+                if channel is not None and channel[0] == kicked_id:
+                    # a channel: routed through channel_kicked so its
+                    # "got through" count (channels started minus kicked)
+                    # is derived correctly in the merge after the loop
+                    channel_kicked[kicked_id] += 1
+                    channel_names.setdefault(kicked_id, kicked_name)
+                else:
+                    entry = stats.enemy_cast_outcomes.setdefault(kicked_id, {
+                        "name": kicked_name, "kicked": 0, "landed": 0, "expired": 0,
+                    })
+                    entry["kicked"] += 1
                 stats.interrupt_events.append({
                     "ts": event.ts,
                     "pull": pull_idx,

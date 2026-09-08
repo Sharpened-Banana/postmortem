@@ -106,13 +106,18 @@ def _enemy_cast_summary(
     kicked_total = 0
     landed_kickable = 0
     for spell_id, entry in stats.enemy_cast_outcomes.items():
-        if spell_id in KNOWN_UNINTERRUPTIBLE_SPELL_IDS:
+        # A spell that WAS kicked this run is never dropped, whatever any
+        # list says: the players table counts that kick (it's the source
+        # of truth for kicks), so the enemy-casts table must show it too
+        # or the two disagree. Evidence from the log beats data about it.
+        was_kicked = bool(entry["kicked"])
+        if spell_id in KNOWN_UNINTERRUPTIBLE_SPELL_IDS and not was_kicked:
             # e.g. this week's M+ affix mechanic -- never a real kick
             # opportunity, checked unconditionally regardless of whether
             # any interrupt_data is loaded (see that constant's docstring).
             continue
         known = interrupt_data.get(spell_id) if interrupt_data else None
-        if known is False:
+        if known is False and not was_kicked:
             # confirmed genuinely uninterruptible -- never a missed kick
             continue
         spells.append({
@@ -134,7 +139,7 @@ def _enemy_cast_summary(
             # kicked this run
             kicked_total += entry["kicked"]
             landed_kickable += entry["landed"]
-        elif entry["kicked"]:
+        elif was_kicked:
             # no ground truth -- only spells someone kicked at least once
             # are provably kickable (today's unchanged heuristic)
             kicked_total += entry["kicked"]
@@ -144,6 +149,7 @@ def _enemy_cast_summary(
     if kicked_total + landed_kickable:
         efficiency = round(100.0 * kicked_total / (kicked_total + landed_kickable), 1)
     return {
+        "kicked_total": sum(s["kicked"] for s in spells),
         "note": "counts every enemy hard-cast (SPELL_CAST_START); spells "
                 "confirmed uninterruptible -- by loaded interrupt data "
                 "(--interrupt-data) or by being a known-uninterruptible "

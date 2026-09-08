@@ -97,7 +97,7 @@ class TestHistoryIndex:
         assert row["timed"] is True
         assert row["deaths"] == 1
         assert row["adherence_pct"] == 66.7
-        assert row["kick_efficiency_pct"] == 42.9
+        assert row["kick_efficiency_pct"] == 55.6
         assert row["html"] is not None and row["html"].endswith(".html")
 
         out = build_index(out_dir)
