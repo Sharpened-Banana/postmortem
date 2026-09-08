@@ -13,6 +13,9 @@ move-folders:
 # plumbing) and must not end up in the addon zip.
 ignore:
   - src
+  - scripts
+  - build
+  - site
   - tests
   - docs
   - data

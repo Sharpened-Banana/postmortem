@@ -35,7 +35,9 @@ from typing import Any, Optional
 # directory too -- e.g. for the upload token in upload.py. Re-exported
 # here so nothing that already imports them from this module breaks.
 from ..appdirs import APP_DIR_NAME, config_dir
-from ..bundled import bundled_dungeon_data_path, bundled_interrupt_data_path
+from ..bundled import (
+    bundled_avoidable_data_path, bundled_dungeon_data_path, bundled_interrupt_data_path,
+)
 
 SETTINGS_FILENAME = "desktop_settings.json"
 
@@ -190,7 +192,14 @@ def resolve_avoidable_data_path(settings: dict[str, Any]) -> Optional[Path]:
     if configured:
         return Path(configured)
     default = config_dir() / AVOIDABLE_FILENAME
-    return default if default.is_file() else None
+    if default.is_file():
+        return default
+    # Since 2026-09-08 a list IS shipped: the addon harvests Blizzard's
+    # own avoidable classification from the damage meter and
+    # `extract-avoidable` bundles it (see analysis/avoidable.py), so the
+    # zero-config path now ends at the package data, like interrupt data.
+    bundled = bundled_avoidable_data_path()
+    return bundled if bundled.is_file() else None
 
 
 LEARNED_INTERRUPTS_FILENAME = "learned_interrupts.json"

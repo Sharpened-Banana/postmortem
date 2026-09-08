@@ -81,6 +81,13 @@ local function InitializeSavedVariables()
   if type(PostmortemSpellDB.global) ~= "table" then PostmortemSpellDB.global = {} end
   applyDefaults(PostmortemSpellDB.global, spellDbDefaults.global)
   MA.spellDb = PostmortemSpellDB.global
+
+  -- Third table, same reasoning: a growing spell database (avoidable-
+  -- damage spell ids harvested from Blizzard's own damage meter, see
+  -- AvoidableDatabase.lua), not settings. Empty is the only default.
+  if type(PostmortemAvoidableDB) ~= "table" then PostmortemAvoidableDB = {} end
+  if type(PostmortemAvoidableDB.global) ~= "table" then PostmortemAvoidableDB.global = {} end
+  MA.avoidableDb = PostmortemAvoidableDB.global
 end
 
 -- Accessor other files should use instead of touching PostmortemDB
@@ -95,6 +102,11 @@ end
 -- rather than touching PostmortemSpellDB directly.
 function MA:GetSpellDB()
   return self.spellDb
+end
+
+-- Accessor for the avoidable-damage spell database (AvoidableDatabase.lua).
+function MA:GetAvoidableDB()
+  return self.avoidableDb
 end
 
 -- Empty init stub for later work packages to extend. Called once, after

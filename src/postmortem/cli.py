@@ -338,6 +338,176 @@ def cmd_extract_interrupts(args: argparse.Namespace) -> int:
     return 0
 
 
+def _read_savedvariables_table(path: Path, global_name: str) -> dict[Any, Any]:
+    """The ``.global`` sub-table of one named SavedVariables assignment
+    in a WoW SavedVariables .lua file (several addon tables share one
+    file, so the assignment is located by name and the rest ignored).
+    Raises SystemExit with a clear message on a missing file, a missing
+    assignment, or unparseable Lua."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise SystemExit(f"error: could not read {path}: {exc}")
+
+    pos = _find_assignment(text, global_name + r"\s*=\s*")
+    if pos is None:
+        raise SystemExit(
+            f"error: no {global_name} assignment found in {path} "
+            "(wrong SavedVariables file? or the addon hasn't recorded "
+            "anything yet -- it writes at the end of a key, and WoW only "
+            "saves SavedVariables on logout or /reload)"
+        )
+
+    warnings: list[str] = []
+    parser = LuaLiteralParser(text, warnings)
+    try:
+        raw = parser.parse_value_at(pos)
+    except LuaParseError as exc:
+        raise SystemExit(f"error: could not parse {global_name} in {path}: {exc}")
+
+    for w in warnings:
+        print(f"warning: {w}", file=sys.stderr)
+    global_table = raw.get("global") if isinstance(raw, dict) else None
+    return global_table if isinstance(global_table, dict) else {}
+
+
+def _challenge_map_to_dungeon_idx(dungeon_data: Optional[str]) -> dict[int, int]:
+    """challenge-map id -> MDT dungeon_idx, from an explicit dungeon-data
+    file or the bundled one. Empty (no per-dungeon grouping, spells still
+    extracted) when neither exists -- the bridge is a nicety, not a
+    requirement."""
+    from .bundled import bundled_dungeon_data_path
+    path = Path(dungeon_data) if dungeon_data else bundled_dungeon_data_path()
+    if dungeon_data:
+        store = _load_store(dungeon_data)
+    elif path.is_file():
+        try:
+            store = DungeonDataStore.load(path)
+        except (OSError, ValueError, KeyError):
+            store = None
+    else:
+        store = None
+    if store is None:
+        return {}
+    return {
+        d.map_id: d.dungeon_idx
+        for d in store.dungeons.values() if d.map_id is not None
+    }
+
+
+def cmd_extract_avoidable(args: argparse.Namespace) -> int:
+    """Extract the addon's PostmortemAvoidableDB SavedVariables table --
+    the avoidable-damage spell ids it harvests from Blizzard's own damage
+    meter at the end of every key (see addon/Postmortem/
+    AvoidableDatabase.lua) -- into the JSON shape AvoidableData.load()
+    reads, and bundle it so every consumer picks it up automatically.
+
+    The addon records, per spell id: name, the challenge-map ids of the
+    dungeons it was seen in, how many keys it was seen in, and the total
+    damage it did. The output's optional ``dungeons`` grouping is keyed by
+    MDT dungeon_idx (what avoidable.py documents), so map ids are bridged
+    through dungeon data when available.
+
+    Merges into an existing output file by default: the list is meant to
+    grow across accounts and machines, and a capture from one PC must
+    never wipe spells only another has seen. ``--no-merge`` rebuilds from
+    this one SavedVariables file alone.
+    """
+    path = Path(args.savedvariables_path)
+    global_table = _read_savedvariables_table(path, "PostmortemAvoidableDB")
+    map_to_idx = _challenge_map_to_dungeon_idx(args.dungeon_data)
+
+    spells: dict[int, dict[str, Any]] = {}
+    dungeons: dict[int, set[int]] = {}
+    unmapped_maps: set[int] = set()
+
+    if not args.no_merge and Path(args.output).is_file():
+        try:
+            existing = AvoidableData.load(args.output)
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+            raise SystemExit(
+                f"error: could not load existing {args.output} to merge into: {exc} "
+                "(pass --no-merge to overwrite it)"
+            )
+        for sid, entry in existing.spells.items():
+            spells[sid] = {"name": entry["name"], "note": entry.get("note")}
+        for idx, ids in existing.dungeons.items():
+            dungeons.setdefault(idx, set()).update(ids)
+        merged_from = len(existing.spells)
+    else:
+        merged_from = 0
+
+    n_captured = 0
+    for spell_id, entry in global_table.items():
+        if not isinstance(spell_id, int) or not isinstance(entry, dict):
+            continue
+        n_captured += 1
+        name = entry.get("name") if isinstance(entry.get("name"), str) else None
+        keys = entry.get("keys") if isinstance(entry.get("keys"), int) else None
+        note = "captured from Blizzard's damage meter"
+        if keys:
+            note += f" (seen in {keys} key{'s' if keys != 1 else ''})"
+        current = spells.get(spell_id)
+        if current is None:
+            spells[spell_id] = {"name": name or f"spell:{spell_id}", "note": note}
+        else:
+            # Keep a real name over a placeholder; keep whatever note the
+            # existing file had unless it was ours (so re-runs refresh
+            # the key count without clobbering a hand-written note).
+            if name and current["name"].startswith("spell:"):
+                current["name"] = name
+            if not current.get("note") or str(current["note"]).startswith("captured from"):
+                current["note"] = note
+
+        maps = entry.get("maps")
+        if isinstance(maps, dict):
+            for map_id in maps:
+                if not isinstance(map_id, int):
+                    continue
+                idx = map_to_idx.get(map_id)
+                if idx is None:
+                    unmapped_maps.add(map_id)
+                    continue
+                dungeons.setdefault(idx, set()).add(spell_id)
+
+    payload = {
+        "_comment": "Avoidable-damage spell ids, as classified by Blizzard's own "
+                    "damage meter and captured in-game by the Postmortem addon "
+                    "(PostmortemAvoidableDB). Built by `postmortem extract-avoidable`; "
+                    "safe to hand-edit -- re-runs merge, they don't overwrite.",
+        "spells": [
+            {"id": sid, "name": spells[sid]["name"], "note": spells[sid].get("note")}
+            for sid in sorted(spells)
+        ],
+        "dungeons": {
+            str(idx): sorted(ids) for idx, ids in sorted(dungeons.items())
+        },
+    }
+    with open(args.output, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, indent=1)
+
+    print(f"extracted {n_captured} captured spells -> {args.output} "
+          f"({len(spells)} total"
+          + (f", merged with {merged_from} already in the file" if merged_from else "")
+          + ")")
+    if dungeons:
+        print(f"  grouped under {len(dungeons)} dungeon(s)")
+    if unmapped_maps:
+        print(f"warning: {len(unmapped_maps)} challenge-map id(s) not in the dungeon "
+              f"data ({', '.join(str(m) for m in sorted(unmapped_maps))}) -- their spells "
+              "are in the list but not grouped by dungeon; refresh dungeon data "
+              "(extract-data) and re-run", file=sys.stderr)
+
+    if not args.no_bundle:
+        from .bundled import bundled_avoidable_data_path
+        bundled_path = bundled_avoidable_data_path()
+        bundled_path.parent.mkdir(parents=True, exist_ok=True)
+        if Path(args.output).resolve() != bundled_path.resolve():
+            shutil.copyfile(args.output, bundled_path)
+        print(f"also copied to the bundled package location: {bundled_path}")
+    return 0
+
+
 def _add_interrupt_spell(spells: dict[str, Any], spell_id: int, name: str) -> bool:
     """Record one confirmed-interruptible spell. Returns True if this was
     a *conflicting* duplicate -- the same id already recorded under a
@@ -790,7 +960,9 @@ def cmd_runs(args: argparse.Namespace) -> int:
 def cmd_analyze(args: argparse.Namespace) -> int:
     route = _load_route(args.route) if args.route else None
     store = _load_store(args.dungeon_data)
-    avoidable = _load_avoidable(args.avoidable_data)
+    # An explicit --avoidable-data wins; otherwise the bundled list built
+    # from the addon's damage-meter capture (None if never built).
+    avoidable = _load_avoidable(args.avoidable_data) or AvoidableData.load_bundled()
     interrupt_data = _load_interruptibility(args.interrupt_data)
     stealable = _load_stealable(args.stealable_data)
     # Stream segments directly into _pick_run rather than list(...)-ing them
@@ -1016,6 +1188,11 @@ def _write_recorded_reports(
             update_from_events(segments[-1].events, learned_path)
         except Exception as exc:
             print(f"warning: could not update learned interrupts: {exc}", file=sys.stderr)
+    # Zero-config avoidable-damage tagging: the bundled list (built by
+    # `extract-avoidable` from the addon's damage-meter capture) unless
+    # the caller loaded its own.
+    if avoidable is None:
+        avoidable = AvoidableData.load_bundled()
     report = analyze_run(segments[-1], route=route, store=store,
                          avoidable=avoidable, interrupt_data=interrupt_data,
                          stealable=stealable, pull_gap_seconds=pull_gap_seconds,
@@ -1180,6 +1357,29 @@ def build_parser() -> argparse.ArgumentParser:
                         "only PostmortemSpellDB is read")
     p.add_argument("-o", "--output", default="interrupt_data.json")
     p.set_defaults(func=cmd_extract_interrupts)
+
+    p = sub.add_parser(
+        "extract-avoidable",
+        help="extract the avoidable-damage spell list the Postmortem addon "
+             "captures from Blizzard's damage meter (PostmortemAvoidableDB in "
+             "its SavedVariables file), and bundle it so every consumer tags "
+             "avoidable damage automatically",
+    )
+    p.add_argument("savedvariables_path",
+                   help="path to the Postmortem SavedVariables file "
+                        "(e.g. WTF/Account/<ACCOUNT>/SavedVariables/"
+                        "Postmortem.lua); only PostmortemAvoidableDB is read")
+    p.add_argument("-o", "--output", default="avoidable_spells.json")
+    p.add_argument("--dungeon-data",
+                   help="dungeon data file used to group spells by dungeon "
+                        "(default: the bundled one)")
+    p.add_argument("--no-merge", action="store_true",
+                   help="rebuild the output from this file alone instead of "
+                        "merging into an existing output file")
+    p.add_argument("--no-bundle", action="store_true",
+                   help="don't also copy the result into the package's bundled "
+                        "data folder")
+    p.set_defaults(func=cmd_extract_avoidable)
 
     p = sub.add_parser(
         "build-interrupt-data",
