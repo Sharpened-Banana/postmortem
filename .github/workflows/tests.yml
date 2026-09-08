@@ -38,7 +38,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install
-        run: pip install -e . pytest
+        run: pip install -e . pytest certifi
       - name: Test
         run: python -m pytest tests -q
 
@@ -71,8 +71,8 @@ jobs:
       - name: Install
         if: steps.tok.outputs.ok == 'true'
         run: |
-          pip install -e postmortem pytest
-          pip install -r postmortem-site/requirements.txt
+          pip install -e postmortem pytest certifi
+          pip install -r postmortem-site/requirements.txt -r postmortem-site/requirements-dev.txt
       - name: Site tests
         if: steps.tok.outputs.ok == 'true'
         env:
