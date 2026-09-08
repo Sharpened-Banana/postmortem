@@ -25,7 +25,10 @@ postmortem = "postmortem.cli:main"
 postmortem-desktop = "postmortem.desktop.app:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "pyinstaller>=6.0"]
+# certifi: five tests assert the certifi-backed SSL context is used when it
+# is installed, so the test environment must have it (the desktop extra
+# brings it too).
+dev = ["pytest>=7", "pyinstaller>=6.0", "certifi"]
 # pillow: stitches MDT's dungeon map tiles into the route map's
 # background (postmortem/mapart.py). Optional by design -- the core
 # package stays stdlib-only and the report simply has no background
