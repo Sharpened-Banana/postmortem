@@ -82,4 +82,71 @@ Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Run]
+; The app hosts its window through .NET (pywebview -> pythonnet -> WinForms
+; on CoreCLR) and needs the .NET 8 Desktop Runtime, which a fresh Windows
+; install does not have -- without it the app dies at startup with
+; "Failed to create a .NET runtime (coreclr)". If it's missing, the
+; [Code] below downloads Microsoft's own installer to {tmp} on the Ready
+; page and this runs it silently. The runtime installs machine-wide, so
+; it asks for elevation itself (the one UAC prompt this installer can
+; cause); a user who declines still gets the app installed, plus a clear
+; dialog from the app about what's missing.
+Filename: "{tmp}\dotnet-desktop-runtime.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing the Microsoft .NET Desktop Runtime..."; Check: not DotNetDesktopInstalled; Flags: shellexec waituntilterminated; Verb: "runas"
 Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+// True when a .NET Desktop Runtime new enough for pythonnet's CoreCLR
+// hoster (6 or later) is registered. Inno runs in 64-bit mode here, so
+// HKLM is the 64-bit hive where the x64 runtime registers itself.
+function DotNetDesktopInstalled(): Boolean;
+var
+  Names: TArrayOfString;
+  I: Integer;
+  Major: Integer;
+begin
+  Result := False;
+  if RegGetValueNames(HKLM, 'SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.WindowsDesktop.App', Names) then
+    for I := 0 to GetArrayLength(Names) - 1 do
+    begin
+      Major := StrToIntDef(Copy(Names[I], 1, Pos('.', Names[I]) - 1), 0);
+      if Major >= 6 then
+        Result := True;
+    end;
+end;
+
+var
+  DownloadPage: TDownloadWizardPage;
+
+procedure InitializeWizard;
+begin
+  DownloadPage := CreateDownloadPage(SetupMessage(msgWizardPreparing), SetupMessage(msgPreparingDesc), nil);
+end;
+
+// Fetch Microsoft's runtime installer when leaving the Ready page, so a
+// download failure (offline machine) is reported before anything is
+// installed. aka.ms/dotnet/8.0/... is Microsoft's stable "latest 8.0
+// patch" link for the x64 Desktop Runtime.
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if (CurPageID = wpReady) and not DotNetDesktopInstalled then
+  begin
+    DownloadPage.Clear;
+    DownloadPage.Add('https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-x64.exe', 'dotnet-desktop-runtime.exe', '');
+    DownloadPage.Show;
+    try
+      try
+        DownloadPage.Download;
+        Result := True;
+      except
+        if DownloadPage.AbortedByUser then
+          Log('.NET runtime download aborted by user')
+        else
+          SuppressibleMsgBox('Could not download the Microsoft .NET Desktop Runtime: ' + AddPeriod(GetExceptionMessage) + #13#10#13#10 + 'Postmortem will still be installed. Install the runtime from https://dotnet.microsoft.com/download/dotnet/8.0 before starting it.', mbInformation, MB_OK, IDOK);
+        Result := True;
+      end;
+    finally
+      DownloadPage.Hide;
+    end;
+  end;
+end;

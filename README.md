@@ -133,6 +133,14 @@ build/postmortem.spec` — produces a double-clickable `.app` (macOS) or a
 PyInstaller doesn't cross-compile). `.github/workflows/release-desktop.yml`
 does this in CI for both platforms on every tag push.
 
+**Windows needs the Microsoft .NET 8 Desktop Runtime (x64).** The app
+hosts its window through .NET, and a fresh Windows install doesn't have
+the modern runtime. The installer (`Postmortem-Setup-windows.exe`)
+downloads and installs it for you if it's missing; the portable zip
+doesn't, so install it once from
+https://dotnet.microsoft.com/download/dotnet/8.0 (the "Desktop Runtime",
+not the SDK) if the app tells you it's missing.
+
 ## What you get
 
 - **Route vs. actual** — every actual pull is matched against the planned
