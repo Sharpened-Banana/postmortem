@@ -159,6 +159,41 @@ def load_dotnet(loader, runtime_config: Optional[str] = None, log=None) -> str:
     raise last
 
 
+# Everything pywebview's Windows backend (webview/platforms/winforms.py
+# and edgechromium.py) imports from .NET, by the assembly it lives in on
+# *modern* .NET. On the .NET Framework these were all inside System.dll
+# / System.Drawing.dll and pythonnet found them automatically; on CoreCLR
+# each is its own assembly that nothing loads until asked, and pythonnet
+# can only import a namespace from an assembly that's already loaded --
+# so `from Microsoft.Win32 import SystemEvents` failed on the first real
+# CoreCLR start (2026-09-08). Loading them here, before pywebview runs,
+# is the difference. Names that don't exist on a given .NET are skipped.
+DESKTOP_ASSEMBLIES = (
+    "System.Runtime", "System.Collections", "System.Threading",
+    "System.Threading.Thread", "System.Threading.Tasks", "System.Reflection",
+    "System.Diagnostics.Process", "System.Globalization",
+    "System.ComponentModel.Primitives", "System.Runtime.InteropServices",
+    "System.Drawing", "System.Drawing.Primitives", "System.Drawing.Common",
+    "System.Windows.Forms", "Microsoft.Win32.SystemEvents", "Microsoft.Win32.Registry",
+)
+
+
+def preload_desktop_assemblies(clr, log=None) -> list[str]:
+    """AddReference each of DESKTOP_ASSEMBLIES that exists; returns the
+    ones that loaded."""
+    loaded = []
+    for name in DESKTOP_ASSEMBLIES:
+        try:
+            clr.AddReference(name)
+            loaded.append(name)
+        except Exception as exc:  # System.IO.FileNotFoundException, as a Python exception
+            if log:
+                log.info("assembly %s not available: %s", name, str(exc).splitlines()[0])
+    if log:
+        log.info("preloaded assemblies: %s", ", ".join(loaded))
+    return loaded
+
+
 def _load_dotnet_or_explain() -> None:
     log = _startup_log()
     import pythonnet
@@ -177,8 +212,14 @@ def _load_dotnet_or_explain() -> None:
             import clr  # noqa: F401  -- the import pywebview does lazily; fail loudly here instead
 
             log.info("import clr ok; runtime: %s", getattr(pythonnet, "get_runtime_info", lambda: "?")())
-            clr.AddReference("System.Windows.Forms")
-            log.info("System.Windows.Forms loads")
+            preload_desktop_assemblies(clr, log)
+            # the exact imports pywebview does first -- fail here, with a
+            # traceback in the log, rather than behind its generic message
+            import System.Windows.Forms  # noqa: F401
+            from Microsoft.Win32 import SystemEvents  # noqa: F401
+            from System.Drawing import Icon, Point  # noqa: F401
+
+            log.info("pywebview's WinForms imports resolve")
         except Exception:
             log.exception("clr / System.Windows.Forms failed after pythonnet.load")
             raise
