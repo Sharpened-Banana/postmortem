@@ -185,6 +185,24 @@ def render_text(report: dict[str, Any]) -> str:
                 add(f"    {'  |  '.join(detail)}")
 
     # --- close calls ---
+    dispel = report.get("dispel_efficiency") or {}
+    if dispel.get("schools"):
+        add("")
+        header = "-- DISPEL EFFICIENCY "
+        overall = dispel.get("overall_efficiency_pct")
+        add(header + (f"{overall}% overall " if overall is not None else "") + "-" * 40)
+        for sch in dispel["schools"]:
+            eff = f"{sch['efficiency_pct']}%" if sch["efficiency_pct"] is not None else "not scored"
+            who = ", ".join(
+                f"{d['name'].split('-', 1)[0]} ({d['dispels']})" for d in sch["dispellers"]
+            ) or f"nobody can dispel {sch['school']}"
+            add(f"  {sch['school'].capitalize():<10}{eff:>11}  {sch['dispelled']} dispelled / "
+                f"{sch['expired']} ran out  -- {who}")
+            for sp in sch["spells"]:
+                t = f"{sp['avg_time_to_dispel_s']}s avg" if sp["avg_time_to_dispel_s"] is not None else ""
+                add(f"      {sp['name']:<30}{sp['applied']:>3} applied  {sp['dispelled']:>3} dispelled"
+                    f"  {sp['expired']:>3} ran out  {t}")
+
     close_calls = report.get("close_calls") or []
     if close_calls:
         add("")

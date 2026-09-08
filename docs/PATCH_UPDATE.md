@@ -23,6 +23,7 @@ is still stale.
 | **Dungeon/enemy data** | Every season (new dungeon pool, changed forces values). Route comparison is meaningless without it. | `extract-data` — reads your installed MDT addon |
 | **Talent map** | Every patch that touches talent trees. Without it, a run's talent picks show as node ids instead of names. | `build-talent-data` — Blizzard's API |
 | **Interrupt database** | Every season (new dungeon pool = new kickable spells). | `build-interrupt-data` — a community file you download |
+| **Dispellable-debuff list** | Every season, from the same Method-derived file as the interrupt database (its dispel rows). Drives the dispel-efficiency section. | `build-dispel-data` — run automatically alongside `build-interrupt-data` |
 | **Avoidable-damage list** | Every season (new dungeons = new avoidable spells). Grows with every key you play; a refresh just merges what the addon captured. | `extract-avoidable` — reads the addon's SavedVariables (auto-found under `WTF/`) |
 | **Spell damage** | Occasionally. Only the kick-value *fallback* when a spell never landed in your own run. | `build-spell-damage` — samples Warcraft Logs |
 | **Addon `## Interface:`** | Every patch, or WoW marks the addon out of date. | `--toc-interface` |

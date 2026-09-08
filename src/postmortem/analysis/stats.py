@@ -29,6 +29,7 @@ from ..combatlog.combatant import parse_combatant_info
 from ..combatlog.guid import parse_guid
 from ..mdt.dungeon_data import DungeonData
 from .avoidable import AvoidableData
+from .dispels import DispelData
 from .gamedata import BREZ_SPELLS, CC_SPELLS, DEFENSIVES, LUST_SPELLS, spec_info
 from .pulls import ActualPull
 
@@ -82,6 +83,9 @@ class PlayerStats:
     kick_prevented_healing: int = 0
     dispels: int = 0      # dispels on friendly targets
     purges: int = 0       # dispels/steals of enemy buffs
+    # school -> friendly dispels of tagged debuffs (see dispels.py); only
+    # filled when dispel data is loaded
+    dispels_by_school: Counter = field(default_factory=Counter)
     death_count: int = 0
     killing_blows: int = 0
     casts_total: int = 0
@@ -128,6 +132,7 @@ class PlayerStats:
             "kick_prevented_damage": self.kick_prevented_damage,
             "kick_prevented_healing": self.kick_prevented_healing,
             "dispels": self.dispels,
+            "dispels_by_school": dict(self.dispels_by_school),
             "purges": self.purges,
             "deaths": self.death_count,
             "killing_blows": self.killing_blows,
@@ -159,6 +164,11 @@ class RunStats:
     deaths: list[DeathRecord] = field(default_factory=list)
     interrupt_events: list[dict[str, Any]] = field(default_factory=list)
     dispel_events: list[dict[str, Any]] = field(default_factory=list)
+    # spell_id -> {name, school, applied, dispelled, expired,
+    # time_to_dispel_s: [..]}: every tagged dispellable debuff that landed
+    # on a group player (see dispels.py); only filled when dispel data is
+    # loaded
+    dispel_outcomes: dict[int, dict[str, Any]] = field(default_factory=dict)
     # a hard-CC application (see gamedata.CC_SPELLS) landed on a hostile
     # target and later ended (removed, target died, or run ended) --
     # {caster, spell_id, spell, cc_type, target, start_ts, end_ts, duration_s}
@@ -218,8 +228,32 @@ def compute_stats(
     avoidable: Optional[AvoidableData] = None,
     spell_damage_fallbacks: Optional[list[tuple[str, Any]]] = None,
     keystone_level: Optional[int] = None,
+    dispel_data: Optional[DispelData] = None,
 ) -> RunStats:
     stats = RunStats()
+    # (target_guid, spell_id) -> applied ts, for tagged dispellable debuffs
+    # currently on a group player (see dispels.py)
+    open_debuffs: dict[tuple[str, int], float] = {}
+    # A dispel logs SPELL_AURA_REMOVED first and SPELL_DISPEL right after,
+    # same timestamp (confirmed in real logs, 2026-09-08 -- counting the
+    # removal as "ran out" on sight double-counted every dispel). So a
+    # removal of a tagged debuff is held here as (removed_ts, applied_ts)
+    # and only becomes "expired" once no dispel has claimed it within
+    # _DISPEL_GRACE_S.
+    pending_removals: dict[tuple[str, int], tuple[float, float]] = {}
+    _DISPEL_GRACE_S = 1.0
+
+    def dispel_entry(spell_id: int, name: str, school: str) -> dict[str, Any]:
+        return stats.dispel_outcomes.setdefault(spell_id, {
+            "name": name, "school": school, "applied": 0, "dispelled": 0,
+            "expired": 0, "time_to_dispel_s": [],
+        })
+
+    def flush_pending_removals(now: float, force: bool = False) -> None:
+        for key, (removed_ts, _applied_ts) in list(pending_removals.items()):
+            if force or now - removed_ts > _DISPEL_GRACE_S:
+                pending_removals.pop(key)
+                stats.dispel_outcomes[key[1]]["expired"] += 1
     owner_map: dict[str, str] = {}
     recent_damage: dict[str, deque] = {}
     locator = _PullLocator(pulls)
@@ -386,6 +420,9 @@ def compute_stats(
     for event in events:
         name = event.name
         params = event.params
+
+        if pending_removals:
+            flush_pending_removals(event.ts)
 
         if name == "COMBATANT_INFO" and params:
             guid = params[0]
@@ -669,6 +706,23 @@ def compute_stats(
                 else:
                     source_player.dispels += 1
                 extra = extra_spell_info(event)
+                school = None
+                if not purge and extra is not None and dispel_data is not None:
+                    school = dispel_data.school_of(extra.spell_id)
+                    if school is not None:
+                        source_player.dispels_by_school[school] += 1
+                        entry = dispel_entry(extra.spell_id, extra.spell_name, school)
+                        entry["dispelled"] += 1
+                        key = (dst_guid, extra.spell_id)
+                        pending = pending_removals.pop(key, None)
+                        if pending is not None:
+                            # the removal logged just before this dispel
+                            # was the dispel, not the debuff running out
+                            applied_ts = pending[1]
+                        else:
+                            applied_ts = open_debuffs.pop(key, None)
+                        if applied_ts is not None:
+                            entry["time_to_dispel_s"].append(round(event.ts - applied_ts, 2))
                 stats.dispel_events.append({
                     "ts": event.ts,
                     "pull": pull_idx,
@@ -676,6 +730,8 @@ def compute_stats(
                     "target": dst_name,
                     "kind": "purge" if purge else "dispel",
                     "dispelled_spell": extra.spell_name if extra else None,
+                    "dispelled_spell_id": extra.spell_id if extra else None,
+                    "school": school,
                 })
             continue
 
@@ -784,6 +840,13 @@ def compute_stats(
                 }
             if sp is not None and is_group_player(dst_flags):
                 aura_kind = event.params[11] if len(event.params) > 11 else ""
+                if (aura_kind == "DEBUFF" and dispel_data is not None
+                        and dispel_data.school_of(sp.spell_id) is not None):
+                    key = (dst_guid, sp.spell_id)
+                    if key not in open_debuffs:
+                        open_debuffs[key] = event.ts
+                        dispel_entry(sp.spell_id, sp.spell_name,
+                                     dispel_data.school_of(sp.spell_id))["applied"] += 1
                 if aura_kind == "BUFF":
                     key = (dst_guid, sp.spell_id)
                     open_buffs.setdefault(key, event.ts)
@@ -814,6 +877,11 @@ def compute_stats(
                 close_cc(dst_guid, sp.spell_id, event.ts)
             if sp is not None and is_group_player(dst_flags):
                 key = (dst_guid, sp.spell_id)
+                applied_ts = open_debuffs.pop(key, None)
+                if applied_ts is not None:
+                    # held until it's clear whether a SPELL_DISPEL follows
+                    # (see pending_removals)
+                    pending_removals[key] = (event.ts, applied_ts)
                 start = open_buffs.pop(key, None)
                 if start is not None:
                     buff_totals[key]["uptime_s"] += event.ts - start
@@ -822,6 +890,13 @@ def compute_stats(
                     if windows and windows[-1][1] is None:
                         windows[-1][1] = event.ts
             continue
+
+    # tagged debuffs still up when the run ends were never dispelled, and
+    # any held removal no dispel ever claimed ran out
+    flush_pending_removals(run_end_ts, force=True)
+    for (_guid, spell_id) in list(open_debuffs.keys()):
+        stats.dispel_outcomes[spell_id]["expired"] += 1
+    open_debuffs.clear()
 
     # CC still active when the run ends counts until the last event
     for target_guid, spell_id in list(open_cc.keys()):
