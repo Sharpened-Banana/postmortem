@@ -272,21 +272,19 @@ M+ run with deliberate route deviations.
 
 ## Public run tracker
 
-`site/` is a small FastAPI service where anyone can upload an analyzed
-report and browse everyone's runs — a public, no-account feed of every
-uploaded run plus each run's full report page. Point `analyze` at a
-deployed instance to upload automatically:
+The tracker at [postmortem-mplus.fly.dev](https://postmortem-mplus.fly.dev)
+is where anyone can upload an analyzed report and browse everyone's
+runs — a public feed of every uploaded run plus each run's full report
+page, with Battle.net sign-in for character pages. Point `analyze` at
+it to upload automatically:
 
 ```bash
-postmortem analyze "path/to/Logs/WoWCombatLog.txt" --upload https://your-tracker.example
+postmortem analyze "path/to/Logs/WoWCombatLog.txt" --upload https://postmortem-mplus.fly.dev
 ```
 
-The site also takes a raw `WoWCombatLog.txt` directly at `<site
-url>/upload` — a plain file picker in the browser, no install of
-anything at all. Every completed key in the file is analyzed
-server-side and posted automatically; this is the same analysis
-pipeline (`combatlog`/`analysis`), just running on the server instead of
-locally.
-
-See [site/README.md](site/README.md) for local development and the
-Fly.io deploy runbook.
+The site also takes a raw `WoWCombatLog.txt` directly at its `/upload`
+page — a plain file picker in the browser, no install of anything at
+all. It runs this same analysis pipeline (`combatlog`/`analysis`) on the
+server. The site's own source is a separate, private repository; this
+package, the desktop app and the addon only ever talk to it over its
+public HTTP endpoints (see `src/postmortem/upload.py`).

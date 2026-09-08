@@ -14,3 +14,10 @@ mdt_data.json
 runs/
 reports/
 .DS_Store
+
+# The tracker site's source lives in its own private repository
+# (postmortem-site) -- never in this public one.
+site/
+Dockerfile
+fly.toml
+.dockerignore
