@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Optional
 
 import webview
 
@@ -49,6 +50,65 @@ BACKGROUND_COLOR = "#14161b"  # shell/style.css's --bg token
 SHELL_INDEX = Path(__file__).resolve().parent / "shell" / "index.html"
 
 
+# pywebview hard-requires pythonnet on Windows (it hosts its window via
+# .NET WinForms regardless of render engine -- see build/postmortem.spec's
+# own note). Which .NET that binds to matters:
+#
+# - "coreclr" (modern .NET 6+, the "Desktop Runtime") is what works from
+#   the frozen build; the installer makes sure it's present.
+# - "netfx" (the .NET Framework built into Windows) failed from a frozen
+#   build on a real machine with "Failed to resolve
+#   Python.Runtime.Loader.Initialize" (2026-09-01), but is a free second
+#   try on a machine with no modern .NET at all rather than a dead end.
+#
+# Without either, pythonnet raises "Failed to create a .NET runtime
+# (coreclr)... Can not determine dotnet root" -- which a user saw on a
+# fresh Windows install (2026-09-08). That's the case this turns into a
+# plain dialog with the download link instead of a traceback.
+DOTNET_RUNTIMES = ("coreclr", "netfx")
+DOTNET_DOWNLOAD_URL = "https://dotnet.microsoft.com/en-us/download/dotnet/8.0"
+DOTNET_MESSAGE = (
+    "Postmortem needs the Microsoft .NET Desktop Runtime (version 8, x64) "
+    "to show its window, and it isn't installed on this PC.\n\n"
+    "Open the download page now? Install the \"Desktop Runtime\" (not the "
+    "SDK), then start Postmortem again."
+)
+
+
+def load_dotnet(loader, runtimes=DOTNET_RUNTIMES) -> str:
+    """Bind pythonnet to the first .NET runtime that loads, trying them in
+    order. Returns the one that worked; raises the *last* failure if none
+    do. ``loader`` is ``pythonnet.load`` (injected for tests). Must run
+    before anything imports ``clr`` -- pywebview does so lazily inside
+    ``webview.start()``."""
+    last: Optional[BaseException] = None
+    for name in runtimes:
+        try:
+            loader(name)
+            return name
+        except Exception as exc:  # pythonnet raises plain RuntimeError
+            last = exc
+    assert last is not None
+    raise last
+
+
+def _load_dotnet_or_explain() -> None:
+    import pythonnet
+
+    try:
+        load_dotnet(pythonnet.load)
+    except Exception:
+        import ctypes
+        import webbrowser
+
+        # MB_YESNO | MB_ICONWARNING; IDYES == 6. No window exists yet, so
+        # a bare Win32 message box is the only UI available.
+        answer = ctypes.windll.user32.MessageBoxW(None, DOTNET_MESSAGE, APP_TITLE, 0x04 | 0x30)
+        if answer == 6:
+            webbrowser.open(DOTNET_DOWNLOAD_URL)
+        sys.exit(1)
+
+
 def main() -> None:
     """Create the desktop window and block until it's closed.
 
@@ -64,27 +124,7 @@ def main() -> None:
     URI conversion needed.
     """
     if sys.platform == "win32":
-        # pywebview hard-requires pythonnet on Windows (it hosts its
-        # window via .NET WinForms regardless of render engine -- see
-        # build/postmortem.spec's own note on this). Left to its default
-        # auto-detection, pythonnet picked the legacy .NET Framework
-        # hoster (clr_loader's "netfx" backend) here, which failed with
-        # "Failed to resolve Python.Runtime.Loader.Initialize" on a real
-        # Windows machine even from a clean, fully-extracted build
-        # (confirmed 2026-09-01 -- ruled out the earlier "still-zipped
-        # download" theory). Forcing the modern CoreCLR hoster instead
-        # avoids that specific netfx binding failure. Must happen before
-        # anything imports ``clr`` -- pywebview's own
-        # ``platforms/winforms.py`` does that lazily inside
-        # ``webview.start()`` below, so this just needs to run first.
-        # Requires a .NET 6+ runtime installed on the machine; if none is
-        # found this raises here with a clear message instead of the
-        # cryptic netfx failure -- if that turns out to be the case on a
-        # real machine, the next step is dropping pythonnet entirely for
-        # pywebview's Qt6/PySide6 Windows backend instead.
-        import pythonnet
-
-        pythonnet.load("coreclr")
+        _load_dotnet_or_explain()
 
     webview.create_window(
         APP_TITLE,
