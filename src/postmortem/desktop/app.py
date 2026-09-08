@@ -70,7 +70,9 @@ DOTNET_MESSAGE = (
     "Postmortem needs the Microsoft .NET Desktop Runtime (version 8, x64) "
     "to show its window, and it isn't installed on this PC.\n\n"
     "Open the download page now? Install the \"Desktop Runtime\" (not the "
-    "SDK), then start Postmortem again."
+    "SDK), then start Postmortem again.\n\n"
+    "If it is already installed, the details are in "
+    "%APPDATA%\\postmortem\\desktop-startup.log."
 )
 
 
@@ -102,7 +104,36 @@ def coreclr_runtime_config_path() -> str:
     return str(path)
 
 
-def load_dotnet(loader, runtime_config: Optional[str] = None) -> str:
+STARTUP_LOG_NAME = "desktop-startup.log"
+
+
+def _startup_log() -> "logging.Logger":
+    """A log of the Windows .NET/pywebview start-up, written next to the
+    app's settings (%APPDATA%\\postmortem\\desktop-startup.log) -- the only
+    way to see *why* a frozen build failed to open its window, since
+    pywebview reduces every WinForms import failure to "You must have
+    pythonnet installed". Truncated each start; DEBUG so pywebview's own
+    diagnostics land in it too."""
+    import logging
+
+    from ..appdirs import config_dir
+
+    log = logging.getLogger("postmortem.desktop.startup")
+    try:
+        path = config_dir() / STARTUP_LOG_NAME
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handler = logging.FileHandler(path, mode="w", encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
+        root = logging.getLogger()
+        root.addHandler(handler)
+        root.setLevel(logging.DEBUG)
+        log.info("startup log at %s", path)
+    except OSError as exc:
+        log.warning("no startup log: %s", exc)
+    return log
+
+
+def load_dotnet(loader, runtime_config: Optional[str] = None, log=None) -> str:
     """Bind pythonnet to the first .NET runtime that loads: CoreCLR with
     the Windows Desktop runtime config, then the built-in .NET
     Framework. Returns the one that worked; raises the *last* failure if
@@ -117,22 +148,40 @@ def load_dotnet(loader, runtime_config: Optional[str] = None) -> str:
     for name, kwargs in attempts:
         try:
             loader(name, **kwargs)
+            if log:
+                log.info("pythonnet bound to %s %s", name, kwargs)
             return name
         except Exception as exc:  # pythonnet raises plain RuntimeError
+            if log:
+                log.exception("pythonnet.load(%r, **%r) failed", name, kwargs)
             last = exc
     assert last is not None
     raise last
 
 
 def _load_dotnet_or_explain() -> None:
+    log = _startup_log()
     import pythonnet
 
+    log.info("python %s frozen=%s pythonnet %s", sys.version.split()[0],
+             getattr(sys, "frozen", False), getattr(pythonnet, "__version__", "?"))
     try:
         try:
             config: Optional[str] = coreclr_runtime_config_path()
+            log.info("runtime config %s: %s", config, Path(config).read_text(encoding="utf-8"))
         except OSError:
-            config = None  # unwritable config dir: still try the bare runtime
-        load_dotnet(pythonnet.load, config)
+            log.exception("could not write the runtime config; trying the bare runtime")
+            config = None
+        load_dotnet(pythonnet.load, config, log)
+        try:
+            import clr  # noqa: F401  -- the import pywebview does lazily; fail loudly here instead
+
+            log.info("import clr ok; runtime: %s", getattr(pythonnet, "get_runtime_info", lambda: "?")())
+            clr.AddReference("System.Windows.Forms")
+            log.info("System.Windows.Forms loads")
+        except Exception:
+            log.exception("clr / System.Windows.Forms failed after pythonnet.load")
+            raise
     except Exception:
         import ctypes
         import webbrowser
