@@ -65,7 +65,6 @@ SHELL_INDEX = Path(__file__).resolve().parent / "shell" / "index.html"
 # (coreclr)... Can not determine dotnet root" -- which a user saw on a
 # fresh Windows install (2026-09-08). That's the case this turns into a
 # plain dialog with the download link instead of a traceback.
-DOTNET_RUNTIMES = ("coreclr", "netfx")
 DOTNET_DOWNLOAD_URL = "https://dotnet.microsoft.com/en-us/download/dotnet/8.0"
 DOTNET_MESSAGE = (
     "Postmortem needs the Microsoft .NET Desktop Runtime (version 8, x64) "
@@ -75,16 +74,49 @@ DOTNET_MESSAGE = (
 )
 
 
-def load_dotnet(loader, runtimes=DOTNET_RUNTIMES) -> str:
-    """Bind pythonnet to the first .NET runtime that loads, trying them in
-    order. Returns the one that worked; raises the *last* failure if none
-    do. ``loader`` is ``pythonnet.load`` (injected for tests). Must run
-    before anything imports ``clr`` -- pywebview does so lazily inside
-    ``webview.start()``."""
+# CoreCLR started with no runtime config gets the bare "console" flavour
+# of .NET (Microsoft.NETCore.App), which has no System.Windows.Forms in
+# it -- pywebview then dies with "Could not load file or assembly
+# 'System.Windows.Forms'" (seen 2026-09-08, right after the Desktop
+# Runtime was installed). This config asks for the Windows Desktop
+# flavour instead; rollForward lets any installed 6+ satisfy it.
+CORECLR_RUNTIME_CONFIG = {
+    "runtimeOptions": {
+        "tfm": "net6.0",
+        "framework": {"name": "Microsoft.WindowsDesktop.App", "version": "6.0.0"},
+        "rollForward": "LatestMajor",
+    },
+}
+
+
+def coreclr_runtime_config_path() -> str:
+    """Path of a runtimeconfig.json asking CoreCLR for the Windows Desktop
+    runtime, written fresh each start next to the app's own settings."""
+    import json
+
+    from ..appdirs import config_dir
+
+    path = config_dir() / "coreclr.runtimeconfig.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(CORECLR_RUNTIME_CONFIG, indent=2), encoding="utf-8")
+    return str(path)
+
+
+def load_dotnet(loader, runtime_config: Optional[str] = None) -> str:
+    """Bind pythonnet to the first .NET runtime that loads: CoreCLR with
+    the Windows Desktop runtime config, then the built-in .NET
+    Framework. Returns the one that worked; raises the *last* failure if
+    none do. ``loader`` is ``pythonnet.load`` (injected for tests). Must
+    run before anything imports ``clr`` -- pywebview does so lazily
+    inside ``webview.start()``."""
+    attempts = [
+        ("coreclr", {"runtime_config": runtime_config} if runtime_config else {}),
+        ("netfx", {}),
+    ]
     last: Optional[BaseException] = None
-    for name in runtimes:
+    for name, kwargs in attempts:
         try:
-            loader(name)
+            loader(name, **kwargs)
             return name
         except Exception as exc:  # pythonnet raises plain RuntimeError
             last = exc
@@ -96,7 +128,11 @@ def _load_dotnet_or_explain() -> None:
     import pythonnet
 
     try:
-        load_dotnet(pythonnet.load)
+        try:
+            config: Optional[str] = coreclr_runtime_config_path()
+        except OSError:
+            config = None  # unwritable config dir: still try the bare runtime
+        load_dotnet(pythonnet.load, config)
     except Exception:
         import ctypes
         import webbrowser
