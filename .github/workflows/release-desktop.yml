@@ -78,6 +78,41 @@ jobs:
         run: |
           ditto -c -k --sequesterRsrc --keepParent dist/Postmortem.app Postmortem-macos.zip
 
+      # Windows: swap pywebview's bundled WebView2 .NET assemblies for
+      # the modern-.NET build of the same library. pywebview ships the
+      # .NET Framework (net462) build, whose WebView2 control references
+      # System.Windows.Forms.ContextMenu -- a type modern .NET removed --
+      # so under CoreCLR (which this app must use; see desktop/app.py)
+      # pythonnet dies reflecting it with "Could not load type
+      # 'System.Windows.Forms.ContextMenu'" (alpha-desktop-32,
+      # 2026-09-08). Microsoft's own NuGet package carried a
+      # netcoreapp3.0 build up to 1.0.2592.51 (later versions dropped
+      # it, net462 only); every WebView2 API pywebview's edgechromium.py
+      # calls predates that version, and an older SDK is compatible with
+      # the newer Evergreen WebView2 Runtime on the machine. The native
+      # loader DLLs are replaced from the same package so all three
+      # match.
+      - name: Swap in the modern-.NET WebView2 assemblies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ver = "1.0.2592.51"
+          $nupkg = "$env:RUNNER_TEMP\webview2.zip"
+          Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/$ver" -OutFile $nupkg
+          $pkg = "$env:RUNNER_TEMP\webview2"
+          Expand-Archive -Path $nupkg -DestinationPath $pkg -Force
+          $lib = (Get-ChildItem -Path dist\Postmortem -Recurse -Filter Microsoft.Web.WebView2.WinForms.dll | Select-Object -First 1).DirectoryName
+          if (-not $lib) { throw "pywebview's WebView2 DLLs not found in dist\Postmortem" }
+          Write-Host "replacing WebView2 assemblies in $lib with $ver (netcoreapp3.0)"
+          Copy-Item "$pkg\lib\netcoreapp3.0\Microsoft.Web.WebView2.Core.dll" "$lib\Microsoft.Web.WebView2.Core.dll" -Force
+          Copy-Item "$pkg\lib\netcoreapp3.0\Microsoft.Web.WebView2.WinForms.dll" "$lib\Microsoft.Web.WebView2.WinForms.dll" -Force
+          foreach ($rid in "win-x64", "win-x86", "win-arm64") {
+            $dst = Join-Path $lib "runtimes\$rid\native\WebView2Loader.dll"
+            $src = Join-Path $pkg "runtimes\$rid\native\WebView2Loader.dll"
+            if ((Test-Path $dst) -and (Test-Path $src)) { Copy-Item $src $dst -Force }
+          }
+          Get-ChildItem $lib -Filter Microsoft.Web.WebView2.*.dll | ForEach-Object { "{0}  {1}" -f $_.Name, $_.VersionInfo.FileVersion }
+
       # Windows: the spec builds a onedir (COLLECT) layout rather than
       # --onefile, so zip the whole dist/Postmortem/ folder as the
       # single downloadable artifact. Kept alongside the installer below
