@@ -38,6 +38,16 @@ DUNGEON_DATA_FILENAME = "dungeon_data.json"
 INTERRUPT_DATA_FILENAME = "interrupt_data.json"
 SPELL_DAMAGE_FILENAME = "spell_damage.json"
 TALENT_DATA_FILENAME = "talent_data.json"
+AVOIDABLE_DATA_FILENAME = "avoidable_spells.json"
+
+
+def bundled_avoidable_data_path() -> Path:
+    """Path to the packaged avoidable-damage spell list (built from the
+    addon's PostmortemAvoidableDB capture of Blizzard's own damage-meter
+    classification by ``postmortem extract-avoidable`` -- see
+    analysis/avoidable.py). Optional: may not exist, and callers treat
+    that as "no tagging", never as an error."""
+    return Path(__file__).resolve().parent / "data" / AVOIDABLE_DATA_FILENAME
 
 
 def bundled_dungeon_data_path() -> Path:

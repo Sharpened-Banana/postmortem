@@ -1,11 +1,21 @@
 """Avoidable-damage tagging.
 
-We do not ship a spell database ourselves (see ROADMAP.md: "full
-avoidable-damage spell databases ... are intentionally not our job") --
-this module just defines and loads a small community/user-maintained JSON
-format that tags which spell ids are "stand in the fire"-type mechanics,
-so per-player damage taken from those specific spells can be broken out
-in the report. See ``docs/avoidable_spells.example.json`` for the schema:
+This module defines and loads a small JSON format that tags which spell
+ids are "stand in the fire"-type mechanics, so per-player damage taken
+from those specific spells can be broken out in the report.
+
+Where the list comes from (2026-09-08): Blizzard's own damage meter
+(patch 12.0.0) classifies spells as avoidable -- the "Avoidable Damage
+Taken" meter type Details! also shows -- but that flag is not written to
+the combat log, so it can't be derived from WoWCombatLog.txt. The addon
+harvests it instead (``addon/Postmortem/AvoidableDatabase.lua`` reads the
+meter at the end of every key into the PostmortemAvoidableDB
+SavedVariables table) and ``postmortem extract-avoidable`` turns that
+into this file, bundled at ``bundled_avoidable_data_path()`` so every
+consumer (CLI, desktop app, Watch Live, the public site) tags avoidable
+damage with zero configuration. A hand-maintained file in the same shape
+still works everywhere via ``--avoidable-data``.
+See ``docs/avoidable_spells.example.json`` for the schema:
 
     {
       "spells": [
@@ -30,7 +40,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 
 @dataclass
@@ -66,3 +76,19 @@ class AvoidableData:
             dungeons[int(key)] = {int(i) for i in ids}
 
         return cls(spells=spells, dungeons=dungeons)
+
+    @classmethod
+    def load_bundled(cls) -> Optional["AvoidableData"]:
+        """The packaged avoidable-spell list, or None when it was never
+        built (or is empty/unreadable) -- a zero-config default, never a
+        requirement. Callers pass an explicit file first and fall back to
+        this, so a bad bundled file can't mask a user's own."""
+        from ..bundled import bundled_avoidable_data_path
+        path = bundled_avoidable_data_path()
+        if not path.is_file():
+            return None
+        try:
+            data = cls.load(path)
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+            return None
+        return data if data.spells else None

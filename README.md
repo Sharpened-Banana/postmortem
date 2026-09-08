@@ -80,6 +80,10 @@ in-game:
 - **Recording helper** — auto-toggles combat logging (and advanced combat
   logging) on at `CHALLENGE_MODE_START`, off at completion/reset, so
   `/combatlog` is never forgotten before a key.
+- **Avoidable-damage capture** — at the end of every key, reads which
+  spells Blizzard's built-in damage meter classified as avoidable into
+  `PostmortemAvoidableDB` (see "Avoidable damage" below for the Python
+  side that turns it into the bundled list).
 - **Live stats overlay** — a small draggable window shown only during a key:
   forces progress, timer, death count (with time lost), and interrupt count.
 - **Route progress** (needs [MythicDungeonTools](https://www.curseforge.com/wow/addons/mythic-dungeon-tools)
@@ -163,11 +167,15 @@ not the SDK) if the app tells you it's missing.
 - **Crowd control uptime** — hard-CC landed on enemies (polymorph, traps,
   stuns, fears, banishes, ...) with real duration, not just a cast count:
   per-caster and per-type totals plus a full timeline.
-- **Avoidable damage** — `analyze --avoidable-data FILE` tags spell ids as
-  "stand in the fire" mechanics (a small community/user-maintained JSON
-  file, format + example in `docs/avoidable_spells.example.json`) and
-  breaks out each player's damage taken from just those spells, with hit
-  counts; omit the flag and the report is unaffected.
+- **Avoidable damage** — each player's damage taken from "stand in the
+  fire" mechanics, with hit counts. The spell list is Blizzard's own: the
+  addon reads the built-in damage meter's avoidable classification at the
+  end of every key (`AvoidableDatabase.lua` → `PostmortemAvoidableDB`),
+  and `postmortem extract-avoidable <SavedVariables/Postmortem.lua>`
+  merges that into a bundled `avoidable_spells.json` every consumer
+  picks up automatically (the CLI, desktop app, Watch Live, the site).
+  `analyze --avoidable-data FILE` overrides it with your own list (format
+  in `docs/avoidable_spells.example.json`).
 - **Spellsteal targets** — `analyze --stealable-data FILE` tags spell ids
   worth Spellstealing (same community/user-maintained shape as avoidable
   damage, format + example in `docs/stealable_spells.example.json` — we

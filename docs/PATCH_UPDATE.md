@@ -23,6 +23,7 @@ is still stale.
 | **Dungeon/enemy data** | Every season (new dungeon pool, changed forces values). Route comparison is meaningless without it. | `extract-data` — reads your installed MDT addon |
 | **Talent map** | Every patch that touches talent trees. Without it, a run's talent picks show as node ids instead of names. | `build-talent-data` — Blizzard's API |
 | **Interrupt database** | Every season (new dungeon pool = new kickable spells). | `build-interrupt-data` — a community file you download |
+| **Avoidable-damage list** | Every season (new dungeons = new avoidable spells). Grows with every key you play; a refresh just merges what the addon captured. | `extract-avoidable` — reads the addon's SavedVariables (auto-found under `WTF/`) |
 | **Spell damage** | Occasionally. Only the kick-value *fallback* when a spell never landed in your own run. | `build-spell-damage` — samples Warcraft Logs |
 | **Addon `## Interface:`** | Every patch, or WoW marks the addon out of date. | `--toc-interface` |
 
@@ -32,6 +33,9 @@ Not on this list, deliberately:
   `notInterruptible` flag unreadable by addons (Blizzard's Secret
   Values). See `addon/Postmortem/InterruptDatabase.lua`, kept as a
   documented stub. The database is maintained on the Python side now.
+  (Avoidable damage is the opposite case: Blizzard's damage meter
+  exposes its avoidable flag to addons, so that list *is* captured
+  in-game — `addon/Postmortem/AvoidableDatabase.lua`.)
 - **Raider.io, gear and live talents** need no refresh: they're fetched
   live from Raider.io and Blizzard at page-view time.
 

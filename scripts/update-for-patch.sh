@@ -10,6 +10,7 @@
 #
 #   ./scripts/update-for-patch.sh --toc-interface 120200
 #   ./scripts/update-for-patch.sh --interrupts-source ~/Downloads/mplus.json
+#   ./scripts/update-for-patch.sh --savedvars path/to/SavedVariables/Postmortem.lua
 #   ./scripts/update-for-patch.sh --with-spell-damage      # slow, hours
 #
 set -euo pipefail
@@ -20,6 +21,8 @@ cd "$REPO_ROOT"
 DATA_DIR="src/postmortem/data"
 MDT_PATH="${MDT_PATH:-/Applications/World of Warcraft/_retail_/Interface/AddOns/MythicDungeonTools}"
 LOGS_DIR="${LOGS_DIR:-/Applications/World of Warcraft/_retail_/Logs}"
+WTF_DIR="${WTF_DIR:-/Applications/World of Warcraft/_retail_/WTF}"
+SAVEDVARS=""
 INTERRUPTS_SOURCE=""
 TOC_INTERFACE=""
 WITH_SPELL_DAMAGE=0
@@ -31,6 +34,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --mdt) MDT_PATH="$2"; shift 2 ;;
     --logs) LOGS_DIR="$2"; shift 2 ;;
+    --savedvars) SAVEDVARS="$2"; shift 2 ;;
     --interrupts-source) INTERRUPTS_SOURCE="$2"; shift 2 ;;
     --toc-interface) TOC_INTERFACE="$2"; shift 2 ;;
     --with-spell-damage) WITH_SPELL_DAMAGE=1; shift ;;
@@ -92,6 +96,34 @@ if [[ -n "$INTERRUPTS_SOURCE" && -f "$INTERRUPTS_SOURCE" ]]; then
   fi
 else
   skip "no --interrupts-source FILE (see docs/PATCH_UPDATE.md for where to get one)"
+fi
+
+# --- 3b. avoidable-damage database -----------------------------------------
+# Captured in-game: the addon reads Blizzard's own damage meter at the end
+# of every key and records which spells it classifies as avoidable
+# (PostmortemAvoidableDB in the addon's SavedVariables). Merges into the
+# existing list -- it only ever grows -- and bundles it. WoW writes
+# SavedVariables on logout or /reload, so play a key and log out first.
+say "Avoidable-damage database (from the addon's SavedVariables)"
+SV_FILES=()
+if [[ -n "$SAVEDVARS" ]]; then
+  SV_FILES=("$SAVEDVARS")
+else
+  while IFS= read -r f; do SV_FILES+=("$f"); done < <(
+    find "$WTF_DIR/Account" -path '*/SavedVariables/Postmortem.lua' -type f 2>/dev/null
+  )
+fi
+if [[ ${#SV_FILES[@]} -gt 0 ]]; then
+  for sv in "${SV_FILES[@]}"; do
+    if grep -q '^PostmortemAvoidableDB' "$sv"; then
+      pm extract-avoidable "$sv" -o "$DATA_DIR/avoidable_spells.json"
+      ok "avoidable_spells.json merged from $sv"
+    else
+      skip "$sv has no PostmortemAvoidableDB yet (finish a key with the addon loaded, then log out)"
+    fi
+  done
+else
+  skip "no Postmortem.lua under $WTF_DIR/Account (pass --savedvars FILE)"
 fi
 
 # --- 4. spell damage (optional, slow) --------------------------------------
