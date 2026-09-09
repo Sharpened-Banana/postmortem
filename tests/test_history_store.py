@@ -89,8 +89,76 @@ class TestQueryRunsShape:
         # value between a directory scan and a DB row)
         for key in ("zone", "level", "start_ts", "completed", "timed",
                     "duration_ms", "deaths", "adherence_pct",
-                    "kick_efficiency_pct", "affixes"):
+                    "kick_efficiency_pct", "affixes",
+                    # leaderboard-row fields: nested JSON round-trips
+                    # through sqlite TEXT back to identical structures
+                    "party", "threshold", "margin_ms", "deaths_detail"):
             assert db_rows[0][key] == scan_rows[0][key], key
+
+    def test_party_excludes_pet_bucket_and_keeps_class_role(self, tmp_path, report):
+        db_path = tmp_path / "runs.db"
+        ingest(report, db_path)
+        row = query_runs(db_path)[0]
+        assert row["party"], "expected at least one player in party"
+        assert all(set(p) == {"name", "class", "role"} for p in row["party"])
+        assert all(not str(p["name"]).startswith("Pets") for p in row["party"])
+        assert len(row["party"]) == len([
+            p for p in report["players"] if not str(p.get("guid", "")).startswith("_")
+        ])
+
+    def test_deaths_detail_carries_killing_spell(self, tmp_path, report):
+        db_path = tmp_path / "runs.db"
+        ingest(report, db_path)
+        row = query_runs(db_path)[0]
+        assert len(row["deaths_detail"]) == row["deaths"] == len(report["deaths"])
+        for d, src in zip(row["deaths_detail"], report["deaths"]):
+            assert set(d) == {"t", "player", "spell"}
+            assert d["player"] == src["player"]
+
+
+class TestMigration:
+    def test_old_schema_db_gains_new_columns_on_open(self, tmp_path, report):
+        # A database created before the leaderboard columns existed: the
+        # original ``runs`` DDL, minus party/threshold/margin_ms/deaths_json.
+        db_path = tmp_path / "runs.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.executescript("""
+            CREATE TABLE runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, zone TEXT, level INTEGER,
+                start_ts REAL, end_ts REAL, completed INTEGER, timed INTEGER,
+                duration_ms INTEGER, wall_s REAL, deaths INTEGER, death_cost_s REAL,
+                forces_pct REAL, adherence_pct REAL, kick_efficiency_pct REAL,
+                affixes TEXT, file_name TEXT, html_name TEXT, source_path TEXT,
+                report_json TEXT NOT NULL, ingested_at REAL, UNIQUE(zone, start_ts));
+            INSERT INTO runs (zone, start_ts, completed, report_json)
+                VALUES ('Old Zone', 1.0, 1, '{}');
+        """)
+        conn.commit()
+        conn.close()
+
+        # Opening the store migrates; the pre-existing row reads back with
+        # the new fields normalized to empty/None, not an error.
+        rows = query_runs(db_path)
+        assert len(rows) == 1
+        assert rows[0]["zone"] == "Old Zone"
+        assert rows[0]["party"] == []
+        assert rows[0]["deaths_detail"] == []
+        assert rows[0]["threshold"] is None
+        assert rows[0]["margin_ms"] is None
+
+        cols = {r[1] for r in sqlite3.connect(str(db_path)).execute("PRAGMA table_info(runs)")}
+        assert {"party", "threshold", "margin_ms", "deaths_json"} <= cols
+
+        # And ingesting into the migrated db fills them.
+        ingest(report, db_path)
+        fresh = [r for r in query_runs(db_path) if r["zone"] != "Old Zone"][0]
+        assert fresh["party"]
+
+    def test_opening_twice_is_idempotent(self, tmp_path):
+        db_path = tmp_path / "runs.db"
+        Store(db_path).close()
+        Store(db_path).close()  # second _migrate() must not re-ALTER
+        assert query_runs(db_path) == []
 
 
 class TestZoneFilter:

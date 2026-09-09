@@ -26,6 +26,11 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
+# The nested index-row fields are derived by the same two helpers the
+# directory-scan producer uses, so both sides of the seam agree by
+# construction rather than by two hand-kept copies.
+from ..report.index import deaths_summary, party_summary
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,6 +53,10 @@ CREATE TABLE IF NOT EXISTS runs (
     source_path TEXT,
     report_json TEXT NOT NULL,
     ingested_at REAL,
+    party TEXT,
+    threshold INTEGER,
+    margin_ms INTEGER,
+    deaths_json TEXT,
     UNIQUE(zone, start_ts)
 );
 
@@ -82,6 +91,26 @@ CREATE INDEX IF NOT EXISTS idx_players_run_id ON players(run_id);
 CREATE INDEX IF NOT EXISTS idx_deaths_run_id ON deaths(run_id);
 """
 
+# Columns added to ``runs`` after the table first shipped. ``CREATE TABLE
+# IF NOT EXISTS`` above never alters an existing table, so ``_migrate()``
+# adds any of these that a pre-existing database is missing. Old rows just
+# read back NULL for them (``_to_index_row`` tolerates that); they fill in
+# the next time each run is re-ingested.
+_RUNS_ADDED_COLUMNS = (
+    ("party", "TEXT"),
+    ("threshold", "INTEGER"),
+    ("margin_ms", "INTEGER"),
+    ("deaths_json", "TEXT"),
+)
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add any ``_RUNS_ADDED_COLUMNS`` missing from ``runs``. Idempotent."""
+    present = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
+    for name, coltype in _RUNS_ADDED_COLUMNS:
+        if name not in present:
+            conn.execute(f"ALTER TABLE runs ADD COLUMN {name} {coltype}")
+
 
 class Store:
     """A connection to one run-history SQLite database.
@@ -101,6 +130,7 @@ class Store:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(_SCHEMA)
+        _migrate(self._conn)
         self._conn.commit()
 
     def close(self) -> None:
@@ -232,6 +262,7 @@ def _row_values(
     comparison = report.get("comparison") or {}
     enemy_casts = report.get("enemy_casts") or {}
     death_cost = report.get("death_cost") or {}
+    timer = report.get("timer") or {}
     zone = run.get("zone")
     start_ts = run.get("start_ts")
 
@@ -277,7 +308,21 @@ def _row_values(
         "source_path": str(source_path) if source_path is not None else None,
         "report_json": json.dumps(report),
         "ingested_at": time.time(),
+        "party": json.dumps(party_summary(report)),
+        "threshold": timer.get("threshold"),
+        "margin_ms": timer.get("margin_ms"),
+        "deaths_json": json.dumps(deaths_summary(report)),
     }
+
+
+def _col(r: sqlite3.Row, name: str) -> Any:
+    """``r[name]``, or None when the query behind ``r`` didn't select that
+    column at all. The public site runs several bespoke ``SELECT`` lists
+    against ``runs`` (its feed, account pages, visibility views) and hands
+    each result here; a column added later (see ``_RUNS_ADDED_COLUMNS``)
+    must degrade to "not present" for those rather than raise
+    ``IndexError: No item with that key``."""
+    return r[name] if name in r.keys() else None
 
 
 def _to_index_row(r: sqlite3.Row) -> dict[str, Any]:
@@ -287,6 +332,8 @@ def _to_index_row(r: sqlite3.Row) -> dict[str, Any]:
     that lets ``report.index.render_index()`` stay ignorant of whether its
     rows came from a directory scan or from here."""
     start_ts = r["start_ts"]
+    party = _col(r, "party")
+    deaths_json = _col(r, "deaths_json")
     return {
         "file": r["file_name"],
         "html": r["html_name"],
@@ -307,6 +354,13 @@ def _to_index_row(r: sqlite3.Row) -> dict[str, Any]:
         "adherence_pct": r["adherence_pct"],
         "kick_efficiency_pct": r["kick_efficiency_pct"],
         "affixes": json.loads(r["affixes"]) if r["affixes"] else [],
+        # Rows ingested before these columns existed read back NULL --
+        # normalized to the same empty/None values collect_reports() would
+        # produce for a report that simply lacks the data.
+        "party": json.loads(party) if party else [],
+        "threshold": _col(r, "threshold"),
+        "margin_ms": _col(r, "margin_ms"),
+        "deaths_detail": json.loads(deaths_json) if deaths_json else [],
     }
 
 

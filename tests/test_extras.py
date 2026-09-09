@@ -32,6 +32,7 @@ def _row(**over):
         "wall_s": 1500.0, "deaths": 0, "death_cost_s": 0.0,
         "forces_pct": 100.0, "adherence_pct": 80.0,
         "kick_efficiency_pct": 60.0, "affixes": [],
+        "party": [], "threshold": None, "margin_ms": None, "deaths_detail": [],
     }
     base.update(over)
     return base
@@ -45,14 +46,16 @@ def _extract_inline_script(html):
     return m.group(1)
 
 
-def _run_chart_js(tmp_path, rows, filter_zone=None):
+def _run_chart_js(tmp_path, rows, filter_zone=None, extra_js=""):
     """Execute the real render() against a stubbed document/RUNS, optionally
-    re-rendering once more with the dungeon filter set, and return the final
-    #app innerHTML. Requires node; callers should be skipped without it."""
+    re-rendering once more with the dungeon filter set (and/or any
+    ``extra_js`` statements, e.g. opening a row's detail), and return the
+    final #app innerHTML. Requires node; callers should be skipped without it."""
     html = render_index(rows)
     script = _extract_inline_script(html)
     runs_literal = json.dumps(json.dumps(rows))
     filter_stmt = f"dungeon = {json.dumps(filter_zone)};\n" if filter_zone is not None else ""
+    filter_stmt += extra_js
     harness = f"""
 class El {{
   constructor() {{ this.innerHTML = ""; this.textContent = ""; }}
@@ -246,6 +249,102 @@ class TestHistoryChartsRuntime:
             rows = [_row(start_ts=1_700_000_000 + i, file=f"r{i}.json") for i in range(n)]
             out = _run_chart_js(tmp_path, rows)
             assert out.count("<svg") == 4
+
+
+@pytest.mark.skipif(NODE is None, reason="node not available for JS-runtime board tests")
+class TestLeaderboardRuntime:
+    """The leaderboard rows that replaced the runs table: rank, dungeon
+    abbreviation, chest stars, affix chips, class-colored party by role,
+    and the expandable detail block -- executed through the real render()."""
+
+    def _rows(self):
+        party = [
+            {"name": "Zimengdk-Realm", "class": "Death Knight", "role": "tank"},
+            {"name": "Bbpaladin-Realm", "class": "Paladin", "role": "healer"},
+            {"name": "Qing-Realm", "class": "Mage", "role": "dps"},
+            {"name": "Nocombatinfo-Realm", "class": None, "role": None},
+        ]
+        return [
+            _row(zone="Ara-Kara, City of Echoes", level=21, start_ts=1, file="a.json",
+                 duration_ms=1_823_000, affixes=[158, 9], party=party, threshold=3,
+                 margin_ms=48_000, deaths=1, death_cost_s=15.0,
+                 deaths_detail=[{"t": 724.0, "player": "Qing-Realm", "spell": "Sonic Blast"}]),
+            # same dungeon+level, slower, over time (threshold 0) and no route
+            _row(zone="Ara-Kara, City of Echoes", level=21, start_ts=2, file="b.json",
+                 html=None, duration_ms=1_915_000, timed=False, threshold=0,
+                 margin_ms=-90_000, adherence_pct=None, party=[], affixes=[]),
+            # incomplete: no rank, level in red
+            _row(zone="The Rookery", level=12, start_ts=3, file="c.json",
+                 completed=False, timed=None, duration_ms=None, threshold=None),
+        ]
+
+    def test_rank_is_per_dungeon_level_fastest_first(self, tmp_path):
+        out = _run_chart_js(tmp_path, self._rows())
+        # a.json fastest -> rank 1, b.json -> rank 2, incomplete c -> "—"
+        assert '<div class="rank">1</div>' in out
+        assert '<div class="rank">2</div>' in out
+        assert '<div class="rank none">—</div>' in out
+
+    def test_dungeon_abbreviation_and_full_name_on_hover(self, tmp_path):
+        out = _run_chart_js(tmp_path, self._rows())
+        assert 'title="Ara-Kara, City of Echoes">AKC</div>' in out
+        assert 'title="The Rookery">R</div>' in out
+
+    def test_stars_and_over_time_styling(self, tmp_path):
+        out = _run_chart_js(tmp_path, self._rows())
+        assert '<span class="stars">★★★</span>' in out       # threshold 3
+        assert 'class="level over">+21<span class="stars"></span>' in out  # threshold 0
+        assert 'class="level dnf">+12' in out                 # incomplete
+        assert 'class="time over">31:55' in out
+
+    def test_stars_fall_back_to_timed_flag_without_threshold(self, tmp_path):
+        rows = [_row(threshold=None, timed=True), _row(threshold=None, timed=False, start_ts=5)]
+        out = _run_chart_js(tmp_path, rows)
+        assert '<span class="stars">★</span>' in out
+        assert 'class="level over">' in out
+
+    def test_affix_chips_with_names_on_hover(self, tmp_path):
+        out = _run_chart_js(tmp_path, self._rows())
+        assert 'title="Voidbound">Void</span>' in out
+        assert 'title="Tyrannical">Tyr</span>' in out
+
+    def test_unknown_affix_id_still_renders(self, tmp_path):
+        out = _run_chart_js(tmp_path, [_row(affixes=[9999])])
+        assert 'title="Affix #9999">#9999</span>' in out
+
+    def test_party_split_by_role_and_class_colored(self, tmp_path):
+        out = _run_chart_js(tmp_path, self._rows())
+        # realm stripped, class color applied
+        assert 'style="color:#C41E3A" title="Zimengdk-Realm · Death Knight">Zimengdk</span>' in out
+        assert 'style="color:#F48CBA" title="Bbpaladin-Realm · Paladin">Bbpaladin</span>' in out
+        assert 'style="color:#3FC7EB" title="Qing-Realm · Mage">Qing</span>' in out
+        # unknown class/role: uncolored, still listed (after DPS), not dropped
+        assert 'class="pname unk" title="Nocombatinfo-Realm">Nocombatinfo</span>' in out
+        # a run with no party data shows dashes, not empty cells
+        assert out.count('<div class="party"><span class="dim">—</span></div>') >= 3
+
+    def test_score_columns_present_and_dash_when_missing(self, tmp_path):
+        out = _run_chart_js(tmp_path, self._rows())
+        assert '<div class="score col-score">60%</div>' in out   # kicks, from _row default
+        assert '<div class="score col-score">80%</div>' in out   # route
+        assert '<div class="score col-score">—</div>' in out     # b.json: no route
+
+    def test_detail_block_opens_with_stats_and_deaths(self, tmp_path):
+        rows = self._rows()
+        collapsed = _run_chart_js(tmp_path, rows)
+        assert "run-detail" not in collapsed
+        opened = _run_chart_js(tmp_path, rows, extra_js="openKey = runKey(RUNS[0]);\n")
+        assert opened.count("run-detail") == 1
+        assert "<b>1</b> <span>deaths (−0:15)</span>" in opened
+        assert "<b>+0:48</b> <span>under timer</span>" in opened
+        assert "<b>Qing</b> → Sonic Blast <span>at 12:04</span>" in opened
+        assert 'class="open" href="run.html">open full report →</a>' in opened
+
+    def test_detail_over_time_and_no_html(self, tmp_path):
+        rows = self._rows()
+        opened = _run_chart_js(tmp_path, rows, extra_js="openKey = runKey(RUNS[1]);\n")
+        assert '<b class="over">1:30</b> <span>over timer</span>' in opened
+        assert '<span class="open dim">b.json</span>' in opened
 
 
 class TestRaiderIO:
