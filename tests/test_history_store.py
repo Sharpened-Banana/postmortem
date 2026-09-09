@@ -132,19 +132,36 @@ class TestMigration:
                 report_json TEXT NOT NULL, ingested_at REAL, UNIQUE(zone, start_ts));
             INSERT INTO runs (zone, start_ts, completed, report_json)
                 VALUES ('Old Zone', 1.0, 1, '{}');
+            INSERT INTO runs (zone, start_ts, completed, report_json)
+                VALUES ('Broken Zone', 2.0, 1, 'not json');
         """)
+        # A row ingested by the old code, whose report_json carries a
+        # party and timer the new columns should be filled from.
+        conn.execute(
+            "INSERT INTO runs (zone, start_ts, completed, report_json) VALUES (?, ?, 1, ?)",
+            ("Old Full", 3.0, json.dumps(report)),
+        )
         conn.commit()
         conn.close()
 
-        # Opening the store migrates; the pre-existing row reads back with
-        # the new fields normalized to empty/None, not an error.
-        rows = query_runs(db_path)
-        assert len(rows) == 1
-        assert rows[0]["zone"] == "Old Zone"
-        assert rows[0]["party"] == []
-        assert rows[0]["deaths_detail"] == []
-        assert rows[0]["threshold"] is None
-        assert rows[0]["margin_ms"] is None
+        # Opening the store migrates; the pre-existing rows read back with
+        # the new fields normalized to empty/None, not an error ...
+        rows = {r["zone"]: r for r in query_runs(db_path)}
+        assert set(rows) == {"Old Zone", "Broken Zone", "Old Full"}
+        assert rows["Old Zone"]["party"] == []
+        assert rows["Old Zone"]["deaths_detail"] == []
+        assert rows["Old Zone"]["threshold"] is None
+        assert rows["Old Zone"]["margin_ms"] is None
+        assert rows["Broken Zone"]["party"] == []
+
+        # ... and the row with a real stored report is backfilled to exactly
+        # what a fresh ingest of the same report writes.
+        fresh_db = tmp_path / "fresh.db"
+        ingest(report, fresh_db)
+        fresh = query_runs(fresh_db)[0]
+        for key in ("party", "deaths_detail", "threshold", "margin_ms"):
+            assert rows["Old Full"][key] == fresh[key], key
+        assert rows["Old Full"]["party"]
 
         cols = {r[1] for r in sqlite3.connect(str(db_path)).execute("PRAGMA table_info(runs)")}
         assert {"party", "threshold", "margin_ms", "deaths_json"} <= cols
