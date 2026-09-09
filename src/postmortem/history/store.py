@@ -93,9 +93,11 @@ CREATE INDEX IF NOT EXISTS idx_deaths_run_id ON deaths(run_id);
 
 # Columns added to ``runs`` after the table first shipped. ``CREATE TABLE
 # IF NOT EXISTS`` above never alters an existing table, so ``_migrate()``
-# adds any of these that a pre-existing database is missing. Old rows just
-# read back NULL for them (``_to_index_row`` tolerates that); they fill in
-# the next time each run is re-ingested.
+# adds any of these that a pre-existing database is missing, then fills
+# them for the rows already there from each row's stored report_json (the
+# same values a fresh ``ingest()`` would write), so an upgraded database's
+# index page shows the party on every run, not only on runs ingested after
+# the upgrade.
 _RUNS_ADDED_COLUMNS = (
     ("party", "TEXT"),
     ("threshold", "INTEGER"),
@@ -104,12 +106,55 @@ _RUNS_ADDED_COLUMNS = (
 )
 
 
+def _leaderboard_fields(report: dict[str, Any]) -> dict[str, Any]:
+    """The ``_RUNS_ADDED_COLUMNS`` values for one report -- shared by
+    ``_row_values`` (fresh ingest) and ``_migrate`` (backfill), so both
+    write exactly the same thing."""
+    timer = report.get("timer") or {}
+    return {
+        "party": json.dumps(party_summary(report)),
+        "threshold": timer.get("threshold"),
+        "margin_ms": timer.get("margin_ms"),
+        "deaths_json": json.dumps(deaths_summary(report)),
+    }
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
-    """Add any ``_RUNS_ADDED_COLUMNS`` missing from ``runs``. Idempotent."""
+    """Add any ``_RUNS_ADDED_COLUMNS`` missing from ``runs`` and backfill
+    them from ``report_json`` for the rows that predate them. Idempotent:
+    a second call finds every column present and no row left to fill."""
     present = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
     for name, coltype in _RUNS_ADDED_COLUMNS:
         if name not in present:
             conn.execute(f"ALTER TABLE runs ADD COLUMN {name} {coltype}")
+    _backfill_leaderboard_columns(conn)
+
+
+def _backfill_leaderboard_columns(conn: sqlite3.Connection) -> None:
+    """Fill ``party``/``threshold``/``margin_ms``/``deaths_json`` on rows
+    where ``party`` is still NULL (rows inserted before the columns
+    existed). One row at a time so the full report_json of only one run
+    is in memory at once -- the same reason the site's feed never selects
+    that column. A row whose report_json won't parse is left alone rather
+    than failing the whole open."""
+    ids = [r[0] for r in conn.execute("SELECT id FROM runs WHERE party IS NULL")]
+    for run_id in ids:
+        row = conn.execute("SELECT report_json FROM runs WHERE id = ?", (run_id,)).fetchone()
+        if row is None:
+            continue
+        try:
+            report = json.loads(row[0])
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(report, dict):
+            continue
+        fields = _leaderboard_fields(report)
+        conn.execute(
+            "UPDATE runs SET party = ?, threshold = ?, margin_ms = ?, deaths_json = ? "
+            "WHERE id = ?",
+            (fields["party"], fields["threshold"], fields["margin_ms"],
+             fields["deaths_json"], run_id),
+        )
 
 
 class Store:
@@ -308,10 +353,7 @@ def _row_values(
         "source_path": str(source_path) if source_path is not None else None,
         "report_json": json.dumps(report),
         "ingested_at": time.time(),
-        "party": json.dumps(party_summary(report)),
-        "threshold": timer.get("threshold"),
-        "margin_ms": timer.get("margin_ms"),
-        "deaths_json": json.dumps(deaths_summary(report)),
+        **_leaderboard_fields(report),
     }
 
 
