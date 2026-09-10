@@ -431,11 +431,37 @@ class TestApplyUpdateAndRelaunch:
         updater.apply_update_and_relaunch(new_install, pid=999)
 
         args = captured["args"]
-        assert args[0] == "powershell"
+        assert args[0].lower().endswith("powershell.exe")
         assert "-File" in args
-        script_path = updater.Path(args[args.index("-File") + 1])
-        assert "Wait-Process" in script_path.read_text()
-        assert captured["kwargs"]["creationflags"] != 0
+        # No console flashing up while the helper waits for the app to exit.
+        assert "-WindowStyle" in args and args[args.index("-WindowStyle") + 1] == "Hidden"
+        flags = captured["kwargs"]["creationflags"]
+        assert flags & 0x00000200  # CREATE_NEW_PROCESS_GROUP: outlives this process
+        assert flags & 0x08000000  # CREATE_NO_WINDOW
+        # The helper logs what it did somewhere a person can find later.
+        assert "-LogPath" in args
+        assert args[args.index("-LogPath") + 1].endswith(updater.UPDATE_LOG_NAME)
+
+        script = updater.Path(args[args.index("-File") + 1]).read_text()
+        assert "Wait-Process" in script
+        # Never leave the user without an app: retry moving the old
+        # install aside, restore the backup if the new build can't be
+        # moved in, and relaunch whatever is in place at the end.
+        assert "for ($i = 1; $i -le 30; $i++)" in script
+        assert "restoring the previous install" in script
+        assert script.count("Launch $OldDir") >= 3
+        # Move-Item can't move a directory across volumes; the helper
+        # falls back to copy + delete.
+        assert "Copy-Item -LiteralPath $src -Destination $dst -Recurse -Force" in script
+        # The Inno uninstaller must survive the swap.
+        assert '-Filter "unins*"' in script
+
+    def test_windows_update_log_lives_in_the_config_dir(self, tmp_path, monkeypatch):
+        import postmortem.appdirs as appdirs
+        monkeypatch.setattr(appdirs, "config_dir", lambda: tmp_path / "cfg")
+        path = updater._update_log_path()
+        assert path == tmp_path / "cfg" / updater.UPDATE_LOG_NAME
+        assert path.parent.is_dir()
 
 
 # -- perform_update (end-to-end with network + subprocess mocked) -----------
