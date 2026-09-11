@@ -125,11 +125,129 @@ class TestBuildResultsPayload:
             "run": {"zone": "X", "keystone_level": 10},
             "players": [],
             "comparison": {"adherence_pct": 66.7},
-            "timer": {"par_ms": 1800000, "diff_ms": -120000, "timed": True},
+            # Real _timer_summary() field names (analysis/run_analyzer.py) --
+            # NOT "diff_ms"/"timed", which that function never emits (a real
+            # bug this WP fixed: those two addon-side fields were silently
+            # always nil before).
+            "timer": {"par_ms": 1800000, "threshold_2_ms": 1440000,
+                      "threshold_3_ms": 1080000, "margin_ms": 120000,
+                      "threshold": 2},
         }
         payload = build_results_payload(report)
         assert payload["adherence_pct"] == 66.7
-        assert payload["timer"]["diff_ms"] == -120000
+        assert payload["timer"]["par_ms"] == 1800000
+        assert payload["timer"]["threshold_2_ms"] == 1440000
+        assert payload["timer"]["threshold_3_ms"] == 1080000
+        assert payload["timer"]["margin_ms"] == 120000
+        assert payload["timer"]["threshold"] == 2
+
+    def test_missed_kicks_only_includes_spells_that_got_through(self):
+        report = {
+            "run": {"zone": "X"},
+            "players": [],
+            "enemy_casts": {
+                "spells": [
+                    {"spell_id": 1, "name": "Always Kicked", "kicked": 3, "got_through": 0},
+                    {"spell_id": 2, "name": "Sometimes Missed", "kicked": 2, "got_through": 5},
+                ],
+            },
+        }
+        payload = build_results_payload(report)
+        spells = payload["enemy_casts"]["spells"]
+        assert len(spells) == 1
+        assert spells[0]["spell_id"] == 2
+        assert spells[0]["got_through"] == 5
+
+    def test_missed_kicks_absent_when_none_got_through(self):
+        report = {
+            "run": {"zone": "X"}, "players": [],
+            "enemy_casts": {"spells": [{"spell_id": 1, "kicked": 3, "got_through": 0}]},
+        }
+        payload = build_results_payload(report)
+        assert "enemy_casts" not in payload
+
+    def test_avoidable_damage_top_spells_per_player(self):
+        report = {
+            "run": {"zone": "X"}, "players": [],
+            "avoidable_damage": {
+                "by_player": [
+                    {
+                        "name": "Tank-Realm",
+                        "avoidable_damage_taken": 5000,
+                        "by_spell": [
+                            {"spell_id": 1, "name": "Fire", "amount": 3000},
+                            {"spell_id": 2, "name": "Poison", "amount": 1500},
+                            {"spell_id": 3, "name": "Frost", "amount": 300},
+                            {"spell_id": 4, "name": "Shadow", "amount": 200},
+                        ],
+                    },
+                ],
+            },
+        }
+        payload = build_results_payload(report)
+        by_spell = payload["avoidable_damage"]["by_player"][0]["by_spell"]
+        assert len(by_spell) == 3
+        assert by_spell[0]["name"] == "Fire"
+
+    def test_dispel_efficiency_excludes_unscored_schools(self):
+        report = {
+            "run": {"zone": "X"}, "players": [],
+            "dispel_efficiency": {
+                "overall_efficiency_pct": 80.0,
+                "schools": [
+                    {"school": "Poison", "applied": 5, "dispelled": 4, "efficiency_pct": 80.0},
+                    {"school": "Curse", "applied": 2, "dispelled": 0, "efficiency_pct": None},
+                ],
+            },
+        }
+        payload = build_results_payload(report)
+        assert payload["dispel_efficiency"]["overall_efficiency_pct"] == 80.0
+        schools = payload["dispel_efficiency"]["schools"]
+        assert len(schools) == 1
+        assert schools[0]["school"] == "Poison"
+
+    def test_unplanned_pulls_absent_when_zero(self):
+        report = {
+            "run": {"zone": "X"}, "players": [],
+            "unplanned_pulls": {"total_off_route_mobs": 0, "total_untracked_mobs": 0},
+        }
+        payload = build_results_payload(report)
+        assert "unplanned_pulls" not in payload
+
+    def test_unplanned_pulls_present_when_nonzero(self):
+        report = {
+            "run": {"zone": "X"}, "players": [],
+            "unplanned_pulls": {"total_off_route_mobs": 2, "total_untracked_mobs": 1},
+        }
+        payload = build_results_payload(report)
+        assert payload["unplanned_pulls"]["total_off_route_mobs"] == 2
+
+    def test_deaths_detail_tags_avoidable_killing_blows(self):
+        report = {
+            "run": {"zone": "X"}, "players": [],
+            "avoidable_damage": {
+                "by_player": [
+                    {"name": "Healer-Realm", "avoidable_damage_taken": 100,
+                     "by_spell": [{"spell_id": 42, "name": "Fire", "amount": 100}]},
+                ],
+            },
+            "deaths": [
+                {"t": 12.5, "player": "Healer-Realm",
+                 "killing_blow": {"spell": "Fire", "spell_id": 42, "amount": 99999}},
+                {"t": 30.0, "player": "Tank-Realm",
+                 "killing_blow": {"spell": "Melee", "spell_id": 0, "amount": 5000}},
+            ],
+        }
+        payload = build_results_payload(report)
+        deaths = payload["deaths_detail"]
+        assert deaths[0]["avoidable"] is True
+        assert deaths[0]["spell"] == "Fire"
+        assert deaths[1]["avoidable"] is False
+
+    def test_deaths_detail_absent_when_no_deaths(self):
+        report = {"run": {"zone": "X"}, "players": []}
+        payload = build_results_payload(report)
+        assert "deaths_detail" not in payload
 
 
 class TestAddonDirDerivation:

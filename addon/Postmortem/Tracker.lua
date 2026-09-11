@@ -113,6 +113,8 @@ function MA:Tracker_OnTick()
   -- once-per-second tick instead of an OnUpdate of its own; same guarded-
   -- call pattern as Overlay_Refresh below.
   if MA.RouteImport_OnTick then MA.RouteImport_OnTick(MA) end
+  if MA.Interrupts_OnTick then MA.Interrupts_OnTick(MA) end
+  if MA.ChestTimer_OnTick then MA.ChestTimer_OnTick(MA) end
   if MA.Overlay_Refresh then MA.Overlay_Refresh(MA) end
 end
 

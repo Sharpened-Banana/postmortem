@@ -97,6 +97,56 @@ local function BuildPlayerLines(r)
   return table.concat(lines, "\n")
 end
 
+-- "Missed kicks" section: enemy_casts.spells the desktop app already
+-- trimmed to only spells that got through at least once (see
+-- addon_results.py's build_results_payload) -- shown as-is, top 5 here so
+-- the window doesn't grow unbounded on a dungeon with many cast types.
+local function BuildMissedKicksLines(r)
+  local spells = (r.enemy_casts or {}).spells
+  if not spells or #spells == 0 then return nil end
+  local lines = { "Missed kicks:" }
+  for i = 1, math.min(5, #spells) do
+    local s = spells[i]
+    table.insert(lines, string.format(
+      "  %s -- %d got through (%d kicked)", s.name or "?", s.got_through or 0, s.kicked or 0
+    ))
+  end
+  return table.concat(lines, "\n")
+end
+
+-- "Off-route pulls" + top avoidable-damage offenders, combined into one
+-- section since both are "what to fix next time" signals and each is
+-- usually short (often absent entirely -- no route pasted, or nobody took
+-- meaningful avoidable damage).
+local function BuildOffendersLines(r)
+  local lines = {}
+
+  local unplanned = r.unplanned_pulls
+  if unplanned and ((unplanned.total_off_route_mobs or 0) > 0 or (unplanned.total_untracked_mobs or 0) > 0) then
+    table.insert(lines, string.format(
+      "Off-route: %d off-route mob(s), %d untracked",
+      unplanned.total_off_route_mobs or 0, unplanned.total_untracked_mobs or 0
+    ))
+  end
+
+  local avoidable = (r.avoidable_damage or {}).by_player
+  if avoidable and #avoidable > 0 then
+    table.insert(lines, "Avoidable damage:")
+    for i = 1, math.min(3, #avoidable) do
+      local p = avoidable[i]
+      local name = (p.name or "?"):match("^([^-]+)") or (p.name or "?")
+      local topSpell = (p.by_spell or {})[1]
+      local spellPart = topSpell and string.format(" (%s)", topSpell.name or "?") or ""
+      table.insert(lines, string.format(
+        "  %s -- %s%s", name, FormatShort(p.avoidable_damage_taken), spellPart
+      ))
+    end
+  end
+
+  if #lines == 0 then return nil end
+  return table.concat(lines, "\n")
+end
+
 local TITLE_BAR_HEIGHT = 40
 local BUTTON_HEIGHT = 22
 
@@ -163,9 +213,30 @@ local function CreateResultsFrame()
   playersFS:SetSpacing(4)
   f.playersFS = playersFS
 
+  -- Missed-kicks and avoidable-damage/off-route sections, both optional --
+  -- hidden entirely (zero height contribution) when the desktop app didn't
+  -- compute them (no interrupt/avoidable/route data loaded for this run).
+  local missedKicksFS = f:CreateFontString(nil, "OVERLAY")
+  missedKicksFS:SetFontObject(GameFontHighlightSmall)
+  missedKicksFS:SetPoint("TOPLEFT", playersFS, "BOTTOMLEFT", 0, -14)
+  missedKicksFS:SetPoint("RIGHT", f, "RIGHT", -16, 0)
+  missedKicksFS:SetJustifyH("LEFT")
+  missedKicksFS:SetJustifyV("TOP")
+  missedKicksFS:SetSpacing(4)
+  f.missedKicksFS = missedKicksFS
+
+  local offendersFS = f:CreateFontString(nil, "OVERLAY")
+  offendersFS:SetFontObject(GameFontHighlightSmall)
+  offendersFS:SetPoint("TOPLEFT", missedKicksFS, "BOTTOMLEFT", 0, -14)
+  offendersFS:SetPoint("RIGHT", f, "RIGHT", -16, 0)
+  offendersFS:SetJustifyH("LEFT")
+  offendersFS:SetJustifyV("TOP")
+  offendersFS:SetSpacing(4)
+  f.offendersFS = offendersFS
+
   local footerFS = f:CreateFontString(nil, "OVERLAY")
   footerFS:SetFontObject(GameFontDisableSmall)
-  footerFS:SetPoint("TOPLEFT", playersFS, "BOTTOMLEFT", 0, -14)
+  footerFS:SetPoint("TOPLEFT", offendersFS, "BOTTOMLEFT", 0, -14)
   footerFS:SetPoint("RIGHT", f, "RIGHT", -16, 0)
   footerFS:SetJustifyH("LEFT")
   footerFS:SetText("Full breakdown (route, pulls, per-pull damage) is on the site "
@@ -202,6 +273,12 @@ function MA:Results_Show()
   local f = _G.PostmortemResultsFrame or CreateResultsFrame()
   f.headlineFS:SetText(BuildHeadline(r))
   f.playersFS:SetText(BuildPlayerLines(r))
+  -- Empty string (not nil) so GetStringHeight() below collapses to 0 when a
+  -- section has no data -- same optional-section idea
+  -- addon_results.py's build_results_payload already uses on the Python
+  -- side (absent when not computed).
+  f.missedKicksFS:SetText(BuildMissedKicksLines(r) or "")
+  f.offendersFS:SetText(BuildOffendersLines(r) or "")
 
   -- Height from the actual rendered content (same approach as
   -- InfoWindow.lua): every FontString has its final SetText and its
@@ -209,6 +286,8 @@ function MA:Results_Show()
   local totalHeight = TITLE_BAR_HEIGHT
     + 8 + f.headlineFS:GetStringHeight()
     + 14 + f.playersFS:GetStringHeight()
+    + 14 + f.missedKicksFS:GetStringHeight()
+    + 14 + f.offendersFS:GetStringHeight()
     + 14 + f.footerFS:GetStringHeight()
     + 14 + BUTTON_HEIGHT + 12
   f:SetHeight(totalHeight)

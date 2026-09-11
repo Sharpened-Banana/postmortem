@@ -52,6 +52,34 @@ local defaults = {
     -- app's PostmortemResults.lua writeback); saved on drag, same as the
     -- overlay/info windows above.
     resultsWindowPosition = { point = "CENTER", relativePoint = "CENTER", x = 0, y = 0 },
+
+    -- Feature toggles, all defaulting on per the user's explicit
+    -- instruction -- Options.lua (a later WP) is the UI for these, but the
+    -- defaults live here alongside every other setting so each consuming
+    -- WP can land independently without Options.lua existing yet. Every
+    -- key here MUST also be registered in Options.lua once that WP lands,
+    -- with the identical default restated (Settings.RegisterAddOnSetting
+    -- requires its own default argument -- see that file's header for why
+    -- this single duplication is unavoidable, not drift-prone laziness).
+    showChestTimer = true,      -- ChestTimer.lua's +2/+3 overlay row
+    showBossSplits = true,      -- ChestTimer.lua's boss-split overlay row
+    showPullProgress = true,    -- RouteImport.lua's "Pull N / M" overlay row
+    showInterrupts = true,      -- Interrupts.lua's kick-count overlay row
+    saveRunHistory = true,      -- RunHistory.lua
+    runHistoryLimit = 50,       -- RunHistory.lua: oldest entries trimmed beyond this count
+    announceCompletion = true,  -- ChatSummary.lua
+    warnLoggingConflicts = true, -- CombatLogging.lua's other-addon-detected notice
+    tagDeaths = true,           -- DeathTagging.lua's recap "Died to <Spell>" line
+
+    -- Per-dungeon-per-level personal-best objective/boss split times, in
+    -- seconds: bestSplits[mapID][level][criteriaIndex] = elapsed. Built up
+    -- by ChestTimer.lua; nothing here needs a nested default shape since an
+    -- empty table is the only meaningful starting point (same reasoning
+    -- Bootstrap.lua already uses for spellDbDefaults below).
+    bestSplits = {},
+    -- Bounded run-history array (RunHistory.lua), newest entries appended,
+    -- oldest trimmed once it exceeds runHistoryLimit above.
+    runHistory = {},
   },
 }
 
@@ -113,6 +141,7 @@ end
 -- SavedVariables are ready, from the ADDON_LOADED handler below.
 function MA:OnInitialize()
   if MA.MinimapButton_Initialize then MA.MinimapButton_Initialize(MA) end
+  if MA.Options_Initialize then MA.Options_Initialize(MA) end
 end
 
 -- ---------------------------------------------------------------------------

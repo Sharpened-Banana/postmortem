@@ -20,6 +20,10 @@ move-folders:
 # Everything else in this monorepo is the unrelated Python tool (or repo
 # plumbing) and must not end up in the addon zip.
 ignore:
+  # Dev-only harnesses that live beside the addon but must never ship in
+  # it -- addon/Postmortem is what move-folders promotes to the package
+  # root, so anything else under addon/ would otherwise ride along.
+  - addon/tests
   - src
   - scripts
   - build

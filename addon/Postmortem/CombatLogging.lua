@@ -70,6 +70,41 @@ local STOP_GRACE_S = 5
 -- next one and silently kill that key's log.
 local pendingStop = nil
 
+-- Other installed addons known to independently manage LoggingCombat --
+-- confirmed present on this machine, real folder names (the name
+-- IsAddOnLoaded actually checks, not the display title): MythicDungeonTools
+-- (Core/CombatLogging.lua), EnhanceQoLDungeonRaid (its own autolog),
+-- EllesmereUIQoL (EllesmereUIQoL_AutoLogging.lua), Hindsight
+-- (MythicMirrorDB.settings.autolog). Reported once per login (not per key --
+-- this doesn't change mid-session) so the user knows why the 2s re-assert
+-- ticker above exists without spamming chat on every key.
+local COEXISTING_LOGGERS = {
+  "MythicDungeonTools",
+  "EnhanceQoLDungeonRaid",
+  "EllesmereUIQoL",
+  "Hindsight",
+}
+local warnedThisSession = false
+
+local function WarnIfOthersManageLogging()
+  if warnedThisSession then return end
+  warnedThisSession = true
+  if not MA:GetDB().warnLoggingConflicts then return end
+
+  local present = {}
+  for _, name in ipairs(COEXISTING_LOGGERS) do
+    local _, loaded = C_AddOns.IsAddOnLoaded(name)
+    if loaded then present[#present + 1] = name end
+  end
+  if #present == 0 then return end
+
+  print(string.format(
+    "|cffd7a94cPostmortem|r: %d other addon(s) also manage combat logging (%s) -- "
+      .. "re-asserting every %ds to win any conflict.",
+    #present, table.concat(present, ", "), REASSERT_INTERVAL_S
+  ))
+end
+
 local function cancelPendingStop()
   if pendingStop then
     pendingStop:Cancel()
@@ -120,6 +155,10 @@ function MA:CombatLogging_OnChallengeModeStart()
   -- exist if we scheduled it, and it must die regardless.
   cancelPendingStop()
   if not self:GetDB().combatLoggingEnabled then return end
+  -- Only worth mentioning once our own re-assert ticker is actually about
+  -- to start (see the message text below) -- nothing to warn about if this
+  -- addon's own logging management is disabled.
+  WarnIfOthersManageLogging()
   -- Advanced combat logging is required for the parses this project's
   -- Python side analyzes (spell IDs, absorbs, etc.), so force it on
   -- alongside plain combat logging.

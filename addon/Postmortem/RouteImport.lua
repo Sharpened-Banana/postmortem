@@ -23,9 +23,19 @@
 -- level deviation flagging (early/off-route/missed), which would need NPC
 -- ids this addon cannot obtain.
 --
--- This file's COMBAT_LOG_EVENT_UNFILTERED data arrives via
--- Interrupts.lua's shared frame (MA:RouteImport_OnCombatLogEvent), not a
--- registration of its own -- see Interrupts.lua's file header for why.
+-- ## Engagement detection (rewritten for patch 12.0)
+-- This used to detect "a new pull has started" by watching
+-- COMBAT_LOG_EVENT_UNFILTERED for group-vs-hostile damage events, forwarded
+-- from Interrupts.lua's shared registration. Patch 12.0 removed that event
+-- from addons entirely (registering it now fires ADDON_ACTION_FORBIDDEN),
+-- so engagement is now read from Blizzard's own built-in damage meter via
+-- MeterUtil.lua instead: Enum.DamageMeterType.EnemyDamageTaken (=10, added
+-- 12.0.1) lists every enemy the group has damaged, and a distinct-GUID walk
+-- of it stands in for "which enemies are engaged" with no combat log access
+-- needed. This is polled every tick (once per second, driven from
+-- Tracker.lua) rather than event-driven, so pull-boundary detection has up
+-- to ~1s of latency it didn't have before -- acceptable for a "which pull
+-- am I on" display, not a precision timing signal.
 
 local ADDON_NAME, MA = ...
 
@@ -122,50 +132,11 @@ function MA:RouteImport_GetPlannedPulls()
   return plannedPulls
 end
 
--- unit flag bits (COMBATLOG_OBJECT_*) -- see Interrupts.lua's header
--- comment for how the bit.band idiom and these Blizzard-global-with-literal-
--- fallback values were verified against real installed addon source this
--- session. Duplicated here rather than factored out, matching this
--- codebase's existing small-duplication-over-a-shared-utility-file
--- precedent (see Overlay.lua's IsKeyActive() comment).
-local band = bit.band
-local AFFILIATION_MINE = COMBATLOG_OBJECT_AFFILIATION_MINE or 0x00000001
-local AFFILIATION_PARTY = COMBATLOG_OBJECT_AFFILIATION_PARTY or 0x00000002
-local AFFILIATION_RAID = COMBATLOG_OBJECT_AFFILIATION_RAID or 0x00000004
-local AFFILIATION_GROUP = AFFILIATION_MINE + AFFILIATION_PARTY + AFFILIATION_RAID
-local REACTION_HOSTILE = COMBATLOG_OBJECT_REACTION_HOSTILE or 0x00000040
-local CONTROL_PLAYER = COMBATLOG_OBJECT_CONTROL_PLAYER or 0x00000100
-local TYPE_NPC = COMBATLOG_OBJECT_TYPE_NPC or 0x00000800
-local TYPE_GUARDIAN = COMBATLOG_OBJECT_TYPE_GUARDIAN or 0x00002000
+local SESSION_OVERALL = 0
 
--- Ported from src/postmortem/combatlog/events.py's is_hostile_npc():
--- NPC-or-guardian type, hostile reaction, and not currently player-
--- controlled (e.g. via Mind Control).
-local function IsHostileNPC(flags)
-  if not flags then return false end
-  return band(flags, TYPE_NPC + TYPE_GUARDIAN) ~= 0
-      and band(flags, REACTION_HOSTILE) ~= 0
-      and band(flags, CONTROL_PLAYER) == 0
+local function EnemyDamageMeterType()
+  return Enum and Enum.DamageMeterType and Enum.DamageMeterType.EnemyDamageTaken
 end
-
--- Ported from src/postmortem/combatlog/events.py's is_group_owned():
--- "Player, pet or guardian belonging to the group." This is the check the
--- module docstring/comments below already assumed was here ("a hostile GUID
--- first seen taking group damage") but the source's own affiliation was
--- never actually verified -- without it, hostile-on-hostile damage (which
--- does happen from some mechanics: adds that cleave each other, hostile AoE
--- landing on a second enemy, etc.) would miscount an NPC the group never
--- even engaged as a new pull member, inflating currentPullCloneCount.
-local function IsGroupOwned(flags)
-  if not flags then return false end
-  return band(flags, AFFILIATION_GROUP) ~= 0 and band(flags, CONTROL_PLAYER) ~= 0
-end
-
-local DAMAGE_SUBEVENTS = {
-  SPELL_DAMAGE = true,
-  SWING_DAMAGE = true,
-  RANGE_DAMAGE = true,
-}
 
 -- gap_seconds: matches this project's Python-side analysis/pulls.py default
 -- (gap_seconds=5.0) for the same "how long a lull means a pull has ended"
@@ -173,19 +144,32 @@ local DAMAGE_SUBEVENTS = {
 -- doesn't need pulls.py's exact algorithm.
 local PULL_GAP_SECONDS = 5
 
--- Currently-engaged hostile NPC GUIDs for the pull in progress, and the
--- GetTime() of the most recently observed group-vs-hostile damage event.
--- Module-local (not MA.state) since this is transient bookkeeping the
--- overlay never reads directly -- only the derived counts in
--- MA.state.route matter to anything outside this file.
-local engagedGUIDs = {}
-local engagedCount = 0
-local lastEngagementTime = nil
+-- Every enemy GUID already attributed to some pull (this one or an earlier
+-- one) this key -- never cleared mid-key, so a corpse lingering in the
+-- persistent Overall EnemyDamageTaken session is never re-counted into a
+-- later pull. currentPullGUIDs is just this pull's subset of it.
+local seenGUIDs = {}
+local currentPullGUIDs = {}
+local lastActivityTime = nil
 
 local function ResetEngagement()
-  engagedGUIDs = {}
-  engagedCount = 0
-  lastEngagementTime = nil
+  currentPullGUIDs = {}
+  lastActivityTime = nil
+end
+
+-- Snapshot whatever's already in the Overall EnemyDamageTaken session when
+-- the key starts (e.g. a hallway pack pulled half a second before
+-- CHALLENGE_MODE_START actually fires, or corpses left over from a previous
+-- key that never reset the meter) so it isn't miscounted as pull 1.
+local function SnapshotBaselineGUIDs()
+  seenGUIDs = {}
+  local meterType = EnemyDamageMeterType()
+  if not meterType then return end
+  local session = select(1, MA:MeterUtil_GetSession(SESSION_OVERALL, meterType))
+  if not session then return end
+  MA:MeterUtil_ForEachSource(session, function(source)
+    if source.sourceGUID then seenGUIDs[source.sourceGUID] = true end
+  end)
 end
 
 -- Fresh/empty route state. Set at file load (so MA.state.route is always a
@@ -208,54 +192,48 @@ local function ResetRouteState()
 end
 ResetRouteState()
 
--- Called by Interrupts.lua's shared COMBAT_LOG_EVENT_UNFILTERED handler for
--- every combat log event during a key. Tracks "currently engaged hostile
--- NPC GUIDs" for the pull in progress: a hostile GUID first seen taking
--- group damage joins the current pull's engaged set once; the pull is
--- considered done once PULL_GAP_SECONDS pass with no further engagement
--- (checked from MA:RouteImport_OnTick(), driven off Tracker.lua's existing
--- once-per-second tick rather than an OnUpdate of our own).
-function MA:RouteImport_OnCombatLogEvent(subevent, sourceGUID, sourceFlags, destGUID, destFlags)
-  local route = MA.state.route
-  if not route or not route.plannedPulls then
-    -- No usable route to compare against -- skip the bookkeeping entirely
-    -- rather than doing free work on every combat log event (this fires at
-    -- very high frequency during any real combat), matching this addon's
-    -- existing run-scoped-registration philosophy.
-    return
-  end
-  if not DAMAGE_SUBEVENTS[subevent] then return end
-  if not IsGroupOwned(sourceFlags) then return end
-  if not destGUID or destGUID == "" then return end
-  if not IsHostileNPC(destFlags) then return end
-
-  if not engagedGUIDs[destGUID] then
-    engagedGUIDs[destGUID] = true
-    engagedCount = engagedCount + 1
-    route.currentPullCloneCount = engagedCount
-  end
-  lastEngagementTime = GetTime()
-end
-
 -- Called from Tracker.lua's MA:Tracker_OnTick() (once per second while a
--- key is active, plus on-demand on SCENARIO_CRITERIA_UPDATE/
--- CHALLENGE_MODE_DEATH_COUNT_UPDATED) -- GetTime() is the standard,
--- long-unchanged Blizzard API for seconds-since-login timing, used the same
--- way for time-delta bookkeeping throughout installed addon source (e.g.
--- Details_MythicPlus/inspect.lua), so no OnUpdate polling of our own is
--- needed here either.
+-- key is active) -- GetTime() is the standard, long-unchanged Blizzard API
+-- for seconds-since-login timing, used the same way for time-delta
+-- bookkeeping throughout installed addon source, so no OnUpdate polling of
+-- our own is needed here.
 function MA:RouteImport_OnTick()
   local route = MA.state.route
   if not route or not route.plannedPulls then return end
-  if not lastEngagementTime or engagedCount == 0 then return end
 
-  if GetTime() - lastEngagementTime < PULL_GAP_SECONDS then return end
+  local meterType = EnemyDamageMeterType()
+  if meterType then
+    local session = select(1, MA:MeterUtil_GetSession(SESSION_OVERALL, meterType))
+    if session then
+      local sawNewActivity = false
+      local complete = MA:MeterUtil_ForEachSource(session, function(source)
+        local guid = source.sourceGUID
+        if not guid or seenGUIDs[guid] then return end
+        seenGUIDs[guid] = true
+        currentPullGUIDs[guid] = true
+        sawNewActivity = true
+      end)
+      if complete then
+        local count = 0
+        for _ in pairs(currentPullGUIDs) do count = count + 1 end
+        route.currentPullCloneCount = count
+        if sawNewActivity then lastActivityTime = GetTime() end
+      end
+      -- An incomplete (secret mid-walk) pass just skips this tick's update;
+      -- the existing counts and lastActivityTime are left alone and picked
+      -- back up next tick.
+    end
+  end
+
+  if not lastActivityTime or route.currentPullCloneCount == 0 then return end
+  if GetTime() - lastActivityTime < PULL_GAP_SECONDS then return end
 
   -- Pull looks done: compare the live engaged-clone count against this
   -- pull's planned clone count. Coarse signal only -- see the scope note at
   -- the top of this file for why this can't be identity-level deviation
   -- detection.
   local planned = route.plannedPulls[route.currentPullIndex]
+  local engagedCount = route.currentPullCloneCount
   route.lastPullSizeDelta = planned and (engagedCount - planned) or nil
 
   MA:Debug("Route: pull %d done -- %d engaged vs %s planned; now on pull %d",
@@ -267,9 +245,7 @@ end
 
 -- Our own event frame for the route-progress lifecycle (reset + lazily load
 -- planned pulls on CHALLENGE_MODE_START, stop engagement bookkeeping on
--- CHALLENGE_MODE_COMPLETED/RESET). Separate from Interrupts.lua's frame --
--- only the COMBAT_LOG_EVENT_UNFILTERED registration is shared (see
--- Interrupts.lua's file header); every file registering its own
+-- CHALLENGE_MODE_COMPLETED/RESET). Every file registering its own
 -- CHALLENGE_MODE_START/COMPLETED/RESET is this addon's existing pattern
 -- (CombatLogging.lua, Tracker.lua, Interrupts.lua all already do it).
 local eventFrame = CreateFrame("Frame")
@@ -281,6 +257,7 @@ eventFrame:RegisterEvent("CHALLENGE_MODE_RESET")
 eventFrame:SetScript("OnEvent", function(self, event, ...)
   if event == "CHALLENGE_MODE_START" then
     ResetRouteState()
+    SnapshotBaselineGUIDs()
     -- Lazy, on-demand call -- see GetMDTCurrentPreset()'s comment above for
     -- why this must not happen at file-load/ADDON_LOADED time.
     MA.state.route.plannedPulls = MA:RouteImport_GetPlannedPulls()

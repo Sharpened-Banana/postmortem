@@ -231,10 +231,15 @@ SlashCmdList["POSTMORTEM"] = function(msg)
     MA:Info_ShowLinkPopup()
   elseif msg == "minimap" then
     if MA.MinimapButton_Toggle then MA.MinimapButton_Toggle(MA) end
+  elseif msg == "history" then
+    if MA.RunHistory_Print then MA:RunHistory_Print(5) end
+  elseif msg == "options" then
+    if MA.Options_Open then MA:Options_Open() end
   elseif msg == "debug" then
     MA:Debug_Toggle()
   else
     print("|cffd7a94cPostmortem|r: /pm (info window), /pm results (in-game run stats), "
+      .. "/pm history (last 5 runs), /pm options (settings), "
       .. "/pm link (copy download link), /pm minimap (toggle minimap icon), "
       .. "/pm debug (run every module now, as if a key started)")
   end
