@@ -84,6 +84,17 @@ jobs:
       # _version.py's checked-in "dev" placeholder, which
       # desktop/updater.py already treats as "not a release build" --
       # see that module's own docstring.
+      # A tag is pushed by hand, and it lands in generated Python source
+      # and on the installer compiler's command line -- so a tag with a
+      # quote in it would inject code into the build. Cheap to refuse.
+      - name: Check the tag is a plain release tag
+        shell: bash
+        run: |
+          case "$GITHUB_REF_NAME" in
+            alpha-desktop-[0-9]*) ;;
+            *) echo "refusing to build from tag '$GITHUB_REF_NAME'"; exit 1 ;;
+          esac
+
       - name: Stamp version
         shell: bash
         run: |
@@ -134,8 +145,20 @@ jobs:
         shell: pwsh
         run: |
           $ver = "1.0.2592.51"
+          # Pinned by DIGEST, not only by version. These DLLs are copied
+          # straight into the release and nothing signs it, so a registry
+          # compromise or an interception on the runner would otherwise put
+          # attacker code inside a build users auto-update to. Verified
+          # against the real package on 2026-09-11 (8,196,752 bytes).
+          # To move to a new version: download it, take its SHA-256, and
+          # change BOTH lines deliberately.
+          $sha = "805c79e05184fab18c9fe7b8ba820c598399b97adc1fbf5b0ea490efad91d5b8"
           $nupkg = "$env:RUNNER_TEMP\webview2.zip"
           Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/$ver" -OutFile $nupkg
+          $actual = (Get-FileHash -Path $nupkg -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $sha) {
+            throw "WebView2 $ver digest mismatch: expected $sha, got $actual"
+          }
           $pkg = "$env:RUNNER_TEMP\webview2"
           Expand-Archive -Path $nupkg -DestinationPath $pkg -Force
           $lib = (Get-ChildItem -Path dist\Postmortem -Recurse -Filter Microsoft.Web.WebView2.WinForms.dll | Select-Object -First 1).DirectoryName
@@ -171,7 +194,10 @@ jobs:
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) {
-            choco install innosetup --no-progress -y
+            # Version-pinned: this compiler builds the installer users
+            # actually run, and "latest" makes each release depend on
+            # whatever the package feed served that day.
+            choco install innosetup --version=6.2.2 --no-progress -y
           }
           if (-not (Test-Path $iscc)) { throw "ISCC.exe not found after install" }
           & $iscc "/DAppVersion=$env:GITHUB_REF_NAME" build\postmortem.iss
@@ -182,6 +208,25 @@ jobs:
       # attach this platform's files. --clobber makes a re-run of a
       # failed job replace its own assets instead of erroring. bash on
       # both runners so the glob and quoting behave the same way.
+      # A digest per asset, so the in-app updater can tell the archive it
+      # downloaded from one an attacker substituted. Without this the whole
+      # trust chain was TLS plus "the host is github.com" -- and one of the
+      # two allowed hosts serves every GitHub user's release assets, so any
+      # attacker-hosted zip on it passed. Nothing signs these builds, and
+      # because the app writes the files itself no operating-system
+      # quarantine check applies to an update either (2026-09-11).
+      #
+      # Each platform job appends its own line; --clobber on the upload
+      # below lets a re-run replace its own entry.
+      - name: Record asset digests
+        shell: bash
+        run: |
+          shopt -s nullglob
+          for f in Postmortem-*.zip Postmortem-Setup-*.exe; do
+            shasum -a 256 "$f" >> "SHA256SUMS-${{ runner.os }}.txt"
+          done
+          cat "SHA256SUMS-${{ runner.os }}.txt"
+
       - name: Publish release assets
         shell: bash
         env:
@@ -189,4 +234,4 @@ jobs:
         run: |
           shopt -s nullglob  # macOS has no .exe; drop the empty pattern instead of failing
           gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
-            Postmortem-*.zip Postmortem-Setup-*.exe
+            Postmortem-*.zip Postmortem-Setup-*.exe "SHA256SUMS-${{ runner.os }}.txt"

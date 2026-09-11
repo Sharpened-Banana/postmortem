@@ -32,7 +32,17 @@ jobs:
           fetch-depth: 0 # full history: the packager reads git tags for changelog generation
 
       - name: Package and release
-        uses: BigWigsMods/packager@v2
+        # Pinned by commit, not by the movable v2 tag. This step receives
+        # the CurseForge publishing token and a write-scoped repository
+        # token, so whoever could move that tag could push a trojaned addon
+        # to every CurseForge installer and write to this repo. The SHA
+        # below is what v2 resolved to on 2026-09-11, confirmed against the
+        # API rather than copied from a note.
+        #
+        # To upgrade: resolve the new tag's commit deliberately with
+        #   gh api repos/BigWigsMods/packager/git/ref/tags/<tag> --jq .object.sha
+        # and change this line, rather than letting a tag move under us.
+        uses: BigWigsMods/packager@5abb6e1ddbd98c818ac5ee3692613cd372619dc9  # v2
         env:
           # Set these as repository secrets (Settings -> Secrets and
           # variables -> Actions) for whichever site(s) you want to publish

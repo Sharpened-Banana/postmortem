@@ -1395,7 +1395,7 @@ class TestAutoUpdate:
 
     def test_start_update_refuses_outside_a_packaged_build(self, api, events, monkeypatch):
         monkeypatch.setattr(api_module.sys, "frozen", False, raising=False)
-        result = api.start_update("https://github.com/x/y/releases/download/t/a.zip")
+        result = api.start_update("https://github.com/Sharpened-Banana/postmortem/releases/download/alpha-desktop-9/Postmortem-macos.zip")
         assert result == {"ok": False, "error": "auto-update only works in a packaged build"}
 
     def test_start_update_refuses_an_untrusted_url(self, api, events, monkeypatch):
@@ -1410,18 +1410,24 @@ class TestAutoUpdate:
         started = threading.Event()
         finish = threading.Event()
 
-        def slow_perform_update(url, work_dir, on_progress=None):
+        def slow_perform_update(url, work_dir, on_progress=None, expected_sha256=None):
             started.set()
             finish.wait(timeout=5.0)
             raise RuntimeError("stop here -- this test only cares about the second call")
 
         monkeypatch.setattr(updater_module, "perform_update", slow_perform_update)
+        monkeypatch.setattr(
+            updater_module, "check_for_update",
+            lambda *a, **k: {"tag": "alpha-desktop-9",
+                             "download_url": 'https://github.com/Sharpened-Banana/postmortem/releases/download/alpha-desktop-9/Postmortem-macos.zip',
+                             "notes": "", "sha256": None},
+        )
 
-        first = api.start_update("https://github.com/x/y/releases/download/t/a.zip")
+        first = api.start_update("https://github.com/Sharpened-Banana/postmortem/releases/download/alpha-desktop-9/Postmortem-macos.zip")
         assert first == {"ok": True}
         assert started.wait(timeout=5.0)
 
-        second = api.start_update("https://github.com/x/y/releases/download/t/a.zip")
+        second = api.start_update("https://github.com/Sharpened-Banana/postmortem/releases/download/alpha-desktop-9/Postmortem-macos.zip")
         assert second == {"ok": False, "error": "an update is already in progress"}
 
         finish.set()
@@ -1434,18 +1440,29 @@ class TestAutoUpdate:
         new_install = tmp_path / "extracted" / "Postmortem.app"
         applied = []
 
-        def fake_perform_update(url, work_dir, on_progress=None):
+        def fake_perform_update(url, work_dir, on_progress=None, expected_sha256=None):
             if on_progress:
                 on_progress({"written": 50, "total": 100})
             return new_install
 
         monkeypatch.setattr(updater_module, "perform_update", fake_perform_update)
+        # start_update() re-resolves the release from the API rather than
+        # trusting the URL it was handed, since that argument comes across
+        # the JS bridge -- so the check has to be stubbed alongside the
+        # download itself (2026-09-11).
+        monkeypatch.setattr(
+            updater_module, "check_for_update",
+            lambda *a, **k: {"tag": "alpha-desktop-9",
+                             "download_url": 'https://github.com/Sharpened-Banana/postmortem/releases/download/alpha-desktop-9/Postmortem-macos.zip',
+                             "notes": "", "sha256": None},
+        )
+
         monkeypatch.setattr(
             updater_module, "apply_update_and_relaunch",
             lambda path, **kw: applied.append(path),
         )
 
-        result = api.start_update("https://github.com/x/y/releases/download/t/a.zip")
+        result = api.start_update("https://github.com/Sharpened-Banana/postmortem/releases/download/alpha-desktop-9/Postmortem-macos.zip")
         assert result == {"ok": True}
 
         self._wait_for(events, "relaunching")
@@ -1458,12 +1475,19 @@ class TestAutoUpdate:
     ):
         monkeypatch.setattr(api_module.sys, "frozen", True, raising=False)
 
-        def boom(url, work_dir, on_progress=None):
+        def boom(url, work_dir, on_progress=None, expected_sha256=None):
             raise ValueError("disk full")
 
         monkeypatch.setattr(updater_module, "perform_update", boom)
+        monkeypatch.setattr(
+            updater_module, "check_for_update",
+            lambda *a, **k: {"tag": "alpha-desktop-9",
+                             "download_url": 'https://github.com/Sharpened-Banana/postmortem/releases/download/alpha-desktop-9/Postmortem-macos.zip',
+                             "notes": "", "sha256": None},
+        )
 
-        result = api.start_update("https://github.com/x/y/releases/download/t/a.zip")
+
+        result = api.start_update("https://github.com/Sharpened-Banana/postmortem/releases/download/alpha-desktop-9/Postmortem-macos.zip")
         assert result == {"ok": True}  # the thread started fine; it fails asynchronously
 
         failed = self._wait_for(events, "failed")

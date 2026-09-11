@@ -32,6 +32,7 @@ to see and report, not something to silently swallow this deep.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -68,7 +69,9 @@ _SSL_CONTEXT = https_context()
 REPO = "Sharpened-Banana/postmortem"
 _RELEASES_LATEST_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
 _TAG_RE = re.compile(r"^alpha-desktop-(\d+)$")
-_DOWNLOAD_CHUNK_BYTES = 262_144  # 256KB -- matches postmortem_site's own streaming-read chunk size
+_DOWNLOAD_CHUNK_BYTES = 262_144
+# A sums file holds a handful of lines; anything larger is not one.
+_MAX_SUMS_BYTES = 64 * 1024  # 256KB -- matches postmortem_site's own streaming-read chunk size
 
 # Release assets only ever come from a GitHub-hosted URL (see
 # release-desktop.yml's own softprops/action-gh-release step) -- this is
@@ -138,12 +141,88 @@ def check_for_update(fetcher: Fetcher = _default_fetcher) -> Optional[dict]:
     download_url = asset.get("browser_download_url") if asset else None
     if not download_url:
         return None
-    return {"tag": tag, "download_url": download_url, "notes": payload.get("body") or ""}
+    return {
+        "tag": tag,
+        "download_url": download_url,
+        "notes": payload.get("body") or "",
+        # The SHA256SUMS-<os>.txt published beside the assets, if this
+        # release has one. None means "this release predates digests",
+        # which is not the same as "the digest did not match" -- see
+        # verify_digest().
+        "sha256": _expected_digest(payload, asset_name),
+    }
+
+
+def _expected_digest(payload: dict, asset_name: str) -> Optional[str]:
+    """The published SHA-256 for ``asset_name``, or None if this release
+    has no sums file. Reads the same GitHub API payload the asset list
+    came from, so it is as trustworthy as the URL itself -- which is the
+    point: an attacker who can substitute the archive cannot also change
+    what the API says its digest should be."""
+    sums_name = f"SHA256SUMS-{'Windows' if sys.platform == 'win32' else 'macOS'}.txt"
+    asset = next(
+        (a for a in payload.get("assets", []) if a.get("name") == sums_name), None,
+    )
+    url = asset.get("browser_download_url") if asset else None
+    if not url or not _is_trusted_download_url(url):
+        return None
+    req = urllib.request.Request(url, headers={"User-Agent": "postmortem-desktop"})
+    try:
+        with urllib.request.urlopen(req, timeout=10, context=_SSL_CONTEXT) as resp:
+            body = resp.read(_MAX_SUMS_BYTES).decode("utf-8", "replace")
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+    for line in body.splitlines():
+        parts = line.split()
+        # "<hex>  <name>", the shasum(1) format the workflow writes.
+        if len(parts) == 2 and parts[1].lstrip("*") == asset_name:
+            digest = parts[0].strip().lower()
+            if len(digest) == 64 and all(c in "0123456789abcdef" for c in digest):
+                return digest
+    return None
+
+
+def verify_digest(path: Path, expected: Optional[str]) -> None:
+    """Raise unless ``path`` hashes to ``expected``.
+
+    ``expected`` of None is accepted deliberately, and only for the
+    transition: a user on an older build updates to the first release that
+    publishes sums, and that OLD release has none to compare against. Every
+    release from 2026-09-11 onward publishes them, so this degrades to the
+    previous behaviour exactly once per install and is strict thereafter. A
+    digest that is present and does not match is always a refusal.
+    """
+    if expected is None:
+        return
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(_DOWNLOAD_CHUNK_BYTES), b""):
+            digest.update(chunk)
+    actual = digest.hexdigest()
+    if actual != expected:
+        raise ValueError(
+            f"downloaded update does not match its published checksum "
+            f"(expected {expected}, got {actual}) -- refusing to install it"
+        )
 
 
 def _is_trusted_download_url(url: str) -> bool:
+    """HTTPS, one of the two GitHub hosts, AND this project's own path.
+
+    The host check alone was not a boundary: `objects.githubusercontent.com`
+    serves EVERY GitHub user's release assets, and any path on github.com
+    passed, so an attacker-hosted archive at
+    https://github.com/<them>/<repo>/releases/download/... was trusted
+    (2026-09-11). Asset URLs on the blob host carry no project path, which
+    is exactly why the digest check below exists -- the two together are
+    the boundary, not either alone.
+    """
     parts = urlsplit(url)
-    return parts.scheme == "https" and parts.hostname in _TRUSTED_DOWNLOAD_HOSTS
+    if parts.scheme != "https" or parts.hostname not in _TRUSTED_DOWNLOAD_HOSTS:
+        return False
+    if parts.hostname == "github.com":
+        return (parts.path or "").startswith(f"/{REPO}/releases/download/")
+    return True
 
 
 def download_update(url: str, dest: Path, on_progress: Optional[ProgressCallback] = None) -> Path:
@@ -514,6 +593,7 @@ def apply_update_and_relaunch(new_install_path: Path, pid: Optional[int] = None)
 
 def perform_update(
     download_url: str, work_dir: Path, on_progress: Optional[ProgressCallback] = None,
+    expected_sha256: Optional[str] = None,
 ) -> Path:
     """Download and extract an update into ``work_dir``, returning the
     validated new install's path (ready for ``apply_update_and_relaunch``).
@@ -525,6 +605,10 @@ def perform_update(
     work_dir.mkdir(parents=True, exist_ok=True)
     zip_path = work_dir / "update.zip"
     download_update(download_url, zip_path, on_progress=on_progress)
+    # Before extracting, not after: extraction restores permission bits and
+    # recreates symlinks from the archive's own metadata, so an unverified
+    # archive should never get that far.
+    verify_digest(zip_path, expected_sha256)
     staging_dir = work_dir / "extracted"
     staging_dir.mkdir(parents=True, exist_ok=True)
     new_install = extract_update(zip_path, staging_dir)

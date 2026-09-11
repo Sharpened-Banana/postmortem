@@ -1022,7 +1022,25 @@ class DesktopAPI:
                 def on_progress(p: dict) -> None:
                     self._emit_update_event({"type": "downloading", **p})
 
-                new_install = _updater.perform_update(download_url, work_dir, on_progress=on_progress)
+                # Re-resolve the release from the API rather than
+                # trusting anything the page passed in. start_update() is
+                # a bridge method, so its argument is only as trustworthy
+                # as whatever is rendering in that window -- and an
+                # attacker who could choose the URL could otherwise also
+                # choose the digest it is checked against, which would
+                # make the check theatre. The URL is required to match
+                # what the API itself reports for the current release.
+                available = _updater.check_for_update()
+                if not available or available.get("download_url") != download_url:
+                    self._emit_update_event({
+                        "type": "failed",
+                        "error": "this update no longer matches the published release",
+                    })
+                    return
+                new_install = _updater.perform_update(
+                    download_url, work_dir, on_progress=on_progress,
+                    expected_sha256=available.get("sha256"),
+                )
                 self._emit_update_event({"type": "applying"})
                 _updater.apply_update_and_relaunch(new_install)
                 self._emit_update_event({"type": "relaunching"})
