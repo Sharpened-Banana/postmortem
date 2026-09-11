@@ -44,7 +44,7 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Callable, Optional
 from urllib.parse import urlsplit
 
@@ -317,14 +317,20 @@ def _safe_extract(zip_path: Path, dest_dir: Path) -> None:
             target = targets[info.filename]
             mode = info.external_attr >> 16
             if mode and stat.S_ISLNK(mode):
+                # Read by handle, never by name: two entries can share a
+                # filename, and zf.read(name) resolves to whichever the
+                # name index points at, not this entry.
+                with zf.open(info) as src:
+                    link_target = src.read().decode("utf-8")
+                _check_link_target(info.filename, link_target, target, dest_resolved)
                 if target.exists() or target.is_symlink():
                     target.unlink()
-                target.symlink_to(zf.read(info.filename).decode("utf-8"))
+                target.symlink_to(link_target)
             else:
                 with zf.open(info) as src, open(target, "wb") as dst:
                     dst.write(src.read())
                 if mode:
-                    target.chmod(mode)
+                    target.chmod(_safe_mode(mode))
 
         # Directory permissions last -- a restrictive mode applied
         # before its contents are written could block writing them.
@@ -333,20 +339,55 @@ def _safe_extract(zip_path: Path, dest_dir: Path) -> None:
                 continue
             mode = info.external_attr >> 16
             if mode:
-                targets[info.filename].chmod(mode)
+                targets[info.filename].chmod(_safe_mode(mode))
+
+
+#: Permission bits an extracted entry may keep. The archive's own mode is
+#: honoured for the executable bit -- that is the whole reason this module
+#: does not use extractall() -- but not for anything that grants authority:
+#: set-user-id, set-group-id and the sticky bit are dropped, as is write
+#: permission for group and other. Restoring external_attr verbatim, which
+#: this did until 2026-09-11, meant an archive could hand itself a setuid
+#: binary; it was demonstrated against the real function.
+_SAFE_MODE_MASK = 0o755
+
+
+def _safe_mode(mode: int) -> int:
+    return mode & _SAFE_MODE_MASK
+
+
+def _check_link_target(name: str, link_target: str, link_path: Path,
+                       dest_resolved: Path) -> None:
+    """Refuse a symlink pointing anywhere outside the extraction tree.
+
+    Link targets were never checked (2026-09-11). A bundle validated only
+    by "the executable path exists", which a link to any local binary
+    satisfies, so a link was a way to have the app relaunch something it
+    never downloaded -- and a link to a directory outside the tree turns
+    later entries in the same archive into writes anywhere on disk.
+    """
+    if not link_target or PurePosixPath(link_target).is_absolute() or (
+        len(link_target) > 1 and link_target[1] == ":"
+    ):
+        raise ValueError(f"refusing absolute symlink in zip entry: {name}")
+    resolved = (link_path.parent / link_target).resolve()
+    if dest_resolved != resolved and dest_resolved not in resolved.parents:
+        raise ValueError(f"refusing symlink escaping the extract directory: {name}")
 
 
 def _validate_macos_bundle(extract_dir: Path) -> Path:
     bundle = extract_dir / "Postmortem.app"
     exe = bundle / "Contents" / "MacOS" / "Postmortem"
-    if not exe.exists():
+    # exists() follows links, and "the path exists" was the whole of this
+    # check: a symlink to any local binary passed it.
+    if exe.is_symlink() or not exe.is_file():
         raise ValueError(f"downloaded build looks incomplete -- missing {exe}")
     return bundle
 
 
 def _validate_windows_install(extract_dir: Path) -> Path:
     exe = extract_dir / "Postmortem.exe"
-    if not exe.exists():
+    if exe.is_symlink() or not exe.is_file():
         raise ValueError(f"downloaded build looks incomplete -- missing {exe}")
     return extract_dir
 

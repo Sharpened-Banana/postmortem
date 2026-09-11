@@ -49,11 +49,98 @@ from ..mdt.decode import MDTDecodeError, decode_mdt_string
 from ..mdt.extract import write_dungeon_data
 from ..mdt.route import Route
 from ..history.store import has_run as _has_run
+from ..history.store import has_uploaded_run as _has_uploaded_run
+from ..history.store import mark_uploaded as _mark_uploaded
 from ..recorder import Recorder
 from ..report.html import render_html
 from ..report.index import collect_reports, render_index
 from . import config as _config
 from . import updater as _updater
+
+
+#: How many already-finished keys a starting watch will replay. A fresh
+#: install pointed at a months-old log otherwise analyzes and uploads every
+#: key it has ever recorded (2026-09-11).
+_CATCH_UP_LIMIT = 3
+
+
+def _normalized_site_url(raw: Any) -> str:
+    """A saveable site URL, or ValueError. Accepts a bare hostname (the
+    same normalization uploads apply) but nothing that is not http(s)."""
+    from urllib.parse import urlsplit
+
+    from ..upload import site_base_url
+
+    import re
+
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError("site URL must be text")
+    raw = raw.strip()
+    # Check the scheme on the RAW text: site_base_url() prepends https://
+    # to anything that has no "//", which turns "javascript:x" into a
+    # nominally https URL whose host is "javascript".
+    scheme = re.match(r"^([A-Za-z][A-Za-z0-9+.\-]*):", raw)
+    if scheme and scheme.group(1).lower() not in ("http", "https"):
+        raise ValueError("site URL must be an http(s) address")
+    url = site_base_url(raw)
+    parts = urlsplit(url)
+    try:
+        parts.port
+    except ValueError:
+        raise ValueError("site URL must be an http(s) address") from None
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError("site URL must be an http(s) address")
+    return url
+
+
+def _same_origin(a: str, b: str) -> bool:
+    """Do two URLs share scheme, host and port?"""
+    from urllib.parse import urlsplit
+
+    from ..upload import site_base_url
+
+    pa, pb = urlsplit(site_base_url(a)), urlsplit(site_base_url(b))
+    return (pa.scheme, pa.hostname, pa.port) == (pb.scheme, pb.hostname, pb.port)
+
+
+def _checked_site_url(explicit: Optional[str], configured: Optional[str]) -> str:
+    """The site to talk to for a call that may name one itself.
+
+    Every bridge method is reachable from any script running in the app
+    window, and several of these carry this install's upload token. No
+    render path can reach them today -- the interface escapes its inserts
+    and both report frames are sandboxed -- but "one XSS away from
+    exfiltrating the token" is not a line worth holding on one defence
+    (2026-09-11), so a caller-supplied target must match the configured
+    site's origin.
+
+    With nothing configured yet there is no origin to compare against and
+    the explicit value is taken: that is first-run setup, before any token
+    exists to leak. Raises ValueError when the two disagree.
+    """
+    if not explicit:
+        if not configured:
+            raise ValueError("no site URL configured -- set one in Settings first")
+        return configured
+    if configured and not _same_origin(explicit, configured):
+        raise ValueError(
+            "refusing to contact a site other than the one configured in Settings"
+        )
+    return explicit
+
+
+def _already_uploaded(db_path, zone, start_ts) -> bool:
+    """Has this key already been analyzed AND uploaded?
+
+    A lock or an unreadable history is deliberately NOT treated as "yes":
+    the honest answer is "cannot tell", and re-processing one run is
+    cheap and de-duplicated on ingest, where skipping one silently loses
+    it forever.
+    """
+    try:
+        return _has_uploaded_run(db_path, zone, start_ts)
+    except Exception:
+        return False
 
 
 class DesktopAPI:
@@ -296,12 +383,18 @@ class DesktopAPI:
         fallback, the same philosophy ``start_watch()`` already
         established for its own recorded-run output).
 
-        Returns ``{"json_path", "html_path", "run_id"}`` on success, or
-        ``None`` if saving failed for any reason (an unwritable
-        directory, a locked database, ...) -- this must never block
-        showing the report itself, the same "best-effort bonus step"
-        philosophy as Raider.io enrichment and site uploads elsewhere in
-        this codebase.
+        Returns ``{"ok": True, "json_path", "html_path", "run_id"}`` on
+        success, or ``{"ok": False, "error": "..."}`` if saving failed for
+        any reason (an unwritable directory, a locked database, ...) --
+        this must never block showing the report itself, the same
+        "best-effort bonus step" philosophy as Raider.io enrichment and
+        site uploads elsewhere in this codebase.
+
+        Until 2026-09-11 a failure returned None and the interface simply
+        hid the "saved" line, so an unwritable output directory meant the
+        report was never written and the run never appeared in History,
+        with nothing shown anywhere. Reporting it is the whole point:
+        best-effort is about not blocking, not about staying quiet.
         """
         try:
             settings = _config.load_settings()
@@ -316,9 +409,10 @@ class DesktopAPI:
             from ..history.store import ingest as ingest_history
             db_path = _config.resolve_history_db_path(settings)
             run_id = ingest_history(report, db_path, source_path=json_path, html_path=html_path)
-            return {"json_path": str(json_path), "html_path": str(html_path), "run_id": run_id}
-        except Exception:
-            return None
+            return {"ok": True, "json_path": str(json_path),
+                    "html_path": str(html_path), "run_id": run_id}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     # -- history ----------------------------------------------------------
 
@@ -391,9 +485,10 @@ class DesktopAPI:
         ``{"ok": False, "error": "..."}`` dict from that function, so
         this method just returns whatever it returns.
         """
-        target = url or _config.load_settings().get("site_url")
-        if not target:
-            return {"ok": False, "error": "no site URL configured"}
+        try:
+            target = _checked_site_url(url, _config.load_settings().get("site_url"))
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
         from .. import upload as _upload
         try:
             return _upload.upload_report(report, target)
@@ -444,6 +539,18 @@ class DesktopAPI:
     #        (addon_dir derivable + exists); silently absent otherwise.
     #   {"type": "uploaded", "url": str}
     #     -- the full URL (site_url + the site's own path) of the report.
+    #   {"type": "scanning", "bytes_read": int, "bytes_total": int}
+    #     -- the initial scan of a pre-existing log is in progress. Only
+    #        emitted for logs big enough to take a while (every 64MB);
+    #        tailing has not begun yet.
+    #   {"type": "catch_up_skipped", "count": int, "limit": int}
+    #     -- that many finished keys found in the log were NOT replayed,
+    #        because only the newest few are (see _CATCH_UP_LIMIT).
+    #   {"type": "log_unavailable", "log_path": str}
+    #     -- the watched file has gone (deleted, drive disconnected) and
+    #        no newer sibling appeared. The watch stays alive and recovers
+    #        by itself if the file comes back, but nothing will be picked
+    #        up until it does.
     #   {"type": "log_switched", "log_path": str}
     #     -- WoW restarted and began a new session log; the watch followed
     #        it automatically (any key left open in the old log is
@@ -605,14 +712,41 @@ class DesktopAPI:
             }),
             # Catch-up: a key that finished before this watch started (or
             # while the app was closed) is replayed through the normal
-            # analyze+upload pipeline unless the run history already has
-            # it -- so "every finished key gets uploaded" holds across app
-            # restarts too, and nothing is ever uploaded twice.
-            already_processed=lambda zone, ts: _has_run(history_db_path, zone, ts),
+            # analyze+upload pipeline unless it has already been dealt
+            # with -- so "every finished key gets uploaded" holds across
+            # app restarts too, and nothing is ever uploaded twice.
+            #
+            # "Dealt with" means UPLOADED, not merely present in local
+            # history. Analysing a key by hand puts it in history, which
+            # used to make catch-up skip it forever, so a key the user
+            # analysed but never pressed Upload on could never reach the
+            # site (2026-09-11).
+            already_processed=lambda zone, ts: _already_uploaded(
+                history_db_path, zone, ts),
             on_run_abandoned=lambda run: self._emit_watch_event({
                 "type": "run_abandoned", "zone": run.zone, "level": run.keystone_level,
             }),
             on_run_complete=on_run_complete,
+            # A first watch on a months-old log found every finished key
+            # unprocessed and replayed all of them -- minutes of analysis
+            # and an upload each (2026-09-11). Take the newest few and say
+            # how many were left.
+            max_catch_up_runs=_CATCH_UP_LIMIT,
+            on_catch_up_skipped=lambda n: self._emit_watch_event({
+                "type": "catch_up_skipped", "count": n,
+                "limit": _CATCH_UP_LIMIT,
+            }),
+            # The initial scan of a pre-existing log reads the whole file
+            # before tailing begins; without this the app says it is
+            # watching and then sits silent for minutes on a large log.
+            on_scan_progress=lambda done, total: self._emit_watch_event({
+                "type": "scanning", "bytes_read": done, "bytes_total": total,
+            }),
+            # A deleted log or a disconnected drive looked exactly like
+            # "no keys yet", forever.
+            on_log_unavailable=lambda path: self._emit_watch_event({
+                "type": "log_unavailable", "log_path": str(path),
+            }),
             on_waiting_for_log=lambda: self._emit_watch_event(
                 {"type": "waiting_for_log", "log_path": str(log_path)}
             ),
@@ -936,6 +1070,13 @@ class DesktopAPI:
         from .. import upload as _upload
         result = _upload.upload_report(report, site_url)
         if result.get("ok"):
+            # ...and record that it got there, so catch-up knows this run
+            # needs no further work (see already_processed above).
+            try:
+                _mark_uploaded(history_db_path, report["run"].get("zone"),
+                               report["run"].get("start_ts"))
+            except Exception:
+                pass
             self._emit_watch_event({
                 "type": "uploaded",
                 "url": f"{site_url.rstrip('/')}{result.get('url', '')}",
@@ -1118,9 +1259,11 @@ class DesktopAPI:
         doesn't answer. Never raises.
         """
         settings = _config.load_settings()
-        site_url = ((params or {}).get("site_url") or settings.get("site_url"))
-        if not site_url:
-            return {"ok": False, "error": "no site URL configured -- set one in Settings first"}
+        try:
+            site_url = _checked_site_url((params or {}).get("site_url"),
+                                         settings.get("site_url"))
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
         import socket
 
         from .. import upload as _upload
@@ -1141,9 +1284,11 @@ class DesktopAPI:
         poll_token = params.get("poll_token")
         if not poll_token:
             return {"status": "error", "error": "poll_token is required"}
-        site_url = params.get("site_url") or _config.load_settings().get("site_url")
-        if not site_url:
-            return {"status": "error", "error": "no site URL configured"}
+        try:
+            site_url = _checked_site_url(params.get("site_url"),
+                                         _config.load_settings().get("site_url"))
+        except ValueError as exc:
+            return {"status": "error", "error": str(exc)}
         from .. import upload as _upload
         return _upload.poll_device_link(site_url, poll_token)
 
@@ -1172,15 +1317,51 @@ class DesktopAPI:
         corrupt settings file."""
         return _config.load_settings()
 
+    def get_settings_status(self) -> dict:
+        """Whether the last settings load fell back to defaults because the
+        file could not be read.
+
+        ``{"reset": False}`` normally, or ``{"reset": True, "kept_path":
+        "...", "message": "..."}`` when a torn or corrupt settings file was
+        moved aside. The interface shows this on the home screen: resetting
+        in silence lost the site URL and left Watch Live refusing to start
+        with nothing to explain it (2026-09-11). Never raises.
+        """
+        try:
+            error = _config.last_load_error()
+        except Exception:
+            return {"reset": False}
+        if not error:
+            return {"reset": False}
+        kept, message = error
+        return {"reset": True, "kept_path": kept, "message": message}
+
     def save_settings(self, settings: dict) -> dict:
         """Persist desktop settings (see ``desktop/config.py``).
 
         Returns ``{"ok": True}`` on success, or
         ``{"ok": False, "error": "..."}`` if writing failed (e.g. an
-        unwritable config directory). Never raises.
+        unwritable config directory) or a value was rejected. Never
+        raises.
+
+        ``site_url`` is checked here because this method can permanently
+        repoint every future upload, and it is reachable from any script
+        running in the app window (2026-09-11). Changing it is the user's
+        own decision, so the check is what it can be: a real http(s)
+        address, not a ``javascript:``/``file:`` URL or junk.
         """
+        settings = dict(settings or {})
+        if "site_url" in settings:
+            raw = settings["site_url"]
+            if raw in (None, ""):
+                settings["site_url"] = None
+            else:
+                try:
+                    settings["site_url"] = _normalized_site_url(raw)
+                except ValueError as exc:
+                    return {"ok": False, "error": str(exc)}
         try:
-            _config.save_settings(settings or {})
+            _config.save_settings(settings)
             return {"ok": True}
         except OSError as exc:
             return {"ok": False, "error": str(exc)}

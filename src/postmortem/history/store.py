@@ -103,6 +103,14 @@ _RUNS_ADDED_COLUMNS = (
     ("threshold", "INTEGER"),
     ("margin_ms", "INTEGER"),
     ("deaths_json", "TEXT"),
+    # When this run was successfully uploaded to a site, or NULL. Watch
+    # Live's catch-up used mere presence in this history to decide a key
+    # had been dealt with, so a key analyzed by hand and never uploaded
+    # was skipped permanently and never reached the site (2026-09-11).
+    # Nothing backfills it: rows that predate it read as "not uploaded",
+    # which is the safe direction -- catch-up may re-upload one old run,
+    # where the ingest side de-duplicates.
+    ("uploaded_at", "REAL"),
 )
 
 
@@ -526,8 +534,14 @@ def has_run(db_path: str | Path, zone: Optional[str], start_ts: Optional[float])
     Used by the desktop's Watch Live catch-up (recorder.Recorder
     ``already_processed``): a completed key found sitting in the current
     log at watch start is only replayed through analysis/upload if it
-    isn't here yet. Tolerant of a missing database (nothing is processed
+    isn't here yet. Tolerant of a MISSING database (nothing is processed
     yet, so: False).
+
+    Nothing else is tolerated. Catching every exception here, as this did
+    until 2026-09-11, turned a transient "database is locked" into an
+    instruction to re-analyze and re-upload work that was already done --
+    the worst possible reading of a lock. A caller that cannot answer the
+    question should hear about it.
     """
     try:
         with Store(db_path) as store:
@@ -536,8 +550,55 @@ def has_run(db_path: str | Path, zone: Optional[str], start_ts: Optional[float])
                 (zone, start_ts),
             )
             return cur.fetchone() is not None
-    except Exception:
-        return False
+    except (OSError, sqlite3.OperationalError) as exc:
+        if _is_missing_database(exc):
+            return False
+        raise
+
+
+def _is_missing_database(exc: Exception) -> bool:
+    """Is this the "there is no database here yet" case, as opposed to a
+    lock, a permission problem or a corrupt file?"""
+    if isinstance(exc, FileNotFoundError):
+        return True
+    return "unable to open database file" in str(exc).lower()
+
+
+def has_uploaded_run(db_path: str | Path, zone: Optional[str],
+                     start_ts: Optional[float]) -> bool:
+    """Whether this run is in the history AND has been marked uploaded.
+
+    This, not ``has_run``, is what Watch Live's catch-up asks when a site
+    is configured: a run analyzed locally and never uploaded still has
+    work outstanding. Same tolerance as ``has_run`` -- a missing database
+    is False, a lock raises.
+    """
+    try:
+        with Store(db_path) as store:
+            cur = store._conn.execute(
+                "SELECT uploaded_at FROM runs WHERE zone IS ? AND start_ts IS ? LIMIT 1",
+                (zone, start_ts),
+            )
+            row = cur.fetchone()
+            return bool(row and row[0])
+    except (OSError, sqlite3.OperationalError) as exc:
+        if _is_missing_database(exc):
+            return False
+        raise
+
+
+def mark_uploaded(db_path: str | Path, zone: Optional[str],
+                  start_ts: Optional[float], when: Optional[float] = None) -> bool:
+    """Record that this run reached a site. Returns whether a row matched.
+    Best-effort by contract: the caller must not lose an upload because
+    the marker could not be written."""
+    with Store(db_path) as store:
+        cur = store._conn.execute(
+            "UPDATE runs SET uploaded_at = ? WHERE zone IS ? AND start_ts IS ?",
+            (when if when is not None else time.time(), zone, start_ts),
+        )
+        store._conn.commit()
+        return cur.rowcount > 0
 
 
 def query_runs(db_path: str | Path, *, zone: Optional[str] = None) -> list[dict[str, Any]]:

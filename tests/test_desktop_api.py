@@ -397,8 +397,27 @@ class TestAnalyzeAutoSavesLocally:
         monkeypatch.setattr("postmortem.history.store.ingest", boom)
         result = api.analyze({"log_path": str(log_file)})
         assert result["ok"] is True
-        assert result["saved"] is None
         assert result["report"]["run"]["zone"] == "Murder Row"  # the report itself is unaffected
+
+    def test_a_save_failure_is_reported_rather_than_hidden(
+        self, api, log_file, monkeypatch,
+    ):
+        """Returning None made a failed save indistinguishable from no
+        save: the interface hid the element, so an unwritable directory or
+        a locked database lost the report and the History entry in silence
+        (2026-09-11)."""
+        def boom(*a, **kw):
+            raise OSError("disk full")
+
+        monkeypatch.setattr("postmortem.history.store.ingest", boom)
+        saved = api.analyze({"log_path": str(log_file)})["saved"]
+        assert saved is not None
+        assert saved["ok"] is False
+        assert "disk full" in saved["error"]
+
+    def test_a_successful_save_says_so(self, api, log_file):
+        saved = api.analyze({"log_path": str(log_file)})["saved"]
+        assert saved["ok"] is True and saved["json_path"]
 
 
 class TestGetDefaultPaths:
@@ -554,9 +573,24 @@ class TestUploadReport:
 
     def test_no_url_and_no_saved_setting_returns_error(self, api):
         result = api.upload_report({"run": {}})
-        assert result == {"ok": False, "error": "no site URL configured"}
+        assert result["ok"] is False and "site URL" in result["error"]
 
-    def test_explicit_url_is_used_over_saved_setting(self, api, monkeypatch):
+    def test_an_explicit_url_off_the_configured_origin_is_refused(self, api, monkeypatch):
+        """Every bridge method is reachable from any script in the app
+        window, and this one carries the install's upload token. Nothing
+        can reach it today, but that is one defence, not two
+        (2026-09-11)."""
+        def fake_upload_report(report, url, **kwargs):  # pragma: no cover
+            raise AssertionError(f"uploaded to {url}")
+
+        monkeypatch.setattr("postmortem.upload.upload_report", fake_upload_report)
+        api.save_settings({"site_url": "https://saved.example"})
+
+        result = api.upload_report({"run": {"zone": "x"}}, "https://explicit.example")
+        assert result["ok"] is False
+        assert "other than the one configured" in result["error"]
+
+    def test_an_explicit_url_on_the_configured_origin_is_allowed(self, api, monkeypatch):
         seen = {}
 
         def fake_upload_report(report, url, **kwargs):
@@ -567,10 +601,24 @@ class TestUploadReport:
         monkeypatch.setattr("postmortem.upload.upload_report", fake_upload_report)
         api.save_settings({"site_url": "https://saved.example"})
 
-        result = api.upload_report({"run": {"zone": "x"}}, "https://explicit.example")
+        result = api.upload_report({"run": {"zone": "x"}}, "https://saved.example/runs")
         assert result == {"ok": True, "run_id": 1, "url": "/runs/1"}
-        assert seen["url"] == "https://explicit.example"
-        assert seen["report"] == {"run": {"zone": "x"}}
+        assert seen["url"] == "https://saved.example/runs"
+
+    def test_an_explicit_url_with_nothing_configured_is_first_run_setup(self, api, monkeypatch):
+        seen = {}
+        def fake(report, url, **kw):
+            seen["url"] = url
+            return {"ok": True}
+
+        monkeypatch.setattr("postmortem.upload.upload_report", fake)
+        assert api.upload_report({"run": {}}, "https://first.example")["ok"] is True
+        assert seen["url"] == "https://first.example"
+
+    def test_a_site_url_that_is_not_http_is_rejected(self, api):
+        result = api.save_settings({"site_url": "javascript:fetch('//evil')"})
+        assert result["ok"] is False
+        assert api.get_settings()["site_url"] is None
 
     def test_falls_back_to_saved_site_url_setting(self, api, monkeypatch):
         seen = {}
@@ -1528,17 +1576,33 @@ class TestAccountLinking:
 
         api.save_settings({"site_url": "https://saved.test"})
         seen = {}
-        monkeypatch.setattr(_upload, "start_device_link",
-                             lambda url, **kw: seen.setdefault("url", url) or {"ok": True})
-        api.start_device_link({"site_url": "https://override.test"})
-        assert seen["url"] == "https://override.test"
+        def fake_start(url, **kw):
+            seen["url"] = url
+            return {"ok": True}
+
+        monkeypatch.setattr(_upload, "start_device_link", fake_start)
+        # same origin: allowed, and used as given
+        api.start_device_link({"site_url": "https://saved.test/link"})
+        assert seen["url"] == "https://saved.test/link"
+
+        # a different origin is refused -- this call carries the token
+        result = api.start_device_link({"site_url": "https://override.test"})
+        assert result["ok"] is False
+        assert "other than the one configured" in result["error"]
 
     def test_poll_device_link_requires_a_poll_token(self, api):
         assert api.poll_device_link({}) == {"status": "error", "error": "poll_token is required"}
 
     def test_poll_device_link_requires_a_site_url(self, api):
         result = api.poll_device_link({"poll_token": "poll-1"})
-        assert result == {"status": "error", "error": "no site URL configured"}
+        assert result["status"] == "error" and "site URL" in result["error"]
+
+    def test_poll_device_link_refuses_another_origin(self, api):
+        api.save_settings({"site_url": "https://saved.test"})
+        result = api.poll_device_link({"poll_token": "poll-1",
+                                       "site_url": "https://elsewhere.test"})
+        assert result["status"] == "error"
+        assert "other than the one configured" in result["error"]
 
     def test_poll_device_link_passes_through_the_sites_response(self, api, monkeypatch):
         from postmortem import upload as _upload
