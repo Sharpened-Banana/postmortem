@@ -166,6 +166,23 @@ function MA:RegisterKeyEventFrame(frame)
   table.insert(self.keyEventFrames, frame)
 end
 
+-- Which key events each frame actually asked for. A frame is a plain
+-- Blizzard Frame, so there is no way to read its registrations back --
+-- modules declare them here instead, and DispatchKeyEvent() honours the
+-- declaration. Without it the dispatcher called EVERY registered frame's
+-- handler for EVERY event, so RunHistory (which only wants COMPLETED and
+-- RESET) was handed CHALLENGE_MODE_START and recorded a junk run from it.
+function MA:RegisterKeyEvents(frame, events)
+  self.keyEventInterest = self.keyEventInterest or {}
+  local wanted = {}
+  for _, event in ipairs(events) do
+    wanted[event] = true
+    frame:RegisterEvent(event)
+  end
+  self.keyEventInterest[frame] = wanted
+  self:RegisterKeyEventFrame(frame)
+end
+
 function MA:IsDebugMode()
   return self.db and self.db.debugMode and true or false
 end
@@ -212,7 +229,10 @@ end
 
 local function DispatchKeyEvent(event)
   for _, frame in ipairs(MA.keyEventFrames) do
-    local handler = frame:GetScript("OnEvent")
+    local interest = MA.keyEventInterest and MA.keyEventInterest[frame]
+    -- No declaration means the frame predates RegisterKeyEvents() and
+    -- still wants everything, which is how this behaved before.
+    local handler = (not interest or interest[event]) and frame:GetScript("OnEvent")
     if handler then
       local ok, err = pcall(handler, frame, event)
       if not ok then
@@ -220,6 +240,13 @@ local function DispatchKeyEvent(event)
       end
     end
   end
+end
+
+-- Exposed as a method so Tracker.lua's reload recovery can broadcast a
+-- synthetic start to every module (see BroadcastKeyStart there). Declared
+-- after the local above, which is what it forwards to.
+function MA:DispatchKeyEvent(event)
+  DispatchKeyEvent(event)
 end
 
 local debugTicker = nil

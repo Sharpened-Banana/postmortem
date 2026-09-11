@@ -112,10 +112,31 @@ function MA:Tracker_OnTick()
   -- not just when a new combat log event arrives. Reuses this existing
   -- once-per-second tick instead of an OnUpdate of its own; same guarded-
   -- call pattern as Overlay_Refresh below.
-  if MA.RouteImport_OnTick then MA.RouteImport_OnTick(MA) end
-  if MA.Interrupts_OnTick then MA.Interrupts_OnTick(MA) end
-  if MA.ChestTimer_OnTick then MA.ChestTimer_OnTick(MA) end
-  if MA.Overlay_Refresh then MA.Overlay_Refresh(MA) end
+  -- Every per-tick module call is wrapped, because this whole function
+  -- runs inside a hooksecurefunc on Blizzard's ChallengeModeBlock.UpdateTime
+  -- -- i.e. INSIDE Blizzard's own execution path. An error escaping here
+  -- does not just lose one module's update; it errors in Blizzard's frame
+  -- and can taint it. The 12.0 Secret Values system makes that a live
+  -- risk rather than a theoretical one: a value the client marks secret
+  -- throws the moment it is compared, concatenated or used as a table
+  -- key, and it only takes one field nobody thought to guard (2026-09-11).
+  --
+  -- A module that errors is reported once per tick in debug mode and is
+  -- simply skipped for that tick; the next tick tries again, which is the
+  -- same "keep last good values, retry next tick" behaviour the meter
+  -- helpers already use for secrets.
+  local function Tick(name, fn)
+    if not fn then return end
+    local ok, err = pcall(fn, MA)
+    if not ok then
+      MA:Debug("Tracker: %s errored on this tick -- %s", name, tostring(err))
+    end
+  end
+
+  Tick("RouteImport_OnTick", MA.RouteImport_OnTick)
+  Tick("Interrupts_OnTick", MA.Interrupts_OnTick)
+  Tick("ChestTimer_OnTick", MA.ChestTimer_OnTick)
+  Tick("Overlay_Refresh", MA.Overlay_Refresh)
 end
 
 -- Hooks Blizzard's own once-per-second ChallengeModeBlock.UpdateTime so we
@@ -229,12 +250,31 @@ end
 -- verified against EllesmereUIMythicTimer.lua:2819-2823 (real, currently-
 -- shipping code and comment): "API data isn't fully populated at PEW;
 -- retry once after 10s to catch a /reload mid-key."
+-- Dispatches a synthetic CHALLENGE_MODE_START to every module, so the
+-- reload-recovery path below brings the whole addon back up rather than
+-- only Tracker.lua's own slice of the state.
+--
+-- Before this, a /reload mid-key left chestTimer, splits, interrupts and
+-- route all nil for the rest of the run -- no countdown, no +2/+3 row, no
+-- splits, no pull counter, and (the one that actually costs data)
+-- CombatLogging's 2-second re-assert ticker never started, so another
+-- addon could switch logging off mid-key and nothing turned it back on.
+-- RunHistory also recorded the key with no zone, level or map
+-- (2026-09-11). StartRun() replaces MA.state wholesale, which is what
+-- discarded everyone else's keys, so the broadcast has to happen after it.
+local function BroadcastKeyStart()
+  if MA.DispatchKeyEvent then
+    MA:DispatchKeyEvent("CHALLENGE_MODE_START")
+  end
+end
+
 local function CheckForActiveKeyAfterReload()
   -- Debug mode starts the run itself (Bootstrap.lua's Debug_Start), so
   -- don't also soft-start here -- that would run StartRun twice on login.
   if MA:IsDebugMode() then return end
   if IsKeyActive() and not MA.state.active then
     StartRun()
+    BroadcastKeyStart()
   end
 end
 
@@ -246,7 +286,16 @@ trackerFrame:RegisterEvent("CHALLENGE_MODE_RESET")
 
 trackerFrame:SetScript("OnEvent", function(self, event, ...)
   if event == "CHALLENGE_MODE_START" then
-    StartRun()
+    -- Idempotent: a start for a run already underway is ignored rather
+    -- than restarting it. Without this, the reload-recovery broadcast
+    -- (BroadcastKeyStart above) would reach this same frame and call
+    -- StartRun() a second time, and StartRun() replaces MA.state
+    -- wholesale -- wiping the state the modules dispatched before this
+    -- one had just rebuilt. A duplicate start event from the client
+    -- would have done the same to a live key.
+    if not MA.state.active then
+      StartRun()
+    end
   elseif event == "CHALLENGE_MODE_COMPLETED" or event == "CHALLENGE_MODE_RESET" then
     EndRun(event)
   elseif event == "SCENARIO_CRITERIA_UPDATE" or event == "CHALLENGE_MODE_DEATH_COUNT_UPDATED" then

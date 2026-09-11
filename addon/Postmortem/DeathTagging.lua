@@ -101,20 +101,46 @@ local function TagDeathCause(recapID)
   return { spellId = bestSpellId, name = name, avoidable = avoidableEntry ~= nil }
 end
 
+-- The ticker currently allowed to write a result, plus the pending
+-- C_Timer.After that would create one. Both are needed: the event is
+-- group-wide, so two deaths inside INITIAL_DELAY_S used to create two
+-- tickers while only the newest was tracked -- the older one then ran
+-- forever, and when it hit POLL_MAX_TRIES its CancelPoll() stopped the
+-- CURRENT ticker instead of itself. Any wipe triggered it (2026-09-11).
 local pollTicker = nil
+local pollGeneration = 0
 
 local function CancelPoll()
   if pollTicker then
     pollTicker:Cancel()
     pollTicker = nil
   end
+  -- Bumping the generation retires any pending C_Timer.After as well, so
+  -- a delay that has already been scheduled cannot still turn into a
+  -- ticker after this call.
+  pollGeneration = pollGeneration + 1
 end
 
 local function PollForCause()
   CancelPoll()
   local tries = 0
+  local generation = pollGeneration
   C_Timer.After(INITIAL_DELAY_S, function()
-    pollTicker = C_Timer.NewTicker(POLL_INTERVAL_S, function()
+    if generation ~= pollGeneration then return end  -- superseded while waiting
+    local ticker
+    ticker = C_Timer.NewTicker(POLL_INTERVAL_S, function()
+      -- Cancel THIS ticker, never whatever is currently in pollTicker: an
+      -- orphan reaching its own limit used to stop the live one instead.
+      local function stop()
+        ticker:Cancel()
+        if pollTicker == ticker then
+          pollTicker = nil
+        end
+      end
+      if generation ~= pollGeneration then
+        stop()
+        return
+      end
       tries = tries + 1
       local ok, result = pcall(function()
         local recapID = FindLocalPlayerRecapID()
@@ -123,19 +149,20 @@ local function PollForCause()
       end)
       if not ok then
         MA:Debug("DeathTagging: errored (%s) -- giving up on this death", tostring(result))
-        CancelPoll()
+        stop()
         return
       end
       if result then
         MA.state.lastDeathCause = result
         MA:Debug("DeathTagging: died to %s%s", result.name, result.avoidable and " (avoidable)" or "")
         if MA.Overlay_Refresh then MA.Overlay_Refresh(MA) end
-        CancelPoll()
+        stop()
       elseif tries >= POLL_MAX_TRIES then
         MA:Debug("DeathTagging: couldn't resolve a death cause after %ds", POLL_MAX_TRIES * POLL_INTERVAL_S)
-        CancelPoll()
+        stop()
       end
     end)
+    pollTicker = ticker
   end)
 end
 
