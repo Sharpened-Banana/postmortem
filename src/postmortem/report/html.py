@@ -17,29 +17,43 @@ _TEMPLATE = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__TITLE__</title>
 <style>
+/* Postmortem brand system (2026-09-11). Two typefaces doing two jobs:
+   Barlow Condensed, uppercase and tracked, for the run's own name; IBM
+   Plex Mono for everything that is a number, a label or a timing -- which,
+   on this page, is nearly all of it. The families are named with real
+   fallbacks and NOT linked here: a report saved to disk has to look right
+   with no network, and the public site injects the webfont link itself
+   (see postmortem_site's _FONTS_LINK). */
 :root {
-  --bg: #14161b; --panel: #1d2027; --panel2: #232733; --line: #313746;
-  --text: #d8dbe2; --dim: #8a90a0; --accent: #d7a94c; --good: #58c47c;
-  --bad: #e06060; --warn: #e0a13c; --blue: #5c9ad0; --steal: #b47fdb;
+  --bg: #0E0D0C; --panel: #141210; --panel2: #1A1714; --line: #2A2621;
+  --text: #F3EFE6; --dim: #A39B8E; --accent: #C9A227; --accent-dim: #6B5718;
+  --good: #5CB85C; --bad: #D9534F; --warn: #E0A13C; --blue: #5c9ad0;
+  --steal: #b47fdb; --muted: #C4BCAE;
+  --display: "Barlow Condensed", "Oswald", "Roboto Condensed", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text);
-  font: 14px/1.5 "Segoe UI", system-ui, sans-serif; padding: 24px; }
-h1 { font-size: 22px; margin: 0 0 4px; color: var(--accent); }
-h2 { font-size: 15px; margin: 28px 0 10px; text-transform: uppercase;
-  letter-spacing: .08em; color: var(--dim); border-bottom: 1px solid var(--line);
-  padding-bottom: 6px; }
+body { margin: 0; background: var(--bg); color: var(--muted);
+  font: 14px/1.65 var(--mono); padding: 24px;
+  -webkit-font-smoothing: antialiased; }
+h1 { font-family: var(--display); font-size: 34px; font-weight: 700;
+  letter-spacing: .04em; text-transform: uppercase; line-height: 1;
+  margin: 0 0 10px; color: var(--text); }
+h2 { font-size: 12px; font-weight: 600; margin: 34px 0 12px;
+  text-transform: uppercase; letter-spacing: .16em; color: var(--accent);
+  border-bottom: 1px solid var(--line); padding-bottom: 8px; }
 .sub { color: var(--dim); margin-bottom: 18px; }
 .badge { display: inline-block; padding: 2px 10px; border-radius: 12px;
-  font-weight: 600; font-size: 12px; margin-right: 8px; }
+  font-weight: 600; font-size: 11.5px; margin-right: 8px;
+  letter-spacing: .04em; }
 .badge.timed { background: #1d3a28; color: var(--good); }
 .badge.over { background: #3a2d1d; color: var(--warn); }
-.badge.abandoned { background: #3a1d1d; color: var(--bad); }
+.badge.abandoned { background: #232733; color: var(--dim); }
 table { border-collapse: collapse; width: 100%; }
 th, td { text-align: left; padding: 5px 10px; border-bottom: 1px solid var(--line);
   white-space: nowrap; }
-th { color: var(--dim); font-weight: 600; font-size: 12px;
-  text-transform: uppercase; letter-spacing: .05em; }
+th { color: var(--dim); font-weight: 600; font-size: 11px;
+  text-transform: uppercase; letter-spacing: .12em; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 /* Long free-text cells (matched packs, deviations) wrap instead of forcing
    the table thousands of pixels wide -- which starved the one wrapping
@@ -48,16 +62,17 @@ td.txt { white-space: normal; min-width: 240px; vertical-align: top; }
 td.txt .pk { display: block; }
 td.txt .pk b { color: var(--dim); font-weight: 600; margin-right: 4px; }
 .wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line);
-  border-radius: 8px; padding: 6px 4px; }
+  border-radius: 10px; padding: 6px 4px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 12px; margin-bottom: 8px; }
-.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
-  padding: 12px 14px; }
-.stat .v { font-size: 20px; font-weight: 700; color: var(--text); }
-.stat .l { font-size: 11px; color: var(--dim); text-transform: uppercase;
-  letter-spacing: .06em; }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 14px 16px; }
+.stat .v { font-family: var(--display); font-size: 30px; font-weight: 700;
+  letter-spacing: .02em; line-height: 1.05; color: var(--text); }
+.stat .l { font-size: 10.5px; color: var(--dim); text-transform: uppercase;
+  letter-spacing: .12em; margin-top: 4px; }
 .timeline { position: relative; background: var(--panel);
-  border: 1px solid var(--line); border-radius: 8px; padding: 14px 10px 6px; }
+  border: 1px solid var(--line); border-radius: 10px; padding: 14px 10px 6px; }
 .tl-row { position: relative; height: 22px; }
 .tl-pull { position: absolute; top: 3px; height: 16px; border-radius: 3px;
   background: var(--blue); opacity: .85; min-width: 2px; }
