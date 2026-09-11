@@ -228,3 +228,48 @@ class TestRunReportEscaping:
         assert "</script><img" not in html
         page_title = re.search(r"<title>(.*?)</title>", html, re.S)
         assert page_title and "<img" not in page_title.group(1)
+
+
+class TestInlineScriptHashes:
+    """The report pages' inline code is static, so a CSP can name its hash
+    instead of allowing inline script wholesale -- which is exactly what
+    both stored-XSS findings relied on (2026-09-11). See report/csp.py."""
+
+    def test_both_pages_yield_one_hash_each(self):
+        from postmortem.report.csp import report_page_script_hashes
+
+        hashes = report_page_script_hashes()
+        assert len(hashes) == 2
+        assert all(h.startswith("'sha256-") and h.endswith("'") for h in hashes)
+
+    def test_the_data_block_is_not_hashed(self):
+        """A type="application/json" block is never executed, so it needs
+        no hash -- and hashing it would break on every report."""
+        from postmortem.report.csp import inline_script_hashes
+
+        page = (
+            '<script id="d" type="application/json">{"a": 1}</script>'
+            "<script>run();</script>"
+        )
+        assert len(inline_script_hashes(page)) == 1
+
+    def test_a_hash_actually_matches_the_rendered_page(self):
+        """The hash is read off the template; it has to match what a real
+        rendered page carries, or the browser refuses to run it."""
+        import base64
+        import hashlib
+        import re
+
+        from postmortem.report.csp import report_page_script_hashes
+        from postmortem.report.index import render_index
+
+        page = render_index([])
+        bodies = re.findall(r"<script>(.*?)</script>", page, re.DOTALL)
+        assert bodies, "the rendered page has no executable inline script"
+        rendered = [
+            "'sha256-" + base64.b64encode(
+                hashlib.sha256(body.encode("utf-8")).digest()
+            ).decode("ascii") + "'"
+            for body in bodies
+        ]
+        assert set(rendered) <= set(report_page_script_hashes())
