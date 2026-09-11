@@ -104,6 +104,19 @@ def build_results_payload(report: dict[str, Any]) -> dict[str, Any]:
     death_cost = report.get("death_cost") or {}
     comparison = report.get("comparison") or {}
     timer = report.get("timer") or {}
+    avoidable_damage = report.get("avoidable_damage") or {}
+    dispel_efficiency = report.get("dispel_efficiency") or {}
+    unplanned_pulls = report.get("unplanned_pulls") or {}
+
+    # Spell ids the loaded avoidable-damage file actually tagged, gathered
+    # from avoidable_damage's own already-filtered by_spell lists rather
+    # than needing the raw AvoidableData object here -- used below to flag
+    # whether a death's killing blow was an avoidable mechanic.
+    avoidable_spell_ids = {
+        sp.get("spell_id")
+        for player_entry in avoidable_damage.get("by_player") or []
+        for sp in player_entry.get("by_spell") or []
+    }
 
     players = []
     for p in report.get("players") or []:
@@ -147,11 +160,94 @@ def build_results_payload(report: dict[str, Any]) -> dict[str, Any]:
     if comparison.get("adherence_pct") is not None:
         payload["adherence_pct"] = comparison.get("adherence_pct")
     if timer:
+        # par_ms/threshold_2_ms/threshold_3_ms are the real fields
+        # _timer_summary emits (analysis/run_analyzer.py's own
+        # _timer_summary); this used to read "diff_ms"/"timed" keys that
+        # function never writes, so those addon-side fields were silently
+        # always nil. margin_ms/threshold are only present once the run
+        # actually finished (an abandoned run has no final time to grade).
         payload["timer"] = {
             "par_ms": timer.get("par_ms"),
-            "diff_ms": timer.get("diff_ms"),
-            "timed": timer.get("timed"),
+            "threshold_2_ms": timer.get("threshold_2_ms"),
+            "threshold_3_ms": timer.get("threshold_3_ms"),
+            "margin_ms": timer.get("margin_ms"),
+            "threshold": timer.get("threshold"),
         }
+
+    # Missed-kick detail: only spells that actually got through at least
+    # once are worth showing in-game (a spell that was always kicked has
+    # nothing to report). Trimmed to the top 10 by got_through so the file
+    # stays small on a dungeon with many enemy cast types.
+    missed = [s for s in enemy_casts.get("spells") or [] if s.get("got_through")]
+    missed.sort(key=lambda s: -s["got_through"])
+    if missed:
+        payload["enemy_casts"] = {
+            "spells": [
+                {
+                    "spell_id": s.get("spell_id"),
+                    "name": s.get("name"),
+                    "kicked": s.get("kicked") or 0,
+                    "got_through": s.get("got_through") or 0,
+                }
+                for s in missed[:10]
+            ],
+        }
+
+    # Avoidable damage, top 3 spells per player who took any.
+    avoidable_by_player = avoidable_damage.get("by_player") or []
+    if avoidable_by_player:
+        payload["avoidable_damage"] = {
+            "by_player": [
+                {
+                    "name": p.get("name") or "",
+                    "avoidable_damage_taken": p.get("avoidable_damage_taken") or 0,
+                    "by_spell": [
+                        {
+                            "spell_id": sp.get("spell_id"),
+                            "name": sp.get("name"),
+                            "amount": sp.get("amount") or 0,
+                        }
+                        for sp in (p.get("by_spell") or [])[:3]
+                    ],
+                }
+                for p in avoidable_by_player
+            ],
+        }
+
+    if dispel_efficiency.get("overall_efficiency_pct") is not None:
+        payload["dispel_efficiency"] = {
+            "overall_efficiency_pct": dispel_efficiency.get("overall_efficiency_pct"),
+            "schools": [
+                {
+                    "school": s.get("school"),
+                    "applied": s.get("applied") or 0,
+                    "dispelled": s.get("dispelled") or 0,
+                    "efficiency_pct": s.get("efficiency_pct"),
+                }
+                for s in dispel_efficiency.get("schools") or []
+                if s.get("efficiency_pct") is not None
+            ],
+        }
+
+    if unplanned_pulls.get("total_off_route_mobs") or unplanned_pulls.get("total_untracked_mobs"):
+        payload["unplanned_pulls"] = {
+            "total_off_route_mobs": unplanned_pulls.get("total_off_route_mobs") or 0,
+            "total_untracked_mobs": unplanned_pulls.get("total_untracked_mobs") or 0,
+        }
+
+    deaths_detail = []
+    for d in report.get("deaths") or []:
+        killing_blow = d.get("killing_blow") or {}
+        spell_id = killing_blow.get("spell_id")
+        deaths_detail.append({
+            "t": d.get("t"),
+            "player": d.get("player") or "",
+            "spell": killing_blow.get("spell") or "Unknown",
+            "avoidable": spell_id in avoidable_spell_ids if spell_id else False,
+        })
+    if deaths_detail:
+        payload["deaths_detail"] = deaths_detail
+
     return payload
 
 
