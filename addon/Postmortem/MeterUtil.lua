@@ -59,7 +59,16 @@ function MA:MeterUtil_ForEachSource(session, fn)
   local sources = (session and session.combatSources) or {}
   for i = 1, #sources do
     local source = sources[i]
-    if self:MeterUtil_IsSecret(source.sourceGUID) or self:MeterUtil_IsSecret(source.totalAmount) then
+    -- `name` is checked alongside the other two. It was omitted, and
+    -- Interrupts.lua uses it as a TABLE KEY every tick -- which throws on
+    -- a secret value, from inside a hooksecurefunc on Blizzard's own
+    -- timer, with no pcall anywhere on the path. That is the exact shape
+    -- of the bug that produced roughly 14,000 errors in one dungeon.
+    -- `type(name) ~= "string"` does not filter a secret string, so the
+    -- callers' own checks were no help (2026-09-11).
+    if self:MeterUtil_IsSecret(source.sourceGUID)
+        or self:MeterUtil_IsSecret(source.totalAmount)
+        or self:MeterUtil_IsSecret(source.name) then
       return false
     end
     fn(source)
@@ -78,7 +87,14 @@ function MA:MeterUtil_ForEachSourceSpell(sessionType, meterType, sourceGUID, fn)
   local spells = (container and container.combatSpells) or {}
   for i = 1, #spells do
     local spell = spells[i]
-    if self:MeterUtil_IsSecret(spell.spellID) then return false end
+    -- Every field a consumer actually reads is checked, not just the id.
+    -- Auditing them was the point: the source walk above checked two of
+    -- three and the third was the one used as a table key. `totalAmount`
+    -- is read by both consumers of this helper.
+    if self:MeterUtil_IsSecret(spell.spellID)
+        or self:MeterUtil_IsSecret(spell.totalAmount) then
+      return false
+    end
     fn(spell)
   end
   return true

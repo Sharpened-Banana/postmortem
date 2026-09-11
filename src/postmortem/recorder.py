@@ -370,6 +370,12 @@ class Recorder:
         if self.already_processed is None:
             return done
         for start_off, end_off, zone, start_ts in completed:
+            # Catch-up analyses take minutes each on a log with several
+            # unprocessed keys, and this loop used to ignore the stop flag
+            # entirely -- so Stop reported "stopped" while runs kept being
+            # analyzed and uploaded (2026-09-11).
+            if self._stop_requested:
+                break
             try:
                 if self.already_processed(zone, start_ts):
                     continue
@@ -411,6 +417,9 @@ class Recorder:
         line boundary like this, not derived by summing decoded string
         lengths (multi-byte UTF-8 content would throw that off).
         """
+        # The scan below walks the whole file, which on a multi-gigabyte log
+        # is minutes of work before tailing even starts. Like _catch_up(),
+        # it has to be interruptible or Stop does not stop.
         pending_start_offset: Optional[int] = None
         pending_start_line: Optional[str] = None
         # Every completed run seen on the way, as (start_offset,
@@ -421,7 +430,7 @@ class Recorder:
         completed: list[tuple[int, int, str, float]] = []
         offset = fh.tell()
         line = fh.readline()
-        while line:
+        while line and not self._stop_requested:
             if _START_RE.search(line):
                 pending_start_offset = offset
                 pending_start_line = line

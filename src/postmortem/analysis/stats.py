@@ -151,6 +151,10 @@ class PlayerStats:
         }
 
 
+
+# See the UNIT_DIED branch: how far back a death recap looks, in seconds.
+DEATH_RECAP_WINDOW_S = 10.0
+
 def _top(counter: Counter, n: int) -> list[dict[str, Any]]:
     return [
         {"spell_id": sid, "name": sname, "total": total}
@@ -255,6 +259,9 @@ def compute_stats(
                 pending_removals.pop(key)
                 stats.dispel_outcomes[key[1]]["expired"] += 1
     owner_map: dict[str, str] = {}
+    # How far back a death recap looks. Long enough to carry the pull that
+    # actually killed someone, short enough that a hit from earlier in the
+    # same life is not presented as the cause.
     recent_damage: dict[str, deque] = {}
     locator = _PullLocator(pulls)
     killed_guids: set[str] = set()
@@ -491,7 +498,32 @@ def compute_stats(
                     continue  # feign death
                 player = get_player(dst_guid, dst_name)
                 player.death_count += 1
-                recap = list(recent_damage.get(dst_guid, ()))
+                # Window the buffer, then empty it. Both matter, for
+                # different reasons.
+                #
+                # The buffer is a rolling deque that was never reset at
+                # death, so a player who died, was battle-rezzed and died
+                # again much later reported a "biggest hit" and a recap
+                # line from the PREVIOUS life -- a reproduction had a death
+                # at t=400 to a 1,234 hit reporting biggest_hit=500,000
+                # from a Doom Bolt 380 seconds and one life earlier, shown
+                # verbatim in both the HTML and text reports (2026-09-11).
+                # Draining it is what stops that.
+                #
+                # The window additionally trims chip damage from earlier in
+                # the SAME life, which draining cannot reach -- a recap is
+                # meant to answer "what killed them", not "what touched
+                # them in the last several minutes".
+                #
+                # Note killing_blow can now legitimately be None, for a
+                # death whose killing blow was not a parsed damage event.
+                # That is the honest answer; it used to be whatever hit
+                # happened to be left in the buffer.
+                buf = recent_damage.get(dst_guid)
+                recap = [r for r in (buf or ())
+                         if r["ts"] >= event.ts - DEATH_RECAP_WINDOW_S]
+                if buf is not None:
+                    buf.clear()
                 killing = recap[-1] if recap else None
                 stats.deaths.append(DeathRecord(
                     ts=event.ts,

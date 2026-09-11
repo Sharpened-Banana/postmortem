@@ -73,7 +73,7 @@ class TestSSLContext:
         monkeypatch.setattr(updater.urllib.request, "urlopen", fake_urlopen)
         with pytest.raises(updater.urllib.error.URLError):
             updater.download_update(
-                "https://github.com/x/y/releases/download/t/a.zip", tmp_path / "out.zip",
+                "https://github.com/Sharpened-Banana/postmortem/releases/download/t/a.zip", tmp_path / "out.zip",
             )
         assert captured["context"] is updater._SSL_CONTEXT
 
@@ -105,14 +105,18 @@ class TestCheckForUpdate:
             "tag_name": "alpha-desktop-8",
             "body": "some release notes",
             "assets": [
-                {"name": "Postmortem-macos.zip", "browser_download_url": "https://github.com/x/y/releases/download/alpha-desktop-8/Postmortem-macos.zip"},
-                {"name": "Postmortem-windows.zip", "browser_download_url": "https://github.com/x/y/releases/download/alpha-desktop-8/Postmortem-windows.zip"},
+                {"name": "Postmortem-macos.zip", "browser_download_url": "https://github.com/Sharpened-Banana/postmortem/releases/download/alpha-desktop-8/Postmortem-macos.zip"},
+                {"name": "Postmortem-windows.zip", "browser_download_url": "https://github.com/Sharpened-Banana/postmortem/releases/download/alpha-desktop-8/Postmortem-windows.zip"},
             ],
         }
         result = updater.check_for_update(fetcher=fetcher)
+        # sha256 is None here because this synthetic release publishes no
+        # SHA256SUMS asset -- the pre-2026-09-11 shape, which
+        # verify_digest() still accepts so an old build can move forward.
         assert result == {
+            "sha256": None,
             "tag": "alpha-desktop-8",
-            "download_url": "https://github.com/x/y/releases/download/alpha-desktop-8/Postmortem-macos.zip",
+            "download_url": "https://github.com/Sharpened-Banana/postmortem/releases/download/alpha-desktop-8/Postmortem-macos.zip",
             "notes": "some release notes",
         }
 
@@ -339,7 +343,7 @@ class TestDownloadUpdate:
         progress = []
         dest = tmp_path / "out.zip"
         updater.download_update(
-            "https://github.com/x/y/releases/download/t/a.zip", dest,
+            "https://github.com/Sharpened-Banana/postmortem/releases/download/t/a.zip", dest,
             on_progress=progress.append,
         )
         assert dest.read_bytes() == payload
@@ -353,7 +357,7 @@ class TestDownloadUpdate:
             lambda req, timeout=None, context=None: _FakeResponse(payload),
         )
         dest = tmp_path / "out.zip"
-        updater.download_update("https://github.com/x/y/releases/download/t/a.zip", dest)
+        updater.download_update("https://github.com/Sharpened-Banana/postmortem/releases/download/t/a.zip", dest)
         assert dest.read_bytes() == payload
 
 
@@ -485,8 +489,101 @@ class TestPerformUpdate:
 
         work_dir = tmp_path / "work"
         result = updater.perform_update(
-            "https://github.com/x/y/releases/download/t/Postmortem-macos.zip", work_dir,
+            "https://github.com/Sharpened-Banana/postmortem/releases/download/t/Postmortem-macos.zip", work_dir,
         )
         assert result == work_dir / "extracted" / "Postmortem.app"
         assert (result / "Contents" / "MacOS" / "Postmortem").exists()
         assert not (work_dir / "update.zip").exists()  # cleaned up after extraction
+
+
+class TestUpdateDigestVerification:
+    """DESK-17. The whole trust chain was TLS plus "the host is one of two
+    GitHub hosts" -- and one of those serves every GitHub user's release
+    assets, so any attacker-hosted archive on it passed. Nothing checked
+    the archive afterwards, and because the app writes the files itself no
+    operating-system quarantine check applies to an update either."""
+
+    def test_another_users_release_path_is_rejected(self):
+        assert not updater._is_trusted_download_url(
+            "https://github.com/someone-else/their-repo/releases/download/v1/Postmortem-macos.zip"
+        )
+
+    def test_this_projects_release_path_is_accepted(self):
+        assert updater._is_trusted_download_url(
+            "https://github.com/Sharpened-Banana/postmortem/releases/download/"
+            "alpha-desktop-9/Postmortem-macos.zip"
+        )
+
+    def test_a_mismatched_digest_refuses_the_update(self, tmp_path):
+        archive = tmp_path / "update.zip"
+        archive.write_bytes(b"not the build you were promised")
+        with pytest.raises(ValueError, match="published checksum"):
+            updater.verify_digest(archive, "0" * 64)
+
+    def test_a_matching_digest_is_accepted(self, tmp_path):
+        import hashlib
+
+        archive = tmp_path / "update.zip"
+        body = b"the real build"
+        archive.write_bytes(body)
+        updater.verify_digest(archive, hashlib.sha256(body).hexdigest())
+
+    def test_a_release_with_no_sums_file_still_updates(self, tmp_path):
+        """Deliberate, and only for the transition: a user on an older
+        build updates to the first release that publishes sums, and that
+        OLD release has none to compare against."""
+        archive = tmp_path / "update.zip"
+        archive.write_bytes(b"anything")
+        updater.verify_digest(archive, None)  # must not raise
+
+    def test_the_digest_is_read_from_the_published_sums_file(self, monkeypatch, tmp_path):
+        import io
+
+        monkeypatch.setattr(sys, "platform", "darwin")
+        sums = b"abc123  Postmortem-macos.zip\ndef456  Postmortem-windows.zip\n"
+
+        class FakeResponse(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        monkeypatch.setattr(updater.urllib.request, "urlopen",
+                            lambda *a, **k: FakeResponse(sums))
+        base = "https://github.com/Sharpened-Banana/postmortem/releases/download/alpha-desktop-9"
+        payload = {"assets": [
+            {"name": "SHA256SUMS-macOS.txt", "browser_download_url": f"{base}/SHA256SUMS-macOS.txt"},
+        ]}
+        # Not a valid 64-char hex digest, so it is refused rather than used.
+        assert updater._expected_digest(payload, "Postmortem-macos.zip") is None
+
+    def test_a_wellformed_digest_is_returned(self, monkeypatch):
+        import io
+
+        monkeypatch.setattr(sys, "platform", "darwin")
+        digest = "a" * 64
+        sums = f"{digest}  Postmortem-macos.zip\n".encode()
+
+        class FakeResponse(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        monkeypatch.setattr(updater.urllib.request, "urlopen",
+                            lambda *a, **k: FakeResponse(sums))
+        base = "https://github.com/Sharpened-Banana/postmortem/releases/download/alpha-desktop-9"
+        payload = {"assets": [
+            {"name": "SHA256SUMS-macOS.txt", "browser_download_url": f"{base}/SHA256SUMS-macOS.txt"},
+        ]}
+        assert updater._expected_digest(payload, "Postmortem-macos.zip") == digest
+
+    def test_a_sums_file_hosted_somewhere_else_is_ignored(self, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "darwin")
+        payload = {"assets": [
+            {"name": "SHA256SUMS-macOS.txt",
+             "browser_download_url": "https://evil.example/SHA256SUMS-macOS.txt"},
+        ]}
+        assert updater._expected_digest(payload, "Postmortem-macos.zip") is None

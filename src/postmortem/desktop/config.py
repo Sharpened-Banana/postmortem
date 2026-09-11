@@ -146,13 +146,29 @@ def resolve_watch_log_path(folder: str | Path) -> Path:
     the first key of a fresh session" behavior.
     """
     folder = Path(folder)
-    candidates = sorted(
-        folder.glob("WoWCombatLog*.txt"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-    if candidates:
-        return candidates[0]
+
+    def _mtime(path: Path) -> float:
+        """Sorting by st_mtime is unguarded at its peril: glob finds a file
+        and stat can still fail on it a moment later. WoW rotating or
+        cleaning its own logs is exactly that race, and a dangling symlink
+        or a permission-denied file does it without any race at all.
+
+        The traceback went somewhere it must not: resolve_wow_log_path() is
+        documented "never raises" and start_watch() reads this BEFORE its
+        own try block, so a user clicking Start Watching got a raw Python
+        error across the JS bridge instead of a failure message
+        (2026-09-11). recorder.newest_combat_log() already guards the
+        identical sort; this copy did not.
+        """
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return float("-inf")  # sorts last, never chosen over a real file
+
+    candidates = sorted(folder.glob("WoWCombatLog*.txt"), key=_mtime, reverse=True)
+    for candidate in candidates:
+        if _mtime(candidate) != float("-inf"):
+            return candidate
     return folder / "WoWCombatLog.txt"
 
 

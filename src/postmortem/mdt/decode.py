@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import re
 import zlib
 from typing import Any
 
@@ -28,14 +29,38 @@ class MDTDecodeError(ValueError):
     pass
 
 
+# An MDT route for the largest dungeon, with every pull and note, is a few
+# hundred kilobytes decompressed. Sixteen megabytes is far past any real
+# route and far below what would trouble the machine, which is the gap a
+# bound wants to sit in.
+#
+# Deflate's ratio ceiling is about 1032:1, so without a bound a 271KB paste
+# inflates to 200MB (measured: 651MB peak resident) and a 2MB paste can ask
+# for 2GB -- the whole of the production server. Route strings are pasted
+# by users on the public site and in the desktop app, so this is reachable
+# input, not a theoretical one (2026-09-11).
+MAX_ROUTE_BYTES = 16 * 1024 * 1024
+
+
 def _inflate(data: bytes) -> bytes:
     """Decompress raw-deflate data (LibDeflate / C_EncodingUtil style),
-    falling back to zlib/gzip wrappers just in case."""
+    falling back to zlib/gzip wrappers just in case.
+
+    Bounded at MAX_ROUTE_BYTES: a decompressobj stops at the limit and
+    leaves the rest in unconsumed_tail, so an over-large stream is a clean
+    MDTDecodeError rather than an allocation the process cannot survive.
+    """
     for wbits in (-15, 15, 31):
+        decompressor = zlib.decompressobj(wbits)
         try:
-            return zlib.decompress(data, wbits)
+            out = decompressor.decompress(data, MAX_ROUTE_BYTES)
         except zlib.error:
             continue
+        if decompressor.unconsumed_tail or not decompressor.eof:
+            raise MDTDecodeError(
+                f"route data expands past the {MAX_ROUTE_BYTES // (1024 * 1024)}MB limit"
+            )
+        return out
     raise MDTDecodeError("could not decompress route data (not a deflate stream)")
 
 
@@ -72,7 +97,11 @@ def _decode_mdt_body(text: str) -> Any:
     if text.startswith(MDT2_PREFIX):
         payload = text[len(MDT2_PREFIX):]
         # Base64 with tolerant padding
-        payload = payload.strip()
+        # Strip everything b64decode would silently discard BEFORE working
+        # out the padding, or a soft-wrapped paste (newlines from an email
+        # or a chat client) pads to the wrong length and either errors or
+        # decodes short.
+        payload = re.sub(r"[^A-Za-z0-9+/=]", "", payload)
         try:
             decoded = base64.b64decode(payload + "=" * (-len(payload) % 4))
         except (binascii.Error, ValueError) as exc:

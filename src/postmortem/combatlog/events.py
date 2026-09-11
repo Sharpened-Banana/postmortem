@@ -203,6 +203,16 @@ _GUID_PREFIXES = (
 ADVANCED_LEN = 19
 
 
+def _is_number(value: str) -> bool:
+    """Is this field a bare number? Used to tell a damage amount from a
+    word like "Falling" -- see _suffix_params()."""
+    try:
+        int(value)
+        return True
+    except ValueError:
+        return False
+
+
 def _looks_like_guid(value: str) -> bool:
     if value.startswith(_GUID_PREFIXES):
         return True
@@ -226,11 +236,43 @@ class AdvancedInfo(NamedTuple):
     level: int
 
 
+def _is_advanced_block(params: list[str], off: int) -> bool:
+    """Does an advanced block really start here?
+
+    Requires BOTH of the block's first two fields -- infoGUID and
+    ownerGUID -- to be GUID-shaped, not just the first. That second check
+    is what makes the test discriminating: one position too far along, the
+    first field is ownerGUID (all zeros, which _looks_like_guid accepts)
+    but the second is currentHP, a plain number. Checking only the first
+    field made an off-by-one look like a valid block.
+    """
+    if off < 0 or len(params) < off + ADVANCED_LEN:
+        return False
+    return _looks_like_guid(params[off]) and _looks_like_guid(params[off + 1])
+
+
 def _advanced_offset(event: Event) -> int:
     """Index where the advanced block starts, or -1 if absent."""
     base = 8 + prefix_len(event.name)
-    if len(event.params) >= base + ADVANCED_LEN and _looks_like_guid(event.params[base]):
-        return base
+    candidates = [base]
+    if event.name.startswith("ENVIRONMENTAL_"):
+        # prefix_len() says environmentalType sits BEFORE the advanced
+        # block, which puts the block at 9. Retail may instead carry the
+        # block first and environmentalType in the suffix, putting it at 8
+        # -- an audit flagged this on 2026-09-11 and it could not be
+        # settled either way: no fixture in this repo contains a single
+        # ENVIRONMENTAL_DAMAGE line, and no test covered one.
+        #
+        # Rather than guess (guessing wrong makes falling deaths report
+        # `level` as their damage amount), try both and let the two-GUID
+        # test above decide, which it can do unambiguously: at the wrong
+        # offset the second field is a number, not a GUID. This is correct
+        # under either layout, so capturing a real falling-damage line
+        # later can only confirm it, never break it.
+        candidates.append(base - 1)
+    for off in candidates:
+        if _is_advanced_block(event.params, off):
+            return off
     return -1
 
 
@@ -264,7 +306,20 @@ def _suffix_params(event: Event) -> list[str]:
     off = _advanced_offset(event)
     if off >= 0:
         base = off + ADVANCED_LEN
-    return event.params[base:]
+    suffix = event.params[base:]
+    # environmentalType ("Falling", "Drowning", "Lava", ...) is a WORD, and
+    # it sits on whichever side of the advanced block this client build
+    # puts it -- see _advanced_offset() for why that is unsettled here. If
+    # it landed at the head of the suffix, drop it, or the damage amount is
+    # read from the word and every falling death reports 0.
+    #
+    # Keying on "not a number" rather than on a list of type names is
+    # deliberate: the suffix always begins with the damage amount, so a
+    # non-numeric first field cannot be anything else, and a type name this
+    # code has never heard of still works.
+    if event.name.startswith("ENVIRONMENTAL_") and suffix and not _is_number(suffix[0]):
+        suffix = suffix[1:]
+    return suffix
 
 
 # --- damage / heal suffixes ------------------------------------------------
@@ -296,10 +351,34 @@ def parse_damage(event: Event) -> Optional[Damage]:
     if len(s) < 9:
         return None
     # 10.x layout: amount, baseAmount, overkill, school, resisted, blocked,
-    #              absorbed, critical, glancing, crushing, isOffHand
+    #              absorbed, critical, glancing, crushing[, spellType]
     # legacy:      amount, overkill, school, resisted, blocked, absorbed,
     #              critical, glancing, crushing, isOffHand
-    if len(s) >= 11:
+    #
+    # The two layouts are told apart by the EVENT FAMILY, not by the field
+    # count, because the counts overlap. Measured against this repo's own
+    # real-log fixture (abandoned_key_instance_mismatch.txt):
+    #
+    #   SPELL_DAMAGE / SPELL_PERIODIC_DAMAGE   11 suffix fields
+    #   SWING_DAMAGE / SWING_DAMAGE_LANDED     10 suffix fields
+    #
+    # A spell carries a trailing spell-type field ("ST"/"AOE") that a swing
+    # has no room for, which is the whole of the difference. A `len(s) >= 11`
+    # test therefore sent every modern SWING down the legacy branch and
+    # shifted every field after `amount` by one. The damage done by that:
+    # across the 767 swings in that fixture, reported overkill came to
+    # 64,756,092 against a true 11,622 -- baseAmount was being read as
+    # overkill, a ~5,600x fabrication shown per player and in every death
+    # recap -- while `absorbed` read 0 against a true 3,943,916, so melee
+    # damage done (stats.py: amount + absorbed) was silently under-counted
+    # whenever an enemy carried a shield. Found 2026-09-11; no test caught it
+    # because the synthetic LogBuilder never emitted a swing line at all.
+    #
+    # Legacy is now reached only by a suffix too short to be the modern
+    # shape, so a pre-10.x log still parses and no modern line can fall
+    # into it by accident.
+    modern = len(s) >= 11 or (event.name.startswith("SWING_") and len(s) >= 10)
+    if modern:
         return Damage(
             amount=to_int(s[0]),
             base_amount=to_int(s[1]),

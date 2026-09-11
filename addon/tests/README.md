@@ -8,6 +8,10 @@ Run them from the repo root with any Lua 5.1+ interpreter:
 
     lua addon/tests/overlay_layout.lua
 
+`reload_recovery.lua` covers the whole reload path: a `/reload` mid-key
+must bring every module back, not just `Tracker.lua`, because `StartRun()`
+replaces `MA.state` wholesale.
+
 `chesttimer_reload.lua` covers `ChestTimer.lua`: finishing a key after a
 `/reload` wiped the shared state. It reloads the module per scenario, which
 is what makes it faithful -- an addon `/reload` restarts every file, so any
