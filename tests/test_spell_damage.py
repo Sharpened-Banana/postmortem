@@ -92,7 +92,14 @@ class TestObserveStats:
         # Dark Bolt landed twice in the fixture (150k + 250k)
         by_name = {e["name"]: e for e in obs.spells.values()}
         bolt = by_name["Dark Bolt"]["levels"][seg.keystone_level or 0]
-        assert bolt == {"damage": 400000, "healing": 0, "casts": 2}
+        assert bolt["damage"] == 400000
+        assert bolt["healing"] == 0
+        assert bolt["casts"] == 2
+        # the two components are kept apart with their own cast counts, so
+        # the average this file yields matches the in-run one (2026-09-11)
+        assert bolt["direct_damage"] == 400000
+        assert bolt["direct_casts"] == 2
+        assert bolt["dot_damage"] == 0
 
     def test_update_from_stats_accumulates(self, tmp_path):
         seg, stats = _run_stats()
@@ -522,3 +529,75 @@ class TestBuildSpellDamageCommand:
         assert main(["build-spell-damage", "-o", str(out), "--samples", str(tmp_path / "s.json"),
                      "--no-bundle"]) == 0
         assert set(SpellDamageData.load(out).spells) == {333}
+
+
+class TestFallbackMatchesTheInRunArithmetic:
+    """The module's claim is that a fallback number and an observed number
+    are comparable. They were not: the in-run estimate averages the direct
+    and periodic components over their OWN cast counts and adds the
+    results, while history stored the sum against the larger count
+    (2026-09-11)."""
+
+    def test_split_components_average_over_their_own_counts(self):
+        data = SpellDamageData()
+        # 12 direct casts for 1.2M, 4 DoT applications for 800k.
+        data.add(999, "Split Bolt", 10, damage=2_000_000, casts=12,
+                 direct_damage=1_200_000, direct_casts=12,
+                 dot_damage=800_000, dot_casts=4)
+        est = data.estimate(999, 10)
+        # in-run arithmetic: 1_200_000/12 + 800_000/4 = 300_000
+        assert est["damage"] == 300_000
+        # the old combined reading was 2_000_000/12 = 166_667, a 1.8x miss
+        assert est["damage"] != round(2_000_000 / 12)
+
+    def test_a_file_without_the_split_still_reads(self):
+        """Community data, and any history written before the split, has
+        only the combined pair -- that must keep working."""
+        data = SpellDamageData.from_dict({"spells": {"999": {
+            "name": "Old Bolt",
+            "levels": {"10": {"damage": 2_000_000, "healing": 0, "casts": 12}},
+        }}})
+        assert data.estimate(999, 10)["damage"] == round(2_000_000 / 12)
+
+    def test_history_round_trips_the_split(self, tmp_path):
+        seg, stats = _run_stats()
+        path = tmp_path / "hist.json"
+        update_from_stats(stats, seg.keystone_level, path, dungeon=587)
+        reloaded = SpellDamageData.load(path)
+        bolt = next(e for e in reloaded.spells.values() if e["name"] == "Dark Bolt")
+        assert bolt["levels"][seg.keystone_level or 0]["direct_casts"] == 2
+        assert bolt["dungeons"] == [587]
+
+
+class TestNameBorrowIsScopedToOneDungeon:
+    """The in-run same-name borrow can only see this key's own spells; the
+    history one searched every dungeon and season ever recorded, so a
+    generic name was priced from an unrelated mob elsewhere (2026-09-11)."""
+
+    @staticmethod
+    def _history():
+        data = SpellDamageData()
+        # the kicked id itself: known, but never landed anywhere
+        data.add(1, "Shadow Bolt", 10, damage=0, casts=0, dungeon=525)
+        # a same-named spell from a DIFFERENT dungeon
+        data.add(2, "Shadow Bolt", 10, damage=5_000_000, casts=10, dungeon=999)
+        return data
+
+    def test_a_same_named_spell_from_another_dungeon_is_not_borrowed(self):
+        assert self._history().estimate(1, 10, name="Shadow Bolt", dungeon=525) is None
+
+    def test_the_same_dungeon_still_borrows(self):
+        data = self._history()
+        data.note_dungeons(2, "Shadow Bolt", [525])
+        found = data.estimate(1, 10, name="Shadow Bolt", dungeon=525)
+        assert found is not None and found["damage"] == 500_000
+
+    def test_data_with_no_dungeon_recorded_is_still_usable(self):
+        """Community data and pre-2026-09-11 history record no dungeon.
+        Refusing those would silently switch the fallback off for everyone
+        who has not rebuilt their file."""
+        data = SpellDamageData()
+        data.add(1, "Shadow Bolt", 10, damage=0, casts=0)
+        data.add(2, "Shadow Bolt", 10, damage=5_000_000, casts=10)
+        found = data.estimate(1, 10, name="Shadow Bolt", dungeon=525)
+        assert found is not None and found["damage"] == 500_000

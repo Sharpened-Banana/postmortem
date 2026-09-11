@@ -145,6 +145,22 @@ doesn't, so install it once from
 https://dotnet.microsoft.com/download/dotnet/8.0 (the "Desktop Runtime",
 not the SDK) if the app tells you it's missing.
 
+### Verifying a download
+
+Every release publishes `SHA256SUMS-*.txt` beside its assets, and each
+asset carries a GitHub build attestation. The in-app updater checks the
+digest itself before it extracts anything; to check a file you downloaded
+by hand:
+
+```bash
+shasum -a 256 -c SHA256SUMS-macOS.txt          # or the Windows one
+gh attestation verify Postmortem-macos.zip --repo Sharpened-Banana/postmortem
+```
+
+The builds themselves are unsigned (no Apple Developer ID, no Windows
+code-signing certificate), so macOS Gatekeeper and Windows SmartScreen
+will both warn on first launch.
+
 ## What you get
 
 - **Route vs. actual** — every actual pull is matched against the planned

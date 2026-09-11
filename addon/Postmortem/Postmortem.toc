@@ -4,7 +4,7 @@
 ## Version: 0.3.0
 ## X-Curse-Project-ID: 1676571
 ## Notes: Live companion to the Postmortem analysis tool -- recording helper, live stats, route tracking.
-## IconTexture: Interface\AddOns\Postmortem\media\icon-64.png
+## IconTexture: Interface\AddOns\Postmortem\media\icon-64.tga
 ## SavedVariables: PostmortemDB, PostmortemSpellDB, PostmortemAvoidableDB
 ## LoadSavedVariablesFirst: 1
 

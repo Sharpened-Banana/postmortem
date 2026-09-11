@@ -232,6 +232,7 @@ def compute_stats(
     avoidable: Optional[AvoidableData] = None,
     spell_damage_fallbacks: Optional[list[tuple[str, Any]]] = None,
     keystone_level: Optional[int] = None,
+    challenge_map_id: Optional[int] = None,
     dispel_data: Optional[DispelData] = None,
 ) -> RunStats:
     stats = RunStats()
@@ -651,6 +652,18 @@ def compute_stats(
 
         heal = parse_heal(event)
         if heal is not None:
+            # A heal's advanced block belongs to the HEALED unit and its
+            # currentHP is post-heal, so this is the cheapest true reading
+            # of a player's health outside a damage event. Until 2026-09-11
+            # only damage wrote here, so a player who dropped low and was
+            # healed back up left last_hp_pct stuck at the low value, and
+            # the "crossed INTO danger" test below then failed for their
+            # NEXT dip -- the close-calls section quietly under-reported
+            # for exactly the players the healer saved.
+            if adv is not None and adv.info_guid == dst_guid and adv.max_hp and (
+                is_group_player(dst_flags) or is_group_owned(dst_flags)
+            ):
+                last_hp_pct[dst_guid] = adv.current_hp / adv.max_hp
             if is_hostile_npc(src_flags):
                 sp = spell_info(event)
                 if sp is not None:
@@ -755,6 +768,19 @@ def compute_stats(
                             applied_ts = open_debuffs.pop(key, None)
                         if applied_ts is not None:
                             entry["time_to_dispel_s"].append(round(event.ts - applied_ts, 2))
+                        else:
+                            # Nothing here ever saw this debuff land: it was
+                            # applied before the run window (or before this
+                            # log), so SPELL_AURA_APPLIED never counted it.
+                            # Counting the dispel anyway produced rows
+                            # reading "0 applied, 2 dispelled" in both
+                            # reports (2026-09-11). A debuff that was
+                            # removed was, necessarily, applied -- so imply
+                            # the application rather than report an
+                            # impossible row. No time-to-dispel is recorded,
+                            # since the application time is genuinely
+                            # unknown.
+                            entry["applied"] += 1
                 stats.dispel_events.append({
                     "ts": event.ts,
                     "pull": pull_idx,
@@ -970,7 +996,8 @@ def compute_stats(
         # every channel of it that wasn't interrupted got through
         entry["landed"] += max(0, channel_casts.get(spell_id, 0) - kicked)
 
-    _estimate_kick_value(stats, spell_damage_fallbacks, keystone_level)
+    _estimate_kick_value(stats, spell_damage_fallbacks, keystone_level,
+                         challenge_map_id)
     _finish_pull_stats(stats, pulls, data)
     _tag_death_defensives(stats, defensive_windows, full_cast_timeline)
     _tag_close_calls(stats)
@@ -1101,6 +1128,7 @@ def _estimate_kick_value(
     stats: RunStats,
     fallbacks: Optional[list[tuple[str, Any]]] = None,
     keystone_level: Optional[int] = None,
+    challenge_map_id: Optional[int] = None,
 ) -> None:
     """Estimate the damage/healing each kick prevented.
 
@@ -1181,8 +1209,12 @@ def _estimate_kick_value(
         if (not est_damage and not est_healing
                 and not ev["prevented_debuff_applications"] and spell_id):
             for label, data in fallbacks or []:
+                # challenge_map_id scopes the fallback's same-name borrow
+                # to this dungeon -- the in-run estimate is inherently
+                # scoped, the accumulated history was not (2026-09-11).
                 found = data.estimate(spell_id, keystone_level,
-                                      name=ev.get("interrupted_spell")) if data else None
+                                      name=ev.get("interrupted_spell"),
+                                      dungeon=challenge_map_id) if data else None
                 if found and (found["damage"] or found["healing"]):
                     est_damage = found["damage"] or None
                     est_healing = found["healing"] or None

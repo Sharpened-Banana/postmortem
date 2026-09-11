@@ -80,6 +80,13 @@ def decode_mdt_string(text: str) -> Any:
     paste; the wrapper converts those so a bad string yields the clean
     error message rather than a raw traceback. ``MDTDecodeError`` itself
     subclasses ``ValueError``, so it's re-raised unchanged first.
+
+    ``RecursionError`` is caught for the same reason: it is not a
+    ValueError, so before cbor.MAX_DEPTH existed a deeply-nested paste
+    escaped every caller's handler as a raw traceback. The depth bound
+    should now convert those first -- this is the belt to its braces, and
+    covers the other recursive decoders (ace, _normalize_cbor_strings)
+    too.
     """
     text = text.strip()
     if not text:
@@ -89,6 +96,8 @@ def decode_mdt_string(text: str) -> Any:
         return _decode_mdt_body(text)
     except MDTDecodeError:
         raise
+    except RecursionError:
+        raise MDTDecodeError("route data is nested too deeply to decode") from None
     except (ValueError, OverflowError) as exc:
         raise MDTDecodeError(f"could not decode MDT string: {exc}") from None
 

@@ -30,7 +30,12 @@ function MA:MinimapButton_Initialize()
   local dataObject = LDB:NewDataObject(ADDON_NAME, {
     type = "launcher",
     text = "Postmortem",
-    icon = "Interface\\AddOns\\Postmortem\\media\\icon-32.png",
+    -- TGA, not PNG: the client loads BLP and uncompressed TGA and
+    -- nothing else, so both icons rendered blank at every login --
+    -- no error, purely visual (2026-09-11). The PNGs are kept as the
+    -- source art (and for the CurseForge listing); the .tga files
+    -- beside them are what the game actually reads.
+    icon = "Interface\\AddOns\\Postmortem\\media\\icon-32.tga",
     OnClick = function(_, button)
       if button == "RightButton" then
         MA:Info_ShowLinkPopup()

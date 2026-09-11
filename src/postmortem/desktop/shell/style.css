@@ -670,6 +670,8 @@ td.num, th.num {
 
 .upload-status.ok { color: var(--good); }
 .upload-status.err { color: var(--bad); }
+/* a local save that failed is a warning, not a hidden element */
+.saved-status.err { color: var(--bad); }
 
 .report-frame {
   flex: 1;

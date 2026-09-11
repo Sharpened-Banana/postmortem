@@ -118,20 +118,27 @@ class LogBuilder:
         return f"Creature-0-1465-2830-12345-{npc_id}-{spawn}"
 
     @staticmethod
-    def _advanced(info_guid: str, hp=500000, max_hp=1000000, x=100.0, y=-200.0):
+    def _advanced(info_guid: str, hp=500000, max_hp=1000000, x=100.0, y=-200.0,
+                  absorb=0):
         # 19 fields, matching the real (2026-era, BUILD_VERSION 12.1.0)
         # client's advanced-logging block -- confirmed field-by-field
         # against two independent real combat-log lines during live
         # in-game testing (see events.py's ADVANCED_LEN comment and
         # memory/advanced_block_parsing_bug.md). The two "0,0" fields
-        # right after powerCost are real, currently-unidentified fields
+        # between armor and absorb are real, currently-unidentified fields
         # observed as 0 in every real sample seen so far -- not one of
-        # AdvancedInfo's named fields, just present-and-skipped so the
-        # fixture's field COUNT matches reality (that's what
-        # ADVANCED_LEN/_advanced_offset() actually depend on, not their
-        # semantics).
-        return (f"{info_guid},0000000000000000,{hp},{max_hp},2000,1000,500,0,3,"
-                f"100,100,0,0,0,{x:.2f},{y:.2f},2200,1.57,80")
+        # AdvancedInfo's named fields, just present-and-skipped.
+        #
+        # The order here matters as much as the count: this builder used to
+        # put those two fields after powerCost, the same wrong belief the
+        # parser held, so no synthetic test could ever disagree with the
+        # parser about where absorb and the power fields live.
+        #
+        # Fields: infoGUID, ownerGUID, currentHP, maxHP, attackPower,
+        # spellPower, armor, unknown, unknown, absorb, powerType,
+        # currentPower, maxPower, powerCost, x, y, uiMapID, facing, level.
+        return (f"{info_guid},0000000000000000,{hp},{max_hp},2000,1000,500,"
+                f"0,0,{absorb},3,100,100,0,{x:.2f},{y:.2f},2200,1.57,80")
 
     # -- combat events --
 
@@ -201,10 +208,13 @@ class LogBuilder:
                     f'{amount},{amount},0,0,nil')
 
     def heal(self, t, src_player, dst_player, spell_id, spell_name, amount,
-             overheal=0):
+             overheal=0, hp=500000):
+        """``hp`` is the target's health AFTER the heal -- that is what a
+        real heal's advanced block carries, and what close-call tracking
+        reads to notice a player was pulled back out of danger."""
         sguid, sname, sflags, _ = src_player
         dguid, dname, dflags, _ = dst_player
-        adv = self._advanced(dguid)
+        adv = self._advanced(dguid, hp=hp)
         self.raw(t, f'SPELL_HEAL,{sguid},"{sname}",{sflags:#06x},0x0,'
                     f'{dguid},"{dname}",{dflags:#06x},0x0,'
                     f'{spell_id},"{spell_name}",0x8,{adv},'

@@ -148,6 +148,25 @@ function renderHomeHint() {
   hint.hidden = !!(s.history_db_path || s.default_output_dir);
 }
 
+// A settings file that could not be read used to reset everything in
+// silence: the site URL went, Watch Live then refused to start, and
+// nothing said why (2026-09-11). The file itself is kept aside; say so.
+function renderSettingsResetBanner(status) {
+  const banner = document.getElementById("home-settings-reset");
+  if (!banner) return;
+  if (!status || !status.reset) {
+    banner.hidden = true;
+    return;
+  }
+  const text = document.getElementById("home-settings-reset-text");
+  text.textContent =
+    "Your saved settings could not be read, so the app started with " +
+    "defaults — including no site URL, which is why Watch Live may be " +
+    "unavailable. The old file was kept at " + (status.kept_path || "") +
+    ". Re-enter your settings and save to start a clean one.";
+  banner.hidden = false;
+}
+
 // ===========================================================================
 // New Analysis
 // ===========================================================================
@@ -335,14 +354,26 @@ async function onAnalyze() {
 }
 
 function showSavedStatus(saved) {
+  // A failed save used to be indistinguishable from no save being
+  // attempted: the element was simply hidden, so an unwritable output
+  // folder or a locked history database meant the report was never
+  // written and the run never reached History, in silence (2026-09-11).
   const el = document.getElementById("report-saved-status");
-  if (saved) {
-    el.textContent = "✓ Saved locally";
-    el.title = saved.json_path;
-    el.hidden = false;
-  } else {
+  el.classList.remove("err");
+  if (!saved) {
     el.hidden = true;
+    return;
   }
+  if (saved.ok === false) {
+    el.textContent = "⚠️ Not saved locally: " + (saved.error || "unknown error");
+    el.title = saved.error || "";
+    el.classList.add("err");
+    el.hidden = false;
+    return;
+  }
+  el.textContent = "✓ Saved locally";
+  el.title = saved.json_path;
+  el.hidden = false;
 }
 
 function initReportScreen() {
@@ -592,6 +623,30 @@ window.onWatchEvent = function (event) {
       addWatchLogEntry("info",
         `No combat log yet at <code>${esc(event.log_path)}</code> — `
         + "it'll appear automatically once you start a Mythic+ key.");
+      break;
+    case "scanning": {
+      // The initial scan of a pre-existing log walks the whole file
+      // before tailing starts -- minutes on a multi-gigabyte log, during
+      // which this screen used to sit silent after saying it was
+      // watching (2026-09-11).
+      const pct = event.bytes_total
+        ? Math.min(99, Math.floor((event.bytes_read / event.bytes_total) * 100))
+        : 0;
+      setWatchStatus(true, `Reading your existing combat log… ${pct}%`);
+      break;
+    }
+    case "catch_up_skipped":
+      addWatchLogEntry("info",
+        `${event.count} older finished ${event.count === 1 ? "key" : "keys"} in this log `
+        + `${event.count === 1 ? "was" : "were"} not replayed — only the newest `
+        + `${event.limit} are caught up automatically. Use New Analysis for older ones.`);
+      break;
+    case "log_unavailable":
+      setWatchStatus(true, "Waiting for the combat log to come back…");
+      addWatchLogEntry("err",
+        `The combat log at <code>${esc(event.log_path)}</code> is no longer there `
+        + "(deleted, or its drive disconnected). Watching continues and will pick up "
+        + "again by itself once the file reappears.");
       break;
     case "log_switched":
       // WoW restarted and began a new session log; the watch followed it
@@ -1264,6 +1319,12 @@ async function boot() {
     state.settings = await api().get_settings();
   } catch (e) {
     state.settings = defaultSettings();
+  }
+
+  try {
+    renderSettingsResetBanner(await api().get_settings_status());
+  } catch (e) {
+    // purely informational -- never block boot on it
   }
 
   applySettingsToNewAnalysis();

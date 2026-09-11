@@ -21,6 +21,15 @@ class CBORError(ValueError):
 
 _BREAK = object()
 
+# How deeply an MDT route may nest. A real preset is about six levels deep
+# (preset > value > pulls > pull > enemy list > clone list); a hundred is
+# far past anything MDT produces and far short of Python's own recursion
+# limit, which is what the bound is really protecting: without it a 291
+# byte paste of nothing but array headers raised RecursionError, which is
+# not a ValueError, so neither the CLI nor the desktop app -- both of which
+# catch MDTDecodeError -- could report it as a bad paste (2026-09-11).
+MAX_DEPTH = 100
+
 
 def loads(data: bytes) -> Any:
     value, _ = _decode_item(data, 0)
@@ -57,7 +66,9 @@ def _decode_head(data: bytes, offset: int) -> tuple[int, int, int | None, int]:
     return major, info, arg, offset + size
 
 
-def _decode_item(data: bytes, offset: int) -> tuple[Any, int]:
+def _decode_item(data: bytes, offset: int, depth: int = 0) -> tuple[Any, int]:
+    if depth > MAX_DEPTH:
+        raise CBORError(f"CBOR nesting deeper than {MAX_DEPTH} levels")
     major, info, arg, offset = _decode_head(data, offset)
 
     if major == 0:  # unsigned int
@@ -70,30 +81,30 @@ def _decode_item(data: bytes, offset: int) -> tuple[Any, int]:
         items: list[Any] = []
         if arg is None:
             while True:
-                value, offset = _decode_item(data, offset)
+                value, offset = _decode_item(data, offset, depth + 1)
                 if value is _BREAK:
                     return items, offset
                 items.append(value)
         for _ in range(arg):
-            value, offset = _decode_item(data, offset)
+            value, offset = _decode_item(data, offset, depth + 1)
             items.append(value)
         return items, offset
     if major == 5:  # map
         table: dict[Any, Any] = {}
         if arg is None:
             while True:
-                key, offset = _decode_item(data, offset)
+                key, offset = _decode_item(data, offset, depth + 1)
                 if key is _BREAK:
                     return table, offset
-                value, offset = _decode_item(data, offset)
+                value, offset = _decode_item(data, offset, depth + 1)
                 table[_hashable(key)] = value
         for _ in range(arg):
-            key, offset = _decode_item(data, offset)
-            value, offset = _decode_item(data, offset)
+            key, offset = _decode_item(data, offset, depth + 1)
+            value, offset = _decode_item(data, offset, depth + 1)
             table[_hashable(key)] = value
         return table, offset
     if major == 6:  # tag: decode content transparently
-        return _decode_item(data, offset)
+        return _decode_item(data, offset, depth + 1)
 
     # major == 7: floats, simple values, break
     if info == 31:

@@ -45,7 +45,10 @@ class TestLoadSaveRoundTrip:
             "default_routes": [],
         }
         config.save_settings(settings)
-        assert config.load_settings() == settings
+        loaded = config.load_settings()
+        assert {k: loaded[k] for k in settings} == settings
+        # every other key keeps its default
+        assert loaded == {**config.DEFAULT_SETTINGS, **settings}
 
     def test_partial_save_is_merged_onto_defaults(self, isolated_config_dir):
         config.save_settings({"raiderio_region": "eu"})
@@ -65,6 +68,50 @@ class TestLoadSaveRoundTrip:
         config.save_settings({"raiderio_region": "tw"})
         assert config.load_settings()["raiderio_region"] == "tw"
 
+    def test_a_save_keeps_keys_the_caller_did_not_send(self):
+        """The settings screen sends only the fields it shows. Merging onto
+        the defaults instead of onto the saved file meant one click of Save
+        discarded the five data-file overrides, silently changing which
+        data files the analysis used (2026-09-11)."""
+        config.save_settings({
+            "site_url": "https://postmortem-mplus.fly.dev",
+            "interrupt_data_path": "/data/interrupts.json",
+            "stealable_data_path": "/data/stealable.json",
+        })
+        config.save_settings({"raiderio_region": "eu"})
+        loaded = config.load_settings()
+        assert loaded["raiderio_region"] == "eu"
+        assert loaded["site_url"] == "https://postmortem-mplus.fly.dev"
+        assert loaded["interrupt_data_path"] == "/data/interrupts.json"
+        assert loaded["stealable_data_path"] == "/data/stealable.json"
+
+    def test_a_key_outside_the_defaults_also_survives_a_save(self):
+        config.save_settings({"future_setting": 42})
+        config.save_settings({"raiderio_region": "kr"})
+        assert config.load_settings()["future_setting"] == 42
+
+    def test_every_setting_the_resolvers_read_has_a_default(self):
+        """A key read by a resolver but missing from DEFAULT_SETTINGS was
+        invisible in the settings screen and, before the merge fix, the
+        first casualty of a save."""
+        for key in ("dungeon_data_path", "interrupt_data_path",
+                    "learned_interrupts_path", "learned_spell_damage_path",
+                    "stealable_data_path"):
+            assert key in config.DEFAULT_SETTINGS
+
+    def test_the_file_is_replaced_atomically(self, isolated_config_dir):
+        """A crash mid-write left truncated JSON, which the loader read as
+        a reason to reset everything to defaults (2026-09-11)."""
+        import json as _json
+
+        config.save_settings({"site_url": "https://example.invalid"})
+        path = isolated_config_dir / "desktop_settings.json"
+        inode_before = path.stat().st_ino
+        config.save_settings({"raiderio_region": "us"})
+        assert path.stat().st_ino != inode_before, "written in place, not renamed"
+        assert _json.loads(path.read_text())["site_url"] == "https://example.invalid"
+        assert not (isolated_config_dir / "desktop_settings.json.tmp").exists()
+
 
 class TestTolerantOfBadState:
     @pytest.fixture(autouse=True)
@@ -81,6 +128,26 @@ class TestTolerantOfBadState:
             "{not valid json", encoding="utf-8",
         )
         assert config.load_settings() == config.DEFAULT_SETTINGS
+
+    def test_an_unreadable_file_is_kept_and_reported(self, isolated_config_dir):
+        """Falling back to defaults in silence lost the site URL and left
+        Watch Live refusing to start with nothing to explain it."""
+        isolated_config_dir.mkdir(parents=True)
+        path = isolated_config_dir / "desktop_settings.json"
+        path.write_text('{"site_url": "https://exa', encoding="utf-8")
+        assert config.load_settings() == config.DEFAULT_SETTINGS
+
+        error = config.last_load_error()
+        assert error is not None
+        kept, message = error
+        assert message
+        # the bytes are kept, so the next save cannot destroy them
+        assert config.Path(kept).read_text().startswith('{"site_url"')
+
+        # ...and a good file afterwards clears the report
+        config.save_settings({"raiderio_region": "us"})
+        assert config.load_settings()["raiderio_region"] == "us"
+        assert config.last_load_error() is None
 
     def test_non_object_json_returns_defaults(self, isolated_config_dir):
         isolated_config_dir.mkdir(parents=True)

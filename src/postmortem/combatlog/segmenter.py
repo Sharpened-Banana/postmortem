@@ -70,6 +70,13 @@ class RunSegment:
             "start_ts": self.start_ts,
             "end_ts": self.end_ts,
             "completed": self.completed,
+            # A run cut off by the event cap is NOT an abandoned key, but
+            # it has exactly the same shape: no END, a duration that stops
+            # at the cap, and a forces percentage counted from the kills
+            # seen so far. The segmenter knew the difference and kept it to
+            # itself until 2026-09-11 -- nothing outside this file read the
+            # flag, so a capped run was reported to the user as abandoned.
+            "truncated": self.truncated,
             "timed": self.success,
             "duration_ms": self.duration_ms,
             "wall_duration_s": round(self.wall_duration, 1),

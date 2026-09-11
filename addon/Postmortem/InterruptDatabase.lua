@@ -117,19 +117,25 @@ local function RegisterCastEvents()
   castEventFrame:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
 end
 
-local function UnregisterCastEvents()
-  castEventFrame:UnregisterEvent("UNIT_SPELLCAST_START")
-  castEventFrame:UnregisterEvent("UNIT_SPELLCAST_CHANNEL_START")
-  castEventFrame:UnregisterEvent("NAME_PLATE_UNIT_ADDED")
-  castEventFrame:UnregisterEvent("NAME_PLATE_UNIT_REMOVED")
-
-  -- Clear tracked nameplate unit tokens back down to just the always-
-  -- tracked boss1-boss8 set, so no stale unit tokens from this key leak
-  -- into the next one.
+-- Clear tracked nameplate unit tokens back down to just the always-
+-- tracked boss1-boss8 set, so no stale unit tokens from this key leak
+-- into the next one.
+local function ResetTrackedUnits()
   trackedUnits = {}
   for i = 1, 8 do
     trackedUnits["boss" .. i] = true
   end
+end
+
+-- Only ever called from RegisterCastEvents()'s own (disabled) path; see
+-- InterruptDB_OnChallengeModeEnd for why the key-end path does not call
+-- this any more.
+local function UnregisterCastEvents()  -- luacheck: ignore
+  castEventFrame:UnregisterEvent("UNIT_SPELLCAST_START")
+  castEventFrame:UnregisterEvent("UNIT_SPELLCAST_CHANNEL_START")
+  castEventFrame:UnregisterEvent("NAME_PLATE_UNIT_ADDED")
+  castEventFrame:UnregisterEvent("NAME_PLATE_UNIT_REMOVED")
+  ResetTrackedUnits()
 end
 
 castEventFrame:SetScript("OnEvent", function(self, event, unit, ...)
@@ -180,7 +186,20 @@ function MA:InterruptDB_OnChallengeModeStart()
 end
 
 function MA:InterruptDB_OnChallengeModeEnd()
-  UnregisterCastEvents()
+  -- UnregisterCastEvents() -- deliberately NOT called any more.
+  --
+  -- RegisterCastEvents() is permanently disabled (see above), so those
+  -- four events are never registered and unregistering them can only ever
+  -- be a no-op. It is not a free no-op: this file's own header records
+  -- that UnregisterEvent() called from inside a handler throws
+  -- ADDON_ACTION_FORBIDDEN once taint is present, which is exactly the
+  -- failure that produced roughly 2,659 errors in one session. Keeping
+  -- dead calls on the completion path is needless exposure on the one
+  -- path that must not fail (2026-09-11).
+  --
+  -- The tracked-unit table is still cleared, since that is real state and
+  -- clearing it cannot throw.
+  ResetTrackedUnits()
 end
 
 challengeModeFrame:SetScript("OnEvent", function(self, event, ...)

@@ -27,6 +27,7 @@ just returns defaults rather than raising.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Optional
 
@@ -69,7 +70,26 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # save time so matching a run needs no data file later. See
     # resolve_default_route.
     "default_routes": [],
+    # The five data-file overrides below are read by the resolvers in this
+    # module and were missing from this dict until 2026-09-11. That was
+    # not cosmetic: save_settings() merged onto DEFAULT_SETTINGS, so any
+    # key not listed here and not sent by the interface -- which is all
+    # five -- was dropped on the next save, silently changing which data
+    # files the analysis used. save_settings() now merges onto the saved
+    # file, so an unknown key survives either way; these are listed so
+    # they also show up in get_settings() and can be edited.
+    "dungeon_data_path": None,
+    "interrupt_data_path": None,
+    "learned_interrupts_path": None,
+    "learned_spell_damage_path": None,
+    "stealable_data_path": None,
 }
+
+#: Set by load_settings() when the settings file existed but could not be
+#: read as JSON: (path to the copy kept aside, message). Read through
+#: last_load_error() so the app can tell the user its settings were reset
+#: rather than silently losing their site URL (2026-09-11).
+_LAST_LOAD_ERROR: Optional[tuple[str, str]] = None
 
 
 def settings_path() -> Path:
@@ -88,15 +108,43 @@ def load_settings() -> dict[str, Any]:
     crash and don't lose the ability to keep working" (see cache.py's
     ``_load_cache``), not "raise a clear error".
     """
+    global _LAST_LOAD_ERROR
     settings = dict(DEFAULT_SETTINGS)
+    path = settings_path()
     try:
-        with open(settings_path(), "r", encoding="utf-8") as fh:
+        with open(path, "r", encoding="utf-8") as fh:
             payload = json.load(fh)
-    except (OSError, ValueError):
+    except OSError:
         return settings
+    except ValueError as exc:
+        # A torn file (a crash mid-write before the atomic rename below
+        # existed) used to reset everything in silence: the site URL went,
+        # Watch Live then refused to start, and nothing said why. Keep the
+        # bytes and record what happened.
+        _LAST_LOAD_ERROR = (_preserve_unreadable(path), str(exc))
+        return settings
+    _LAST_LOAD_ERROR = None
     if isinstance(payload, dict):
         settings.update(payload)
     return settings
+
+
+def last_load_error() -> Optional[tuple[str, str]]:
+    """``(kept_copy_path, message)`` if the last load found an unreadable
+    settings file and fell back to defaults, else None."""
+    return _LAST_LOAD_ERROR
+
+
+def _preserve_unreadable(path: Path) -> str:
+    """Move an unparseable settings file aside so it is not overwritten by
+    the next save. Best-effort: returns the path it ended up at, or the
+    original if it could not be moved."""
+    kept = path.with_suffix(path.suffix + ".corrupt")
+    try:
+        os.replace(path, kept)
+        return str(kept)
+    except OSError:
+        return str(path)
 
 
 def resolve_output_dir(settings: dict[str, Any], subdir: str) -> Path:
@@ -363,14 +411,34 @@ def resolve_default_route(
 
 def save_settings(settings: dict[str, Any]) -> None:
     """Persist ``settings`` as JSON, creating the config directory if
-    needed. Merged onto ``DEFAULT_SETTINGS`` first so a partial dict
-    (e.g. just one changed field) still leaves a complete, self-
-    consistent file behind -- callers don't need to round-trip
-    ``load_settings()`` themselves before saving.
+    needed. Merged onto the SAVED settings (themselves merged onto
+    ``DEFAULT_SETTINGS``) so a partial dict -- e.g. just one changed
+    field, or the settings screen, which sends only the fields it shows --
+    leaves every other saved value intact. Callers don't need to
+    round-trip ``load_settings()`` themselves before saving.
+
+    Merging onto the defaults alone, as this did until 2026-09-11, meant
+    one click of Save discarded every key the interface did not send: the
+    five data-file overrides above lived only in the file, so saving
+    anything silently changed which data files the analysis used.
+
+    Written to a temporary file and renamed, so a crash mid-write cannot
+    leave truncated JSON behind -- which the loader would have read as a
+    reason to reset everything to defaults.
     """
-    merged = dict(DEFAULT_SETTINGS)
+    merged = load_settings()
     merged.update(settings or {})
     path = settings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(merged, fh, indent=1)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(merged, fh, indent=1)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass

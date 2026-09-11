@@ -153,7 +153,12 @@ const npcs = list => (list||[]).map(e =>
 function render() {
   const run = R.run, forces = R.forces || {}, dt = R.downtime || {};
   const dur = run.wall_duration_s;
-  let badge = '<span class="badge abandoned">INCOMPLETE / ABANDONED</span>';
+  // A run cut off by the ingest event cap has the same shape as an
+  // abandoned one -- no END, a duration stopping at the cap -- but it is
+  // not the same thing, so say so rather than calling the key abandoned.
+  let badge = run.truncated
+    ? '<span class="badge abandoned">PARTIAL ANALYSIS (SIZE LIMIT)</span>'
+    : '<span class="badge abandoned">INCOMPLETE / ABANDONED</span>';
   if (run.completed) badge = run.timed
     ? '<span class="badge timed">TIMED</span>'
     : '<span class="badge over">OVER TIMER</span>';

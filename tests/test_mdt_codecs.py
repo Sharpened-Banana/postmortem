@@ -178,3 +178,42 @@ class TestMDTString:
         for bad in ["!abc$def", "!abc=def", "~garbage~", "xxxxxxxxxx", "!!!"]:
             with pytest.raises(MDTDecodeError):
                 decode_mdt_string(bad)
+
+
+class TestNestingBound:
+    """A hostile paste must be an MDTDecodeError, never a RecursionError.
+
+    A few hundred bytes of nothing but one-element array headers nests
+    thousands of levels deep. Python raises RecursionError, which is not a
+    ValueError, so the CLI and the desktop app -- both catching
+    MDTDecodeError -- showed a raw traceback instead of "bad route string"
+    (2026-09-11).
+    """
+
+    @staticmethod
+    def _deep_route(levels: int) -> str:
+        import base64
+        import zlib
+
+        # 0x81 = array of exactly one item; nest, then a 0 at the bottom.
+        payload = bytes([0x81] * levels) + b"\x00"
+        compressor = zlib.compressobj(9, zlib.DEFLATED, -15)
+        blob = compressor.compress(payload) + compressor.flush()
+        return "!~MDT2~" + base64.b64encode(blob).decode("ascii")
+
+    def test_deep_nesting_raises_the_decode_error_callers_catch(self):
+        # 5,000 levels from a ~300 byte paste -- the shape the audit found.
+        with pytest.raises(MDTDecodeError):
+            decode_mdt_string(self._deep_route(5_000))
+
+    def test_the_bound_is_well_clear_of_a_real_route(self):
+        """A real preset nests about six deep; the cap must not clip it."""
+        assert cbor.MAX_DEPTH >= 50
+        value = 1
+        for _ in range(20):
+            value = {"pulls": [value]}
+        assert decode_mdt_string(encode_mdt_string(value)) == value
+
+    def test_the_limit_itself_is_a_cbor_error(self):
+        with pytest.raises(cbor.CBORError):
+            cbor.loads(bytes([0x81] * (cbor.MAX_DEPTH + 2)) + b"\x00")

@@ -85,17 +85,29 @@ class _ClockState:
         return self.year
 
 
-_DAY_CACHE: dict[tuple[int, int, int], float] = {}
+# Keyed by the whole hour, not by the day. Resolving midnight once and
+# adding the seconds since -- which is what this did until 2026-09-11 --
+# assumes every day is 24 hours long. On the spring transition it is 23,
+# so every run started after 2am that day got a start time an hour in the
+# future, and a run straddling the change reported a wall duration an hour
+# out. Letting mktime() place the hour itself is the fix; caching by hour
+# keeps it to at most 24 mktime() calls a day, which is what the day cache
+# was there for.
+#
+# Minutes and seconds are still added on, which is safe: transitions land
+# on an hour boundary, so no hour this resolves is itself of an unusual
+# length.
+_HOUR_CACHE: dict[tuple[int, int, int, int], float] = {}
 
 
-def _day_epoch(year: int, month: int, day: int) -> float:
-    key = (year, month, day)
-    cached = _DAY_CACHE.get(key)
+def _hour_epoch(year: int, month: int, day: int, hour: int) -> float:
+    key = (year, month, day, hour)
+    cached = _HOUR_CACHE.get(key)
     if cached is None:
         cached = float(
-            time.mktime((year, month, day, 0, 0, 0, 0, 1, -1))
+            time.mktime((year, month, day, hour, 0, 0, 0, 1, -1))
         )
-        _DAY_CACHE[key] = cached
+        _HOUR_CACHE[key] = cached
     return cached
 
 
@@ -137,7 +149,7 @@ def parse_line(
                 time_part = time_part[:i]
                 break
         hh, mm, ss = time_part.split(":")
-        ts = _day_epoch(year, month, day) + int(hh) * 3600 + int(mm) * 60 + float(ss)
+        ts = _hour_epoch(year, month, day, int(hh)) + int(mm) * 60 + float(ss)
     except (ValueError, IndexError):
         return None
 

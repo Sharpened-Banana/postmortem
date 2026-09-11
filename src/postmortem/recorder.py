@@ -49,6 +49,11 @@ _START_RE = re.compile(r"  CHALLENGE_MODE_START,")
 _END_RE = re.compile(r"  CHALLENGE_MODE_END,")
 _DEATH_RE = re.compile(r"  UNIT_DIED,")
 
+#: How much of a pre-existing log to read between on_scan_progress calls.
+#: The initial scan is a whole-file read; on a multi-gigabyte log that is
+#: minutes during which the interface has already said watching started.
+_SCAN_PROGRESS_EVERY = 64 * 1024 * 1024
+
 # CHALLENGE_MODE_START,"<zone>",<instance_id>,<challenge_map_id>,<keystone_level>,[<affixes>]
 _START_FIELDS_RE = re.compile(
     r'CHALLENGE_MODE_START,"([^"]*)",([^,]*),([^,]*),([^,]*)'
@@ -183,6 +188,28 @@ class Recorder:
     # was handled before -- the desktop app answers that from its run
     # history. None (the CLI) keeps the old "only tail what's new" start.
     already_processed: Optional[Callable[[str, float], bool]] = None
+    # How many caught-up keys to actually replay, newest first. A first
+    # watch on an install with months of logs found EVERY finished key
+    # unprocessed and analyzed and uploaded all of them, which is minutes
+    # of work per key and not what anyone pressing Start expects
+    # (2026-09-11). None = no cap (the CLI, which has no catch-up at all
+    # without already_processed anyway).
+    max_catch_up_runs: Optional[int] = None
+    # Fired with the number of finished keys the cap left behind, so the
+    # interface can say they were skipped rather than silently dropping
+    # them.
+    on_catch_up_skipped: Optional[Callable[[int], None]] = None
+    # Fired during the initial scan of a pre-existing log with
+    # ``(bytes_read, bytes_total)``. That scan walks the whole file --
+    # minutes on a multi-gigabyte log -- while the interface has already
+    # reported that watching started, so without this it looks hung.
+    on_scan_progress: Optional[Callable[[int, int], None]] = None
+    # Fired when the watched file has gone (deleted, or its drive
+    # disconnected) and no newer sibling has appeared. Both filesystem
+    # checks in the idle path swallow their errors, so the loop just slept
+    # forever while the interface kept saying it was watching -- no key
+    # would ever be picked up again (2026-09-11).
+    on_log_unavailable: Optional[Callable[[Path], None]] = None
     on_start_cmd: Optional[str] = None  # shell hook (e.g. start OBS recording)
     on_end_cmd: Optional[str] = None    # shell hook (e.g. stop OBS recording)
     obs_url: Optional[str] = None       # e.g. ws://127.0.0.1:4455 -- native OBS control
@@ -298,6 +325,7 @@ class Recorder:
                         fh = rotated
                         partial = ""
                         continue
+                    self._check_log_still_there()
                     time.sleep(self.poll_interval)
                     continue
                 if partial:
@@ -323,6 +351,58 @@ class Recorder:
                 runs.append(self._current)
             fh.close()
         return runs
+
+    #: How often the idle path re-checks that the watched file still
+    #: exists, and whether it has already said it doesn't.
+    _last_presence_check: float = field(default=0.0, repr=False)
+    _reported_missing: bool = field(default=False, repr=False)
+
+    def _check_log_still_there(self) -> None:
+        """Say so, once, when the watched file has gone.
+
+        The truncation and rotation checks both swallow filesystem errors
+        -- individually right, since a transient stat failure must not
+        kill a watch -- but together they meant a deleted log or an
+        unplugged drive looked exactly like "no keys yet", forever
+        (2026-09-11). Rate-limited to the rotation interval; a file that
+        comes back re-arms the report."""
+        if self.on_log_unavailable is None:
+            return
+        now = time.monotonic()
+        if now - self._last_presence_check < self.rotation_check_s:
+            return
+        self._last_presence_check = now
+        try:
+            present = self.log_path.exists()
+        except OSError:
+            present = False
+        if present:
+            self._reported_missing = False
+            return
+        if self._reported_missing:
+            return
+        self._reported_missing = True
+        self.echo(f"  the log file is gone: {self.log_path}")
+        try:
+            self.on_log_unavailable(self.log_path)
+        except Exception:
+            pass
+
+    def _notify_count(self, cb, value: int) -> None:
+        if cb is None:
+            return
+        try:
+            cb(value)
+        except Exception:
+            pass
+
+    def _notify_scan_progress(self, done: int, total: int) -> None:
+        if self.on_scan_progress is None:
+            return
+        try:
+            self.on_scan_progress(done, total)
+        except Exception:
+            pass
 
     _last_rotation_check: float = field(default=0.0, repr=False)
 
@@ -369,18 +449,32 @@ class Recorder:
         done: list[RecordedRun] = []
         if self.already_processed is None:
             return done
-        for start_off, end_off, zone, start_ts in completed:
+
+        pending = []
+        for entry in completed:
+            if self._stop_requested:
+                break
+            try:
+                if self.already_processed(entry[2], entry[3]):
+                    continue
+            except Exception:
+                continue
+            pending.append(entry)
+
+        if self.max_catch_up_runs is not None and len(pending) > self.max_catch_up_runs:
+            skipped = len(pending) - self.max_catch_up_runs
+            # newest keys are the ones anyone actually wants back
+            pending = pending[-self.max_catch_up_runs:]
+            self.echo(f"  skipping {skipped} older finished key(s) -- catch-up limit")
+            self._notify_count(self.on_catch_up_skipped, skipped)
+
+        for start_off, end_off, zone, start_ts in pending:
             # Catch-up analyses take minutes each on a log with several
             # unprocessed keys, and this loop used to ignore the stop flag
             # entirely -- so Stop reported "stopped" while runs kept being
             # analyzed and uploaded (2026-09-11).
             if self._stop_requested:
                 break
-            try:
-                if self.already_processed(zone, start_ts):
-                    continue
-            except Exception:
-                continue
             self.echo(f"  catching up on a finished key found in the log: {zone}")
             fh.seek(start_off)
             while fh.tell() < end_off:
@@ -428,9 +522,17 @@ class Recorder:
         # timed key sat fully written in the current log at open time and
         # the old "skip to EOF" start silently walked past it).
         completed: list[tuple[int, int, str, float]] = []
+        try:
+            total = os.path.getsize(self.log_path)
+        except OSError:
+            total = 0
+        next_progress = _SCAN_PROGRESS_EVERY
         offset = fh.tell()
         line = fh.readline()
         while line and not self._stop_requested:
+            if offset >= next_progress:
+                next_progress = offset + _SCAN_PROGRESS_EVERY
+                self._notify_scan_progress(offset, total)
             if _START_RE.search(line):
                 pending_start_offset = offset
                 pending_start_line = line

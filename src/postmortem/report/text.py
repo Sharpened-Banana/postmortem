@@ -49,6 +49,10 @@ def render_text(report: dict[str, Any]) -> str:
     result = "IN PROGRESS / ABANDONED"
     if run.get("completed"):
         result = "TIMED" if run.get("timed") else "COMPLETED (over timer)"
+    elif run.get("truncated"):
+        # Cut off by the ingest event cap, not abandoned: everything below
+        # is computed from the part of the key that was read.
+        result = "PARTIAL ANALYSIS (log truncated at size limit)"
     timer = run.get("duration_ms")
     add(f"Result: {result}"
         + (f"  |  In-game timer: {_fmt_time(timer / 1000)}" if timer else "")
