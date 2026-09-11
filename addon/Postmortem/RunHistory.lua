@@ -14,12 +14,46 @@
 
 local ADDON_NAME, MA = ...
 
+-- Has the key that is running (or just ran) already been archived? Set
+-- when an entry is written, cleared on CHALLENGE_MODE_START.
+--
+-- Both guards below exist because this handler used to ignore which event
+-- it was handed (2026-09-11): a bare CHALLENGE_MODE_RESET with no key
+-- ever started wrote an entry with no zone, level or result; a completion
+-- followed by the reset that always follows it wrote the same key twice;
+-- and one debug-mode toggle wrote two junk entries.
+local recordedThisKey = false
+
 local function RecordRun(event)
+  if event == "CHALLENGE_MODE_START" then
+    recordedThisKey = false
+    return
+  end
+  if event ~= "CHALLENGE_MODE_COMPLETED" and event ~= "CHALLENGE_MODE_RESET" then
+    return
+  end
+
   local db = MA:GetDB()
   if not db.saveRunHistory then return end
 
   local state = MA.state or {}
   local ct = state.chestTimer or {}
+
+  -- A key that never started has nothing to archive. ChestTimer fills
+  -- mapID on CHALLENGE_MODE_START and MA.state is replaced wholesale
+  -- there, so this is exactly "was a key running?".
+  if not ct.mapID then
+    MA:Debug("RunHistory: ignoring %s -- no key was running", tostring(event))
+    return
+  end
+
+  -- A completed key gets its RESET moments later; that is the same key,
+  -- already archived.
+  if recordedThisKey then
+    MA:Debug("RunHistory: ignoring %s -- this key is already recorded", tostring(event))
+    return
+  end
+  recordedThisKey = true
 
   local zone = nil
   if C_ChallengeMode.GetMapUIInfo and ct.mapID then
@@ -90,10 +124,14 @@ function MA:RunHistory_Print(count)
   end
 end
 
+-- START is wanted only to clear the once-per-key guard above; the
+-- recording itself happens on COMPLETED/RESET.
 local eventFrame = CreateFrame("Frame")
-MA:RegisterKeyEventFrame(eventFrame)
-eventFrame:RegisterEvent("CHALLENGE_MODE_COMPLETED")
-eventFrame:RegisterEvent("CHALLENGE_MODE_RESET")
+MA:RegisterKeyEvents(eventFrame, {
+  "CHALLENGE_MODE_START",
+  "CHALLENGE_MODE_COMPLETED",
+  "CHALLENGE_MODE_RESET",
+})
 
 eventFrame:SetScript("OnEvent", function(self, event, ...)
   RecordRun(event)

@@ -230,9 +230,24 @@ end
 local function DispatchKeyEvent(event)
   for _, frame in ipairs(MA.keyEventFrames) do
     local interest = MA.keyEventInterest and MA.keyEventInterest[frame]
-    -- No declaration means the frame predates RegisterKeyEvents() and
-    -- still wants everything, which is how this behaved before.
-    local handler = (not interest or interest[event]) and frame:GetScript("OnEvent")
+    local wanted
+    if interest then
+      wanted = interest[event] and true or false
+    elseif frame.IsEventRegistered then
+      -- No declaration: ask the frame what it actually registered for.
+      -- Dispatching to every frame regardless (which is what this did
+      -- until 2026-09-11) meant a synthetic event reached handlers that
+      -- never asked for it -- two modules happen to branch on the event
+      -- name and survived; RunHistory did not, and recorded a run from a
+      -- start event it never subscribed to.
+      wanted = frame:IsEventRegistered(event) and true or false
+    else
+      -- A stub frame with neither (test harnesses): keep the old
+      -- everything-goes behaviour rather than silently dispatching
+      -- nothing.
+      wanted = true
+    end
+    local handler = wanted and frame:GetScript("OnEvent")
     if handler then
       local ok, err = pcall(handler, frame, event)
       if not ok then
