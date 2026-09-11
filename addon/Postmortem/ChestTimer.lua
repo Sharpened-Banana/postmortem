@@ -98,7 +98,16 @@ local function GetBestSplitsTable(mapID, level, createIfMissing)
 end
 
 local function RecordSplit(criteriaIndex, description, elapsed)
+  -- No chest timer means no key as far as this file is concerned, and
+  -- there is nothing to file a split against. This is reachable for real:
+  -- a /reload during a key sends Tracker.lua down its recovery path, which
+  -- rebuilds MA.state from scratch, and this file's own state goes with it
+  -- -- CHALLENGE_MODE_START has already fired and will not fire again. The
+  -- key then FINISHED with chestTimer nil and this function threw
+  -- "attempt to index a nil value (local 'ct')" (2026-09-11).
   local ct = MA.state.chestTimer
+  if not ct or not MA.state.splits then return end
+
   local best = GetBestSplitsTable(ct.mapID, ct.level, false)
   local previousBest = best and best[criteriaIndex]
   local delta = previousBest and (elapsed - previousBest) or nil
@@ -124,6 +133,11 @@ local function RecordSplit(criteriaIndex, description, elapsed)
 end
 
 local function CheckSplits(elapsed)
+  -- Same reason as RecordSplit's own guard: EndChestTimer() reaches here
+  -- on CHALLENGE_MODE_COMPLETED whether or not this file ever saw the
+  -- matching start, and after a mid-key /reload it did not.
+  if not MA.state.chestTimer then return end
+
   local numCriteria = select(3, C_Scenario.GetStepInfo()) or 0
   for i = 1, numCriteria do
     local info = C_ScenarioInfo.GetCriteriaInfo(i)

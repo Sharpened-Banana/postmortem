@@ -272,6 +272,16 @@ class Recorder:
             fh.seek(resume_at)
             if in_progress:
                 self.echo("  found a key already in progress -- resuming it")
+        # A line the game is still writing. WoW flushes whenever its buffer
+        # fills, not on line boundaries, so readline() at the end of the
+        # file regularly returns the first half of a line and the rest
+        # arrives on a later poll. Feeding those halves separately matches
+        # nothing -- and when the split lands in CHALLENGE_MODE_END, the run
+        # never closes: no analysis, no upload, and the slice file grows
+        # until some later key starts, at which point it is reported
+        # abandoned (2026-09-11). This is the same lost-key symptom as the
+        # 2026-09-03 addon bug, arriving through the reader instead.
+        partial = ""
         try:
             while not self._stop_requested:
                 line = fh.readline()
@@ -279,13 +289,25 @@ class Recorder:
                     if self._truncated(fh):
                         fh.close()
                         fh = self._open()
+                        partial = ""  # the held fragment belongs to the old file
                         continue
                     # Idle at end-of-file: the natural moment to notice WoW
                     # has moved on to a new session's log file.
                     rotated = self._maybe_rotate(fh)
                     if rotated is not None:
                         fh = rotated
+                        partial = ""
                         continue
+                    time.sleep(self.poll_interval)
+                    continue
+                if partial:
+                    line = partial + line
+                    partial = ""
+                if not line.endswith("\n"):
+                    # Hold it until the rest is written. The file position
+                    # has already advanced past it, so the next readline()
+                    # returns the remainder, not this text again.
+                    partial = line
                     time.sleep(self.poll_interval)
                     continue
                 run = self._feed(line)

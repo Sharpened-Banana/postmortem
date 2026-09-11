@@ -92,13 +92,57 @@ summary { cursor: pointer; }
 <div id="app">Loading…</div>
 <script id="report-data" type="application/json">__REPORT_JSON__</script>
 <script>
-const R = JSON.parse(document.getElementById("report-data").textContent);
-const esc = s => String(s ?? "").replace(/[&<>"]/g,
-  c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const num = n => n == null ? "?" :
-  Math.abs(n) >= 1e9 ? (n/1e9).toFixed(2)+"b" :
-  Math.abs(n) >= 1e6 ? (n/1e6).toFixed(2)+"m" :
-  Math.abs(n) >= 1e3 ? (n/1e3).toFixed(1)+"k" : Math.round(n).toString();
+// ---------------------------------------------------------------------
+// Everything below renders into innerHTML, and every value in R came out
+// of an uploaded combat log -- anonymously, on the public site. Two stored
+// cross-site scripting holes were found here on 2026-09-11, and a scan
+// afterwards counted ~70 places where a report value is interpolated
+// directly. Escaping each of them by hand is a standing invitation to miss
+// one (the original bug was invisible at the source level: every value DID
+// go through esc(); esc() was simply incomplete).
+//
+// So the angle brackets are neutralised once, here, for every string in
+// the report, before a single template runs. Nothing downstream can then
+// open a tag, whatever context it lands in. Escaping (rather than
+// stripping) keeps the characters readable, and it is deliberately ONLY
+// < and > -- quotes are left for esc() at the attribute sites, because
+// pre-escaping them here would double-escape the many legitimate
+// apostrophes in WoW names.
+function deTag(value) {
+  if (typeof value === "string") return value.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  if (Array.isArray(value)) return value.map(deTag);
+  if (value && typeof value === "object") {
+    const out = {};
+    for (const k of Object.keys(value)) out[k] = deTag(value[k]);
+    return out;
+  }
+  return value;
+}
+
+const R = deTag(JSON.parse(document.getElementById("report-data").textContent));
+// Covers the single quote and backtick as well as the obvious four, so
+// an escaped value is safe in a single-quoted attribute and in a
+// template literal, not only in the double-quoted attributes this file
+// happens to use today.
+const esc = s => String(s ?? "").replace(/[&<>"'`]/g,
+  c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;","`":"&#96;"}[c]));
+// Every field in this report came out of an uploaded log, and on the
+// public site that upload is anonymous -- so a value the schema calls a
+// number can be arbitrary text. num() now rejects a non-number instead
+// of stringifying it into the page (2026-09-11); pct() is the same
+// guard for the several "value + %" call sites below.
+const num = n => {
+  const v = Number(n);
+  if (n == null || n === "" || !Number.isFinite(v)) return "?";
+  return Math.abs(v) >= 1e9 ? (v/1e9).toFixed(2)+"b" :
+    Math.abs(v) >= 1e6 ? (v/1e6).toFixed(2)+"m" :
+    Math.abs(v) >= 1e3 ? (v/1e3).toFixed(1)+"k" : Math.round(v).toString();
+};
+const plain = (n, fallback = "?") => {
+  const v = Number(n);
+  return n == null || n === "" || !Number.isFinite(v) ? fallback : String(v);
+};
+const pct = n => plain(n, "?") + "%";
 const mmss = s => { if (s == null) return "?"; s = Math.round(s);
   const m = Math.floor(s/60), sec = s%60;
   return m >= 60 ? `${Math.floor(m/60)}:${String(m%60).padStart(2,"0")}:${String(sec).padStart(2,"0")}`
@@ -114,11 +158,11 @@ function render() {
     ? '<span class="badge timed">TIMED</span>'
     : '<span class="badge over">OVER TIMER</span>';
 
-  let html = `<h1>${esc(run.zone || R.dungeon.name)} +${run.keystone_level ?? "?"}</h1>
+  let html = `<h1>${esc(run.zone || R.dungeon.name)} +${plain(run.keystone_level)}</h1>
   <div class="sub">${badge}
     ${run.duration_ms ? "In-game timer " + mmss(run.duration_ms/1000) + " · " : ""}
     wall clock ${mmss(dur)}
-    ${run.affixes && run.affixes.length ? " · affixes " + run.affixes.join(", ") : ""}</div>`;
+    ${run.affixes && run.affixes.length ? " · affixes " + esc(run.affixes.join(", ")) : ""}</div>`;
 
   html += timerInfo();
 
@@ -129,10 +173,10 @@ function render() {
     ${stat(mmss(dt.total_s), "downtime")}
     ${stat((R.pulls||[]).length, "actual pulls")}
     ${R.route ? stat(R.route.pull_count, "planned pulls") : ""}
-    ${R.comparison && R.comparison.adherence_pct != null ? stat(R.comparison.adherence_pct + "%", "route adherence") : ""}
+    ${R.comparison && R.comparison.adherence_pct != null ? stat(pct(R.comparison.adherence_pct), "route adherence") : ""}
     ${R.kick_value && R.kick_value.total_estimated_prevented_damage ? stat("~" + num(R.kick_value.total_estimated_prevented_damage), "dmg prevented by kicks (est.)") : ""}
     ${R.kick_value && R.kick_value.total_estimated_prevented_healing ? stat("~" + num(R.kick_value.total_estimated_prevented_healing), "enemy healing prevented by kicks (est.)") : ""}
-    ${R.enemy_casts && R.enemy_casts.kick_efficiency_pct != null ? stat(R.enemy_casts.kick_efficiency_pct + "%", "kick efficiency") : ""}
+    ${R.enemy_casts && R.enemy_casts.kick_efficiency_pct != null ? stat(pct(R.enemy_casts.kick_efficiency_pct), "kick efficiency") : ""}
     ${R.death_cost && R.death_cost.deaths ? stat("-" + mmss(R.death_cost.total_s), "timer lost to deaths") : ""}
   </div>`;
 
@@ -153,7 +197,7 @@ function render() {
   document.getElementById("app").innerHTML = html;
 }
 
-const stat = (v, l) => `<div class="stat"><div class="v">${v}</div><div class="l">${esc(l)}</div></div>`;
+const stat = (v, l) => `<div class="stat"><div class="v">${esc(v)}</div><div class="l">${esc(l)}</div></div>`;
 
 function timerInfo() {
   const t = R.timer;
@@ -344,7 +388,7 @@ function mapSection() {
   const pois = (m.pois||[]).map(p => {
     const s = Math.max(w, h) * 0.02 * (p.size_mult || 1);
     return `<rect x="${(p.x - s/2).toFixed(1)}" y="${(p.y - s/2).toFixed(1)}"
-      width="${s.toFixed(1)}" height="${s.toFixed(1)}" transform="rotate(45 ${p.x} ${p.y})"
+      width="${s.toFixed(1)}" height="${s.toFixed(1)}" transform="rotate(45 ${Number(p.x) || 0} ${Number(p.y) || 0})"
       fill="var(--warn)" stroke="var(--bg)" stroke-width="1"><title>${esc(p.type)}</title></rect>`;
   }).join("");
 
@@ -359,7 +403,7 @@ function mapSection() {
       : `stroke="#00000066" stroke-width="${(r*0.15).toFixed(2)}"`;
     const tip = `${e.name}${e.plan_pull != null ? " — plan #" + e.plan_pull : " — not in route"}`
       + (e.deviated ? " (deviation)" : "");
-    return `<circle cx="${e.x}" cy="${e.y}" r="${r.toFixed(2)}" fill="${fill}" ${stroke}>` +
+    return `<circle cx="${Number(e.x) || 0}" cy="${Number(e.y) || 0}" r="${r.toFixed(2)}" fill="${fill}" ${stroke}>` +
       `<title>${esc(tip)}</title></circle>`;
   }).join("");
 
@@ -371,7 +415,7 @@ function mapSection() {
     // sub-map that didn't calibrate -- is a gap, not a straight line
     // across the dungeon.
     paths = (m.players||[]).map((p, i) => (p.segments || [p.path]).map(seg => {
-      const pts = seg.map(pt => `${pt[1]},${pt[2]}`).join(" ");
+      const pts = seg.map(pt => `${Number(pt[1]) || 0},${Number(pt[2]) || 0}`).join(" ");
       return `<polyline points="${pts}" fill="none" stroke="${playerColor(i)}"
         stroke-width="${(Math.max(w, h) * 0.004).toFixed(2)}" stroke-linejoin="round"
         opacity="0.8"><title>${esc(p.name)}'s path</title></polyline>`;
@@ -397,14 +441,20 @@ function mapSection() {
   // every dot with no further transform; the viewBox still crops to the
   // planned pack extents as before.
   const bg = (m.backgrounds || {})["1"];
-  const cw = (m.canvas || {}).width || 840, ch = (m.canvas || {}).height || 555;
-  const image = bg && bg.data_uri
-    ? `<image href="${bg.data_uri}" x="0" y="0" width="${cw}" height="${ch}" preserveAspectRatio="none" />`
+  const cw = Number((m.canvas || {}).width) || 840, ch = Number((m.canvas || {}).height) || 555;
+  // The background is a data: URI built by mapart.py, but it arrives
+  // here inside the uploaded report like everything else -- so require
+  // the shape rather than trusting it, and escape what is left.
+  const safeBg = bg && typeof bg.data_uri === "string"
+    && /^data:image[/](png|jpeg|webp);base64,[A-Za-z0-9+=]+$/.test(bg.data_uri)
+    ? bg.data_uri : null;
+  const image = safeBg
+    ? `<image href="${esc(safeBg)}" x="0" y="0" width="${cw}" height="${ch}" preserveAspectRatio="none" />`
     : "";
   const dotOpacity = image ? ` opacity="0.92"` : "";
 
   return `<h2>Route map</h2><div class="wrap map-wrap${image ? " has-art" : ""}">
-    <svg viewBox="${b.min_x} ${(-b.max_y).toFixed(1)} ${w} ${h}" preserveAspectRatio="xMidYMid meet">
+    <svg viewBox="${Number(b.min_x) || 0} ${(-b.max_y).toFixed(1)} ${Number(w) || 0} ${Number(h) || 0}" preserveAspectRatio="xMidYMid meet">
       ${image}<g transform="scale(1,-1)"${dotOpacity}>${pois}${enemyDots}${paths}${deathMarks}</g>
     </svg></div>${note}
     <div class="legend">dot = planned enemy (color = plan pull; dashed red ring = route deviation)
@@ -448,8 +498,8 @@ function enemyCasts() {
       const cls = pct >= 70 ? "ok" : pct >= 30 ? "dev-early" : "dev-off";
       return `<tr class="${s.stealable ? "stealable" : ""}"${s.stealable ? ' title="Worth Spellstealing"' : ""}>
         <td>${esc(s.name)}</td>
-        <td class="num${s.got_through ? " dev-off" : ""}">${s.got_through}</td>
-        <td class="num">${s.kicked}</td><td class="num">${s.expired || ""}</td>
+        <td class="num${s.got_through ? " dev-off" : ""}">${plain(s.got_through, "0")}</td>
+        <td class="num">${plain(s.kicked, "0")}</td><td class="num">${s.expired ? plain(s.expired, "") : ""}</td>
         <td><span class="${cls}">${pct}%</span></td></tr>`;
     }).join("")}</table></div>${anyStealable
       ? `<div class="legend"><i style="background:var(--steal)"></i>★ worth Spellstealing</div>` : ""}`;
@@ -464,19 +514,19 @@ function dispelEfficiency() {
     const who = s.dispellers.length
       ? s.dispellers.map(p => `${esc(p.name)} <span class="dim">(${esc([p.spec, p.class].filter(Boolean).join(" "))}${p.dispels ? ", " + p.dispels + " dispel" + (p.dispels === 1 ? "" : "s") : ""})</span>`).join(", ")
       : `<span class="dim">nobody in the group can dispel ${esc(s.school)} — not scored</span>`;
-    const eff = s.efficiency_pct == null ? "—" : `${s.efficiency_pct}%`;
+    const eff = s.efficiency_pct == null ? "—" : pct(s.efficiency_pct);
     const rows = s.spells.map(sp => `<tr><td>${esc(sp.name)}</td>
-      <td class="num">${sp.applied}</td><td class="num">${sp.dispelled}</td>
-      <td class="num${sp.expired && s.dispellers.length ? " dev-off" : ""}">${sp.expired}</td>
-      <td class="num">${sp.avg_time_to_dispel_s != null ? sp.avg_time_to_dispel_s + "s" : '<span class="dim">—</span>'}</td></tr>`).join("");
+      <td class="num">${plain(sp.applied, "0")}</td><td class="num">${plain(sp.dispelled, "0")}</td>
+      <td class="num${sp.expired && s.dispellers.length ? " dev-off" : ""}">${plain(sp.expired, "0")}</td>
+      <td class="num">${sp.avg_time_to_dispel_s != null ? plain(sp.avg_time_to_dispel_s) + "s" : '<span class="dim">—</span>'}</td></tr>`).join("");
     return `<h3 style="margin:14px 0 6px;font-size:14px">${esc(cap(s.school))}
       <span class="${pctCls(s.efficiency_pct)}" style="margin-left:8px">${eff}</span>
-      <span class="dim" style="font-weight:400;font-size:12.5px;margin-left:8px">${s.dispelled} dispelled / ${s.expired} ran out${s.avg_time_to_dispel_s != null ? ` · avg ${s.avg_time_to_dispel_s}s to dispel` : ""}</span></h3>
+      <span class="dim" style="font-weight:400;font-size:12.5px;margin-left:8px">${plain(s.dispelled, "0")} dispelled / ${plain(s.expired, "0")} ran out${s.avg_time_to_dispel_s != null ? ` · avg ${plain(s.avg_time_to_dispel_s)}s to dispel` : ""}</span></h3>
       <div class="dim" style="font-size:12.5px;margin-bottom:6px">Can dispel: ${who}</div>
       <div class="wrap"><table><tr><th>Debuff</th><th class="num">Applied</th><th class="num">Dispelled</th>
       <th class="num">Ran out</th><th class="num">Avg time to dispel</th></tr>${rows}</table></div>`;
   }).join("");
-  const overall = d.overall_efficiency_pct == null ? "" : ` <span class="${pctCls(d.overall_efficiency_pct)}" style="font-size:14px;margin-left:8px">${d.overall_efficiency_pct}% overall</span>`;
+  const overall = d.overall_efficiency_pct == null ? "" : ` <span class="${pctCls(d.overall_efficiency_pct)}" style="font-size:14px;margin-left:8px">${plain(d.overall_efficiency_pct)}% overall</span>`;
   return `<h2>Dispel efficiency${overall}</h2>${blocks}`;
 }
 
@@ -556,7 +606,7 @@ function utility() {
       ? `no landed casts this run -- from ${i.estimate_source}: average of ${i.estimate_samples || "?"} casts at +${i.estimate_level}`
       : `average per completed cast (direct + periodic) over ${i.observed_casts} observed casts in this run`;
     const suffix = est.length
-      ? ` — <span class="ok" title="${basis}">${est.join(" + ")} prevented${borrowed ? ` <span class="dim">(${esc(i.estimate_source)})</span>` : ""}</span>`
+      ? ` — <span class="ok" title="${esc(basis)}">${est.join(" + ")} prevented${borrowed ? ` <span class="dim">(${esc(i.estimate_source)})</span>` : ""}</span>`
       : ' — <span class="dim">no landed casts to estimate from</span>';
     rows.push([i.t, "Interrupt", `${esc(i.player)} kicked ${esc(i.interrupted_spell || "?")} on ${esc(i.target)}${suffix}`, i.pull]);
   });

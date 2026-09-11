@@ -8,6 +8,11 @@ Run them from the repo root with any Lua 5.1+ interpreter:
 
     lua addon/tests/overlay_layout.lua
 
+`chesttimer_reload.lua` covers `ChestTimer.lua`: finishing a key after a
+`/reload` wiped the shared state. It reloads the module per scenario, which
+is what makes it faithful -- an addon `/reload` restarts every file, so any
+file-local carried between scenarios hides the bug.
+
 `overlay_layout.lua` covers `Overlay.lua`: the overall dungeon countdown
 (including overtime and the no-time-limit fallback), and the order the rows
 actually reflow into, both during a key and in the post-key recap window.
