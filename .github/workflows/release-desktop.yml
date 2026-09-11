@@ -28,7 +28,9 @@ name: Release desktop app
 on:
   push:
     tags:
-      - "**"
+      # The desktop app's own tags only; the addon has addon-v* (see
+      # release-addon.yml).
+      - 'alpha-desktop-*'
 
 permissions:
   contents: write
