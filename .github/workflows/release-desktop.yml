@@ -34,8 +34,35 @@ permissions:
   contents: write
 
 jobs:
+  # Create the tag's GitHub release exactly once, before any build runs.
+  # Both matrix builds (and release-addon.yml's packager) then only ever
+  # *upload* to an existing release. Letting each job create-or-update it
+  # raced: softprops in the two matrix jobs raced each other (alpha-
+  # desktop-39: "Validation Failed: already_exists" after three retries,
+  # macOS job failed, Windows job cancelled by fail-fast), and the addon
+  # packager raced both (alpha-desktop-37, a 422 of its own).
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create the release for this tag (idempotent)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME already exists"
+          else
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --title "$GITHUB_REF_NAME" --prerelease \
+              --notes "Desktop app (macOS + Windows) and WoW addon build $GITHUB_REF_NAME."
+          fi
+
   build:
+    needs: release
     strategy:
+      # One platform failing must not cancel the other's upload -- each
+      # asset is independently useful, and a partial release is easy to
+      # complete by re-running only the failed job.
+      fail-fast: false
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
@@ -149,16 +176,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed ($LASTEXITCODE)" }
           Move-Item installer\Postmortem-Setup.exe Postmortem-Setup-windows.exe
 
-      # softprops/action-gh-release creates the tag's release on first
-      # call and appends to it on subsequent calls, so both matrix jobs
-      # (macOS and Windows) can safely call it independently and both
-      # artifacts end up attached to the same release -- unlike the
-      # deprecated actions/create-release + actions/upload-release-asset
-      # combo, which has no built-in "release already exists, just
-      # attach this file too" handling for concurrent jobs.
-      - name: Publish release asset
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            Postmortem-*.zip
-            Postmortem-Setup-*.exe
+      # The release already exists (see the `release` job above); just
+      # attach this platform's files. --clobber makes a re-run of a
+      # failed job replace its own assets instead of erroring. bash on
+      # both runners so the glob and quoting behave the same way.
+      - name: Publish release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob  # macOS has no .exe; drop the empty pattern instead of failing
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
+            Postmortem-*.zip Postmortem-Setup-*.exe
