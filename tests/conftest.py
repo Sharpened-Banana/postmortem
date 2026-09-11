@@ -145,6 +145,26 @@ class LogBuilder:
                     f'{amount},{amount},{overkill},0x4,0,0,0,'
                     f'{"1" if crit else "nil"},nil,nil,nil')
 
+    def swing_damage(self, t, src, src_name, src_flags, dst, dst_name, dst_flags,
+                     amount, base_amount=None, overkill=0, absorbed=0,
+                     crit=False, hp=500000, landed=False):
+        """A melee swing. TEN suffix fields, not the eleven a spell has --
+        a swing carries no trailing spell-type ("ST"/"AOE"), which is the
+        whole of the difference between the two modern layouts and the
+        reason parse_damage() cannot tell them apart by field count.
+
+        The builder had no swing emitter at all until 2026-09-11, which is
+        why nothing caught every modern swing being parsed with the legacy
+        layout -- see the comment in events.py's parse_damage().
+        """
+        adv = self._advanced(dst, hp=hp)
+        base = amount if base_amount is None else base_amount
+        name = "SWING_DAMAGE_LANDED" if landed else "SWING_DAMAGE"
+        self.raw(t, f'{name},{src},"{src_name}",{src_flags:#06x},0x0,'
+                    f'{dst},"{dst_name}",{dst_flags:#06x},0x0,{adv},'
+                    f'{amount},{base},{overkill},1,0,0,{absorbed},'
+                    f'{"1" if crit else "nil"},nil,nil')
+
     def player_damage(self, t, player, dst, dst_name, spell_id, spell_name,
                       amount, overkill=0, crit=False):
         guid, name, flags, _ = player
