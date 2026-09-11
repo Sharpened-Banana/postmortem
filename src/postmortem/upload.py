@@ -92,6 +92,16 @@ def site_base_url(url: str) -> str:
     still works, since only known page suffixes are stripped.
     """
     base = url.strip().rstrip("/")
+    # A pasted host with no scheme ("postmortem-mplus.fly.dev") is the
+    # obvious thing for someone to type into Settings, and it used to raise
+    # ValueError("unknown url type") out of urllib deep inside the upload --
+    # which killed `analyze --upload` with a traceback and a non-zero exit,
+    # killed a whole `record` session on its first key, and crossed the
+    # desktop app's JS bridge, all three of which are documented never to
+    # happen (2026-09-11). Assume https, which is the only scheme the real
+    # site serves, rather than rejecting something a person plainly meant.
+    if base and "://" not in base:
+        base = "https://" + base
     for _ in range(4):  # e.g. ".../upload/" or ".../api/runs" -> strip in turn
         for suffix in ("/api/runs", "/api", "/upload", "/runs", "/about", "/guide"):
             if base.lower().endswith(suffix):
@@ -138,17 +148,20 @@ def upload_report(
     # path goes through, rather than trusting each caller to remember.
     from .mapart import strip_backgrounds
     payload = json.dumps(strip_backgrounds(report)).encode("utf-8")
-    request = urllib.request.Request(
-        endpoint,
-        data=payload,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "X-Upload-Token": token,
-            "User-Agent": USER_AGENT,
-        },
-    )
     try:
+        # Inside the try on purpose: Request() itself raises ValueError for
+        # a URL it cannot make sense of, and this function's whole contract
+        # is that it returns a result dict and never raises.
+        request = urllib.request.Request(
+            endpoint,
+            data=payload,
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "X-Upload-Token": token,
+                "User-Agent": USER_AGENT,
+            },
+        )
         with urllib.request.urlopen(request, timeout=timeout, context=https_context()) as resp:
             body = resp.read()
         return json.loads(body.decode("utf-8"))
@@ -202,11 +215,12 @@ def start_device_link(
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
     endpoint = f"{site_base_url(url)}/api/device/start"
     payload = json.dumps({"token_hash": token_hash, "label": label}).encode("utf-8")
-    request = urllib.request.Request(
-        endpoint, data=payload, method="POST",
-        headers={"Content-Type": "application/json", "User-Agent": USER_AGENT},
-    )
     try:
+        # Inside the try for the same reason as upload_report() above.
+        request = urllib.request.Request(
+            endpoint, data=payload, method="POST",
+            headers={"Content-Type": "application/json", "User-Agent": USER_AGENT},
+        )
         with urllib.request.urlopen(request, timeout=timeout, context=https_context()) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:

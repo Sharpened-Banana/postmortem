@@ -395,7 +395,14 @@ class DesktopAPI:
         if not target:
             return {"ok": False, "error": "no site URL configured"}
         from .. import upload as _upload
-        return _upload.upload_report(report, target)
+        try:
+            return _upload.upload_report(report, target)
+        except Exception as exc:  # noqa: BLE001
+            # upload_report() is documented never to raise, and now does
+            # not -- but this method is called across the JS bridge, where
+            # an exception is a raw traceback in the interface rather than
+            # a message. Belt and braces at the boundary that has to hold.
+            return {"ok": False, "error": str(exc)}
 
     # -- live watch mode (auto-analyze + auto-upload every run) -------------
     #
@@ -648,8 +655,10 @@ class DesktopAPI:
         watch thread to actually exit. Never raises."""
         if self._watch_recorder is not None:
             self._watch_recorder.request_stop()
+        still_running = False
         if self._watch_thread is not None:
             self._watch_thread.join(timeout=5.0)
+            still_running = self._watch_thread.is_alive()
         # Let the worker finish whatever run it's on (it's daemon, so it
         # can't outlive the app), then tell it to exit once the queue
         # drains. Joined only briefly: a run mid-analysis can take
@@ -658,6 +667,22 @@ class DesktopAPI:
             self._watch_queue.put(self._watch_stop_sentinel)
         if self._watch_worker is not None:
             self._watch_worker.join(timeout=1.0)
+        if still_running:
+            # The watch thread is mid catch-up (each replayed key can take
+            # minutes) and has not seen the stop flag yet. Clearing the
+            # state here is what made this unrecoverable: the recorder
+            # reference went away so a second Stop could do nothing, and
+            # start_watch()'s "is a thread already running" guard passed --
+            # so a SECOND recorder could tail the same log and duplicate
+            # every slice, analysis and upload (2026-09-11).
+            #
+            # Keep the handles, report honestly, and let the next Stop
+            # finish the job once the thread notices.
+            self._emit_watch_event({
+                "type": "stopping",
+                "detail": "finishing the run it is on -- this can take a few minutes",
+            })
+            return {"ok": True, "stopping": True}
         self._watch_recorder = None
         self._watch_thread = None
         self._watch_queue = None
