@@ -34,6 +34,12 @@ on:
 
 permissions:
   contents: write
+  # For build provenance (see the attestation step below): the attestation
+  # is signed with a short-lived OIDC identity for this workflow run, which
+  # is what makes it a claim about WHO built the file rather than just what
+  # the file hashes to.
+  id-token: write
+  attestations: write
 
 jobs:
   # Create the tag's GitHub release exactly once, before any build runs.
@@ -226,6 +232,24 @@ jobs:
             shasum -a 256 "$f" >> "SHA256SUMS-${{ runner.os }}.txt"
           done
           cat "SHA256SUMS-${{ runner.os }}.txt"
+
+      # Provenance, not just a digest. SHA256SUMS says "these bytes are the
+      # ones this release published"; an attestation says "these bytes came
+      # out of this workflow, at this commit, in this repository", which is
+      # the part a stolen release token cannot forge. Verifiable by anyone
+      # with:
+      #
+      #   gh attestation verify Postmortem-macos.zip --repo Sharpened-Banana/postmortem
+      #
+      # Pinned to a commit, per this repository's own action-pinning rule
+      # (a movable tag on an action that touches a release is the same
+      # exposure the addon packager had).
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-path: |
+            Postmortem-*.zip
+            Postmortem-Setup-*.exe
 
       - name: Publish release assets
         shell: bash
