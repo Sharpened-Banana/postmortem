@@ -1,5 +1,13 @@
 package-as: Postmortem
 
+# A short, hand-written changelog. Without this the packager generates one
+# from every commit since the previous non-alpha tag -- there is none, so
+# that is the whole history (~200k characters), and GitHub rejects the
+# release body with a 422 (its limit is 125,000). Seen on alpha-desktop-37.
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
 # The addon lives in addon/Postmortem/, not the repo root (this repo also
 # holds the unrelated Python post-mortem tool). move-folders relocates it to
 # become the package root -- the source path is package-as + the file's real
