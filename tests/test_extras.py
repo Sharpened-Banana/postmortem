@@ -890,3 +890,80 @@ class TestRecorderHooks:
             time.sleep(0.05)
         assert start_marker.read_text().strip() == "Murder Row +10"
         assert end_marker.read_text().strip() == "Murder Row"
+
+
+class TestPartialLineAtEndOfFile:
+    """WoW flushes its combat log when its buffer fills, not on line
+    boundaries, so a tailer sitting at end-of-file regularly reads the first
+    half of a line and gets the rest on a later poll.
+
+    Until 2026-09-11 both halves were fed to the parser separately, matched
+    nothing, and were dropped. When the split landed inside
+    CHALLENGE_MODE_END the run never closed: no analysis, no upload, and the
+    slice file grew until a later key started, at which point the run was
+    reported abandoned. Same lost-key symptom as the 2026-09-03 addon bug,
+    arriving through the reader instead.
+    """
+
+    @staticmethod
+    def _write_in_halves(log, text, split_at, delay=0.15):
+        """Write ``text`` as two flushes with the break at ``split_at``,
+        exactly as a mid-line flush looks to a tailer."""
+        import threading
+        import time
+
+        def writer():
+            time.sleep(delay)
+            with open(log, "a", encoding="utf-8") as fh:
+                fh.write(text[:split_at])
+                fh.flush()
+                time.sleep(delay)
+                fh.write(text[split_at:])
+                fh.flush()
+
+        t = threading.Thread(target=writer, daemon=True)
+        t.start()
+        return t
+
+    def test_a_key_whose_end_line_is_flushed_in_two_halves_still_completes(self, tmp_path):
+        log = tmp_path / "WoWCombatLog.txt"
+        full = build_run_log().text()
+        end_at = full.index("CHALLENGE_MODE_END")
+        # Everything up to and including the start of the END line is
+        # already on disk; the END line itself arrives split down the middle.
+        log.write_text(full[:end_at], encoding="utf-8")
+        tail = full[end_at:]
+        writer = self._write_in_halves(log, tail, split_at=len(tail) // 2)
+
+        rec = Recorder(
+            log_path=log, out_dir=tmp_path / "runs", from_start=True,
+            poll_interval=0.02, echo=lambda s: None,
+        )
+        runs = rec.watch(stop_after_runs=1)
+        writer.join(timeout=5.0)
+
+        assert len(runs) == 1, "the key never completed"
+        assert runs[0].completed, "the run closed as abandoned, not completed"
+        assert runs[0].zone == "Murder Row"
+
+    def test_a_line_split_mid_field_is_reassembled_not_dropped(self, tmp_path):
+        """The generic property: no event is lost to a mid-line flush."""
+        log = tmp_path / "WoWCombatLog.txt"
+        full = build_run_log().text()
+        half = len(full) // 2
+        log.write_text("", encoding="utf-8")
+        writer = self._write_in_halves(log, full, split_at=half)
+
+        rec = Recorder(
+            log_path=log, out_dir=tmp_path / "runs", from_start=True,
+            poll_interval=0.02, echo=lambda s: None,
+        )
+        runs = rec.watch(stop_after_runs=1)
+        writer.join(timeout=5.0)
+
+        assert len(runs) == 1
+        assert runs[0].completed
+        # The slice the recorder saved must be the whole run, not a
+        # truncated copy ending at the flush boundary.
+        saved = runs[0].path.read_text(encoding="utf-8")
+        assert "CHALLENGE_MODE_END" in saved
