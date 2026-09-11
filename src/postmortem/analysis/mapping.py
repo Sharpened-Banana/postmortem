@@ -202,6 +202,39 @@ def _fit_candidate(
     return transform, residual
 
 
+# How much a point cloud must spread along its narrower axis, relative to
+# its wider one, before an orientation can be read from it. A perfectly
+# straight line is 0.0 and a circular scatter is 1.0. Five per cent is a
+# long, thin corridor -- comfortably admitting real dungeon geometry while
+# rejecting the degenerate sets that make both orientations fit equally.
+MIN_SPREAD_RATIO = 0.05
+
+
+def _spread_ratio(pts: list[Point]) -> float:
+    """The ratio of the cloud's minor to major axis spread, from the
+    closed-form eigenvalues of its 2x2 covariance. Stdlib only, in keeping
+    with the rest of the package -- this is small enough not to want numpy.
+    Returns 0.0 for a set with no spread at all."""
+    n = len(pts)
+    if n < 2:
+        return 0.0
+    mean_x = sum(p[0] for p in pts) / n
+    mean_y = sum(p[1] for p in pts) / n
+    sxx = sum((p[0] - mean_x) ** 2 for p in pts) / n
+    syy = sum((p[1] - mean_y) ** 2 for p in pts) / n
+    sxy = sum((p[0] - mean_x) * (p[1] - mean_y) for p in pts) / n
+    trace = sxx + syy
+    if trace <= 0.0:
+        return 0.0
+    # Eigenvalues of [[sxx, sxy], [sxy, syy]].
+    gap = math.sqrt(max(0.0, ((sxx - syy) / 2.0) ** 2 + sxy * sxy))
+    major = trace / 2.0 + gap
+    minor = trace / 2.0 - gap
+    if major <= 0.0:
+        return 0.0
+    return math.sqrt(max(0.0, minor) / major)
+
+
 def fit_transform(pairs: list[tuple[Point, Point]]) -> Optional[tuple[Transform, float]]:
     """Fit the best (lowest-residual) similarity transform, trying both the
     non-reflected and reflected orientation, from a list of
@@ -212,6 +245,24 @@ def fit_transform(pairs: list[tuple[Point, Point]]) -> Optional[tuple[Transform,
         return None
     world_pts = [p[0] for p in pairs]
     canvas_pts = [p[1] for p in pairs]
+    # Collinear anchors carry no orientation information, and the fit has
+    # no way to notice: with every anchor on one line BOTH orientations
+    # reproduce them exactly, so each scores RMS 0.0 and the tie falls to
+    # list order -- which silently picks whichever of the two happens to
+    # come first. A reproduction with five anchors on wy == 0 whose true
+    # mapping was (wx, -wy) was accepted at residual 0.0 with
+    # reflected=False, and an off-line point at world (15, 120) was then
+    # drawn at (15, 120) instead of (15, -120): every player path and death
+    # marker mirrored across the anchor line (2026-09-11).
+    #
+    # Nothing downstream could catch it, because the residual gate that
+    # normally rejects a bad fit sees a perfect one. A corridor dungeon
+    # produces near-collinear anchors naturally, and there the chirality
+    # was being decided by a unit of positional noise. So the check has to
+    # happen HERE, before fitting, on the geometry itself.
+    if _spread_ratio(world_pts) < MIN_SPREAD_RATIO or \
+            _spread_ratio(canvas_pts) < MIN_SPREAD_RATIO:
+        return None
     candidates = []
     for reflect in (False, True):
         result = _fit_candidate(world_pts, canvas_pts, reflect)
