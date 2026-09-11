@@ -219,9 +219,49 @@ select { background:var(--panel); color:var(--text); border:1px solid var(--line
 <div id="app"></div>
 <script id="runs-data" type="application/json">__RUNS_JSON__</script>
 <script>
-const RUNS = JSON.parse(document.getElementById("runs-data").textContent);
-const esc = s => String(s ?? "").replace(/[&<>"]/g,
-  c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+// ---------------------------------------------------------------------
+// Everything below renders into innerHTML, and every value in R came out
+// of an uploaded combat log -- anonymously, on the public site. Two stored
+// cross-site scripting holes were found here on 2026-09-11, and a scan
+// afterwards counted ~70 places where a report value is interpolated
+// directly. Escaping each of them by hand is a standing invitation to miss
+// one (the original bug was invisible at the source level: every value DID
+// go through esc(); esc() was simply incomplete).
+//
+// So the angle brackets are neutralised once, here, for every string in
+// the report, before a single template runs. Nothing downstream can then
+// open a tag, whatever context it lands in. Escaping (rather than
+// stripping) keeps the characters readable, and it is deliberately ONLY
+// < and > -- quotes are left for esc() at the attribute sites, because
+// pre-escaping them here would double-escape the many legitimate
+// apostrophes in WoW names.
+function deTag(value) {
+  if (typeof value === "string") return value.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  if (Array.isArray(value)) return value.map(deTag);
+  if (value && typeof value === "object") {
+    const out = {};
+    for (const k of Object.keys(value)) out[k] = deTag(value[k]);
+    return out;
+  }
+  return value;
+}
+
+const RUNS = deTag(JSON.parse(document.getElementById("runs-data").textContent));
+// Escapes the single quote and backtick as well as the obvious four.
+// A zone name is raw text from the log's CHALLENGE_MODE_START line, i.e.
+// fully attacker-controlled on the public site, and it used to reach an
+// inline onclick handler -- where a bare ' closed the JS string literal
+// and everything after it ran (2026-09-11). The inline handlers are gone
+// (see the delegated listeners at the bottom of this script), but the
+// escape stays complete so the next author cannot reintroduce it.
+const esc = s => String(s ?? "").replace(/[&<>"'`]/g,
+  c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;","`":"&#96;"}[c]));
+// Report fields are typed only by whatever was uploaded: SQLite's loose
+// typing lets a string through a column declared INTEGER, so a "number"
+// here can be arbitrary text. Anything rendered as a number goes through
+// this rather than being interpolated raw.
+const num = (v, fallback = "—") => Number.isFinite(Number(v)) && v !== null && v !== ""
+  ? String(Number(v)) : fallback;
 const mmss = s => { if (s == null) return "?"; s = Math.round(s);
   const m = Math.floor(s/60);
   return `${m}:${String(s%60).padStart(2,"0")}`; };
@@ -321,12 +361,14 @@ function affixCell(ids) {
   return ids.map(id => `<span class="affix" title="${esc(AFFIXES[id] || ("Affix #" + id))}">${esc(AFFIX_SHORT[id] || ("#" + id))}</span>`).join("");
 }
 
-function pct(v) { return v != null ? v + "%" : "—"; }
+// The score columns. These read a percentage out of the report, so a
+// non-number here is text an uploader chose -- never concatenate it.
+function pct(v) { return v != null ? num(v, "—") + "%" : "—"; }
 
 function detailBlock(r) {
   const parts = [];
-  parts.push(`<b>${r.deaths ?? 0}</b> <span>deaths${r.death_cost_s ? ` (−${mmss(r.death_cost_s)})` : ""}</span>`);
-  if (r.forces_pct != null) parts.push(`<b>${r.forces_pct}%</b> <span>forces</span>`);
+  parts.push(`<b>${num(r.deaths, "0")}</b> <span>deaths${r.death_cost_s ? ` (−${mmss(r.death_cost_s)})` : ""}</span>`);
+  if (r.forces_pct != null) parts.push(`<b>${num(r.forces_pct)}%</b> <span>forces</span>`);
   if (r.margin_ms != null) {
     const s = Math.abs(r.margin_ms) / 1000;
     parts.push(r.margin_ms >= 0
@@ -376,11 +418,11 @@ function runRow(r) {
     <div class="party">${partyCell(dpsList)}</div>`;
   // The whole row toggles its detail (the caret is just the indicator) --
   // a 22px glyph is too small a click target on its own.
-  return `<div class="run-row${isOpen ? " open" : ""}" data-key="${esc(key)}" onclick="toggle('${esc(key)}')">
+  return `<div class="run-row${isOpen ? " open" : ""}" data-key="${esc(key)}">
     <div class="caret">${isOpen ? "▾" : "▸"}</div>
-    <div class="rank${r._rank ? "" : " none"}">${r._rank ?? "—"}</div>
+    <div class="rank${r._rank ? "" : " none"}">${num(r._rank, "—")}</div>
     <div class="dungeon" title="${esc(r.zone)}">${esc(abbrev(r.zone))}</div>
-    <div class="${levelCls}">+${r.level ?? "?"}<span class="stars">${starStr}</span></div>
+    <div class="${levelCls}">+${num(r.level, "?")}<span class="stars">${starStr}</span></div>
     <div class="${timeCls}">${timeStr}</div>
     <div class="affixes">${affixCell(r.affixes)}</div>
     ${partyCells}
@@ -479,9 +521,9 @@ function render() {
       best[r.zone] = r;
   }
 
-  const stat = (v, l) => `<div class="stat"><div class="v">${v}</div><div class="l">${esc(l)}</div></div>`;
+  const stat = (v, l) => `<div class="stat"><div class="v">${esc(v)}</div><div class="l">${esc(l)}</div></div>`;
   const hd = (label, key, cls) => key
-    ? `<div class="${cls || ""}" onclick="sortBy('${key}')">${label}${sortKey === key ? (sortDir > 0 ? " ▲" : " ▼") : ""}</div>`
+    ? `<div class="${cls || ""}" data-sort="${esc(key)}">${label}${sortKey === key ? (sortDir > 0 ? " ▲" : " ▼") : ""}</div>`
     : `<div class="static ${cls || ""}">${label}</div>`;
 
   document.getElementById("app").innerHTML = `
@@ -491,7 +533,7 @@ function render() {
     ${stat(completed ? Math.round(100 * timed / completed) + "%" : "—", "timed rate")}
     ${stat(deaths, "total deaths")}
   </div>
-  <select onchange="dungeon=this.value;render()">
+  <select id="dungeon-filter">
     <option value="">All dungeons</option>
     ${dungeons.map(d => `<option ${d === dungeon ? "selected" : ""} value="${esc(d)}">${esc(d)}</option>`).join("")}
   </select>
@@ -509,7 +551,7 @@ function render() {
   <div class="wrap"><table>
     <tr><th>Dungeon</th><th class="num">Key</th><th class="num">Timer</th><th>Date</th><th></th></tr>
     ${Object.values(best).sort((a, b) => (b.level||0) - (a.level||0)).map(r => `<tr>
-      <td>${esc(r.zone)}</td><td class="num">+${r.level}</td>
+      <td>${esc(r.zone)}</td><td class="num">+${num(r.level, "?")}</td>
       <td class="num">${r.duration_ms ? mmss(r.duration_ms/1000) : "?"}</td>
       <td>${esc(r.date)}</td>
       <td>${r.html ? `<a href="${esc(r.html)}">open</a>` : ""}</td></tr>`).join("")
@@ -526,6 +568,20 @@ function sortBy(key) {
   if (sortKey === key) sortDir = -sortDir; else { sortKey = key; sortDir = -1; }
   render();
 }
+
+// One delegated listener on the container, installed once. Report data
+// reaches these handlers as a data-* attribute value read back through
+// the DOM, never as source text spliced into an event-handler attribute
+// -- so no amount of quoting in a zone name can become code.
+document.getElementById("app").addEventListener("click", ev => {
+  const sorter = ev.target.closest("[data-sort]");
+  if (sorter) { sortBy(sorter.getAttribute("data-sort")); return; }
+  const row = ev.target.closest(".run-row[data-key]");
+  if (row) toggle(row.getAttribute("data-key"));
+});
+document.getElementById("app").addEventListener("change", ev => {
+  if (ev.target.id === "dungeon-filter") { dungeon = ev.target.value; render(); }
+});
 render();
 </script>
 </body>

@@ -59,6 +59,10 @@ def _run_chart_js(tmp_path, rows, filter_zone=None, extra_js=""):
     harness = f"""
 class El {{
   constructor() {{ this.innerHTML = ""; this.textContent = ""; }}
+  // The renderer installs one delegated click/change listener on #app
+  // instead of the inline onclick attributes it used to emit (the
+  // 2026-09-11 injection fix), so the stub has to accept them.
+  addEventListener() {{}}
 }}
 const __els = {{ "runs-data": new El(), "app": new El() }};
 __els["runs-data"].textContent = {runs_literal};
