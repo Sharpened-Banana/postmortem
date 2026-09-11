@@ -31,11 +31,21 @@ jobs:
           # variables -> Actions) for whichever site(s) you want to publish
           # to. Any left unset are simply skipped -- see README's "Which
           # files do I need to submit" / this repo's own README for where
-          # to get each token. CF_API_TOKEN: CurseForge, Settings -> API
+          # to get each token. CF_API_KEY: CurseForge, Settings -> API
           # Tokens. WOWI_API_TOKEN: WoWInterface, downloads/filecpl.php ->
           # API Tokens. WAGO_API_TOKEN: Wago Addons, developer dashboard ->
           # API keys.
-          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          #
+          # Variable NAMES are what the pinned packager@v2 actually reads
+          # (its release.sh: `cf_token=$CF_API_KEY`,
+          # `github_token=$GITHUB_OAUTH`). The names in the packager's
+          # current README (CF_API_TOKEN / GITHUB_API_TOKEN) belong to a
+          # newer, untagged version; with those, every run since the repo
+          # was re-created packaged the zip and then uploaded it nowhere,
+          # silently -- the run log printed "GitHub: <slug>" without
+          # " [token set]". Found 2026-09-11. CurseForge additionally needs
+          # `## X-Curse-Project-ID: <id>` in the .toc.
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
           WOWI_API_TOKEN: ${{ secrets.WOWI_API_TOKEN }}
           WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
-          GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
