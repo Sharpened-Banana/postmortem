@@ -106,6 +106,44 @@ class TestStats:
         assert stats.players[HEALER[0]].dispels == 1
 
 
+class TestDebuffAppliedBeforeTheRun:
+    """A debuff that landed before the run window was never counted as
+    applied, but dispelling it still counted -- so the table could report
+    "0 applied, 2 dispelled" in both renderers (2026-09-11). A debuff that
+    was removed was, necessarily, applied."""
+
+    def test_a_dispel_with_no_observed_application_implies_one(self, dispel_data):
+        b = LogBuilder()
+        mob = b.npc_guid(SHADELING, "00E2")
+        b.start(0)
+        for p in PLAYERS:
+            b.combatant(0.5, p)
+        b.player_damage(10, TANK, mob, "Shadeling", 31935, "Avenger's Shield", 20000)
+        # no npc_debuff(): the aura landed before CHALLENGE_MODE_START
+        b.dispel(13.0, HEALER, TANK[0], TANK[1], TANK[2], 77130, "Purify Spirit",
+                 MAGIC_ID, "Glacial Torment", kind="DEBUFF")
+        b.dispel(18.0, HEALER, TANK[0], TANK[1], TANK[2], 77130, "Purify Spirit",
+                 MAGIC_ID, "Glacial Torment", kind="DEBUFF")
+        b.end(60)
+        seg = _segment(b)
+        stats = compute_stats(seg.events, detect_pulls(seg.events), None,
+                              dispel_data=dispel_data)
+        out = stats.dispel_outcomes[MAGIC_ID]
+        assert out["dispelled"] == 2
+        assert out["applied"] >= out["dispelled"], (
+            "the table reported fewer applications than dispels"
+        )
+        # An implied application has no known application time.
+        assert out["time_to_dispel_s"] == []
+
+    def test_an_observed_application_is_still_counted_once(self, dispel_data):
+        """The implied count must not double up on the normal path."""
+        seg = _segment(_log())
+        stats = compute_stats(seg.events, detect_pulls(seg.events), None,
+                              dispel_data=dispel_data)
+        assert stats.dispel_outcomes[MAGIC_ID]["applied"] == 2
+
+
 class TestRealLogOrdering:
     def test_removed_then_dispel_is_one_dispel(self, dispel_data):
         """Real logs write SPELL_AURA_REMOVED one line BEFORE the

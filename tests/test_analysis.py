@@ -1689,6 +1689,43 @@ class TestCloseCalls:
         stats = compute_stats(run.events, detect_pulls(run.events))
         assert len(stats.close_calls) == 1
 
+    def test_a_second_dip_after_a_heal_is_still_a_close_call(self):
+        """Health was only ever read from damage, so after a heal the
+        tracker still held the old low value and the "crossed INTO danger"
+        test failed for the next dip. The section under-reported for
+        exactly the players the healer saved (2026-09-11)."""
+        b = LogBuilder()
+        npc = b.npc_guid(FELWYRM, "0001")
+        b.start(0)
+        b.combatant(0.5, TANK)
+        b.combatant(0.5, HEALER)
+        b.npc_damage(5, npc, "Felwyrm", TANK, self.BIG_HIT, "Hit 1", 50000, hp=150000)  # 15%
+        b.heal(6, HEALER, TANK, 82326, "Holy Light", 800000, hp=950000)                 # 95%
+        b.npc_damage(10, npc, "Felwyrm", TANK, self.BIG_HIT, "Hit 2", 800000, hp=150000)  # 15%
+        b.end(20)
+
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        stats = compute_stats(run.events, detect_pulls(run.events))
+        assert [c["spell"] for c in stats.close_calls] == ["Hit 1", "Hit 2"]
+
+    def test_a_heal_that_does_not_leave_danger_does_not_rearm_it(self):
+        """Only recovering ABOVE the threshold should re-arm; a top-up that
+        leaves the player still in danger must not manufacture a second
+        entry from the next chip of damage."""
+        b = LogBuilder()
+        npc = b.npc_guid(FELWYRM, "0001")
+        b.start(0)
+        b.combatant(0.5, TANK)
+        b.combatant(0.5, HEALER)
+        b.npc_damage(5, npc, "Felwyrm", TANK, self.BIG_HIT, "Hit 1", 50000, hp=150000)  # 15%
+        b.heal(6, HEALER, TANK, 82326, "Flash of Light", 30000, hp=180000)              # 18%
+        b.npc_damage(10, npc, "Felwyrm", TANK, self.BIG_HIT, "Hit 2", 30000, hp=150000)
+        b.end(20)
+
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        stats = compute_stats(run.events, detect_pulls(run.events))
+        assert len(stats.close_calls) == 1
+
     def test_a_hit_that_actually_kills_is_not_reported_as_a_close_call(self):
         b = LogBuilder()
         npc = b.npc_guid(FELWYRM, "0001")

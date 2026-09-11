@@ -169,6 +169,36 @@ class TestSegmenter:
         assert runs[0].truncated and not runs[0].completed
         assert runs[1].completed and not runs[1].truncated
 
+    def test_the_truncated_flag_leaves_the_segmenter(self):
+        """Nothing outside segmenter.py could see this flag until
+        2026-09-11, so a size-capped run reached the user labelled
+        abandoned. summary() is the report's own "run" section, so
+        emitting it there is what carries it to every renderer."""
+        b = LogBuilder()
+        b.start(0)
+        for i in range(20):
+            b.player_damage(i + 1, DPS1, b.npc_guid(1, "1"), "X", 1, "S", 10)
+        b.end(100)
+        capped = list(segment_runs(iter_events(b.lines), max_run_events=5))[0]
+        assert capped.summary()["truncated"] is True
+
+        whole = list(segment_runs(iter_events(build_run_log().lines)))[0]
+        assert whole.summary()["truncated"] is False
+
+    def test_a_truncated_run_does_not_read_as_abandoned_in_the_report(self):
+        from postmortem.analysis.run_analyzer import analyze_run
+        from postmortem.report.text import render_text
+
+        b = LogBuilder()
+        b.start(0)
+        for i in range(20):
+            b.player_damage(i + 1, DPS1, b.npc_guid(1, "1"), "X", 1, "S", 10)
+        b.end(100)
+        capped = list(segment_runs(iter_events(b.lines), max_run_events=5))[0]
+        rendered = render_text(analyze_run(capped))
+        assert "PARTIAL ANALYSIS" in rendered
+        assert "ABANDONED" not in rendered
+
 
 class TestLikelyAbandoned:
     """RunSegment.likely_abandoned: best-effort inference for a run with
@@ -294,3 +324,59 @@ class TestMismatchedEndDoesNotCloseAWrongRun:
         assert run.completed
         assert run.success is False
         assert run.duration_ms == 1800000
+
+
+class TestDaylightSaving:
+    """A day is not always 24 hours long.
+
+    Resolving the day's midnight and adding the seconds since assumes it
+    is. On the spring transition the day is 23 hours, so every timestamp
+    after 2am came out an hour in the future, and a run straddling the
+    change reported a wall duration an hour out (2026-09-11).
+    """
+
+    @staticmethod
+    def _parse_at(tz: str, line: str):
+        import importlib
+        import os
+        import time as time_module
+
+        from postmortem.combatlog import parser as parser_module
+
+        old = os.environ.get("TZ")
+        os.environ["TZ"] = tz
+        time_module.tzset()
+        parser_module._HOUR_CACHE.clear()
+        try:
+            return parser_module.parse_line(line)
+        finally:
+            if old is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = old
+            time_module.tzset()
+            parser_module._HOUR_CACHE.clear()
+            importlib.invalidate_caches()
+
+    def test_a_timestamp_after_the_spring_transition_is_not_an_hour_out(self):
+        import calendar
+
+        # US/Eastern springs forward at 2am on 2026-03-08.
+        event = self._parse_at("America/New_York", "3/8/2026 15:30:00.000-4  ZONE_CHANGE,1,\"x\",1")
+        assert event is not None
+        # 15:30 EDT == 19:30 UTC.
+        assert event.ts == calendar.timegm((2026, 3, 8, 19, 30, 0, 0, 1, 0))
+
+    def test_a_run_across_the_transition_has_the_real_wall_duration(self):
+        start = self._parse_at("America/New_York", "3/8/2026 1:30:00.000-5  ZONE_CHANGE,1,\"x\",1")
+        end = self._parse_at("America/New_York", "3/8/2026 3:30:00.000-4  ZONE_CHANGE,1,\"x\",1")
+        assert start is not None and end is not None
+        # One hour of wall clock passed, not two.
+        assert end.ts - start.ts == 3600
+
+    def test_an_ordinary_day_is_unchanged(self):
+        import calendar
+
+        event = self._parse_at("America/New_York", "8/30/2026 22:06:30.452-7  ZONE_CHANGE,1,\"x\",1")
+        assert event is not None
+        assert event.ts == calendar.timegm((2026, 8, 31, 2, 6, 30, 0, 1, 0)) + 0.452

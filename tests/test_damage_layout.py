@@ -146,3 +146,58 @@ class TestEnvironmentalDamageOffset:
         assert not _is_advanced_block(params, 9), (
             "an offset one past the block still looked like a block"
         )
+
+
+class TestAdvancedBlockInterior:
+    """Where inside the advanced block the two 12.x fields sit.
+
+    The block's LENGTH (19) was settled in August against two real lines.
+    Their POSITION was not: the parser assumed they followed powerCost,
+    which read absorb, powerType, currentPower and maxPower two positions
+    early (2026-09-11). Position, map, facing, level and health sit after
+    the insertion under either belief, which is why nothing downstream --
+    map calibration least of all -- ever noticed.
+    """
+
+    @pytest.mark.skipif(not REAL_LOG.exists(), reason="real-log fixture not present")
+    def test_advanced_power_fields_match_real_log(self):
+        """Two facts hold for every unit in a real log: currentPower never
+        exceeds maxPower, and powerType is one of a handful of small ids.
+        Read two positions early, 1,850 of the fixture's 11,303 advanced
+        lines break one or the other; read correctly, none do."""
+        from postmortem.combatlog.events import advanced_info
+
+        seen = impossible = 0
+        with open(REAL_LOG, encoding="utf-8", errors="replace") as fh:
+            for event in iter_events(fh, base_year=2026):
+                if event.name not in ("SPELL_DAMAGE", "SPELL_HEAL"):
+                    continue
+                info = advanced_info(event)
+                if info is None:
+                    continue
+                seen += 1
+                try:
+                    power_type = int(info.power_type)
+                except ValueError:
+                    impossible += 1
+                    continue
+                if not 0 <= power_type <= 20 or info.current_power > info.max_power:
+                    impossible += 1
+
+        assert seen > 10_000, f"only {seen} advanced lines found -- fixture changed?"
+        assert impossible == 0
+
+    def test_the_builder_agrees_with_the_parser_about_the_interior(self):
+        """The builder used to bake in the parser's own wrong belief, so no
+        synthetic test could ever contradict it. Pin the interior here."""
+        from postmortem.combatlog.events import advanced_info
+
+        log = LogBuilder()
+        log.spell_damage(1.0, "Player-1-1", "Healer", 0x511,
+                         LogBuilder.npc_guid(1234, "0001"), "Mob", HOSTILE,
+                         42, "Zap", 100)
+        events = list(iter_events(iter(log.lines), base_year=2026))
+        info = advanced_info(events[0])
+        assert info is not None
+        assert (info.power_type, info.current_power, info.max_power) == ("3", 100, 100)
+        assert info.absorb == 0

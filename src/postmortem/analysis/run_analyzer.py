@@ -473,10 +473,13 @@ def analyze_run(
         segment.events, pulls, data, full_cast_timeline=full_cast_timeline,
         avoidable=avoidable, spell_damage_fallbacks=fallbacks or None,
         keystone_level=segment.keystone_level, dispel_data=dispel_data,
+        challenge_map_id=segment.challenge_map_id,
     )
     if spell_damage_history_path:
         try:
-            update_from_stats(stats, segment.keystone_level, spell_damage_history_path)
+            update_from_stats(stats, segment.keystone_level,
+                              spell_damage_history_path,
+                              dungeon=segment.challenge_map_id)
         except Exception:
             pass
 

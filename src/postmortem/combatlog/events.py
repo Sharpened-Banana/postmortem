@@ -191,7 +191,17 @@ _GUID_PREFIXES = (
 # BUILD_VERSION 12.1.0) captured during real in-game testing: the true
 # block is 19 fields, with two extra fields (both observed as "0" in every
 # sample so far, semantics unknown -- not one of the named AdvancedInfo
-# fields below) inserted between powerCost and pos_x. Under the old
+# fields below) inserted between armor and absorb. (The block's LENGTH was
+# right from the start; where inside it the two new fields sit was not --
+# they were assumed to follow powerCost, which read absorb and all three
+# power fields two positions early. Settled 2026-09-11 against the whole
+# real-log fixture: over 11,000 advanced lines, reading power at the
+# assumed offsets produced 1,850 impossible rows -- currentPower above
+# maxPower, or a powerType out of range -- and none at these offsets. See
+# tests/test_damage_layout.py::test_advanced_power_fields_match_real_log.)
+# Only absorb and the power fields moved; position, map, facing, level and
+# health sit after the insertion either way, which is why map calibration
+# never noticed. Under the old
 # ADVANCED_LEN=17, every field read *after* the advanced block -- which
 # includes the damage/heal "amount" suffix field, not just pos_x/pos_y/
 # ui_map_id/facing/level inside the block itself -- was shifted by 2,
@@ -286,13 +296,15 @@ def advanced_info(event: Event) -> Optional[AdvancedInfo]:
         owner_guid=p[off + 1],
         current_hp=to_int(p[off + 2]),
         max_hp=to_int(p[off + 3]),
-        absorb=to_int(p[off + 7]),
-        power_type=p[off + 8],
-        current_power=to_int(p[off + 9]),
-        max_power=to_int(p[off + 10]),
-        # off + 11 is powerCost; off + 12/13 are the two newly-discovered
-        # fields (see ADVANCED_LEN's own comment) -- both skipped here since
-        # AdvancedInfo has no field for them and their meaning is unknown.
+        # off + 4/5/6 are attackPower/spellPower/armor; off + 7/8 are the
+        # two newly-discovered fields (see ADVANCED_LEN's own comment) --
+        # both skipped here since AdvancedInfo has no field for them and
+        # their meaning is unknown.
+        absorb=to_int(p[off + 9]),
+        power_type=p[off + 10],
+        current_power=to_int(p[off + 11]),
+        max_power=to_int(p[off + 12]),
+        # off + 13 is powerCost.
         pos_x=to_float(p[off + 14]),
         pos_y=to_float(p[off + 15]),
         ui_map_id=to_int(p[off + 16]),

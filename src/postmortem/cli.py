@@ -1066,7 +1066,9 @@ def cmd_runs(args: argparse.Namespace) -> int:
         s = seg.summary()
         seg.events = []
         state = "timed" if s["timed"] else (
-            "over timer" if s["completed"] else "incomplete")
+            "over timer" if s["completed"] else
+            # A size-capped run only looks abandoned; say which it is.
+            ("partial (size limit)" if s.get("truncated") else "incomplete"))
         mins = s["wall_duration_s"] / 60
         print(f"{i:>3}. {s['zone']} +{s['keystone_level']}  [{state}]"
               f"  {mins:.1f} min, {s['event_count']} events")
