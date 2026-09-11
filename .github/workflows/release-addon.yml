@@ -24,6 +24,27 @@ jobs:
         with:
           fetch-depth: 0 # full history: the packager reads git tags for changelog generation
 
+      # Both this workflow and release-desktop.yml fire on the same tag
+      # push. The desktop one creates the tag's GitHub release (softprops);
+      # the packager below looks the release up, finds nothing, tries to
+      # create it too and loses the race with a 422 (alpha-desktop-37,
+      # 2026-09-11). Wait for the desktop workflow's release to exist, so
+      # the packager takes its "update existing release" path and just
+      # attaches the addon zip. Falls through after ~6 minutes (a normal
+      # desktop build takes ~1.5) so a broken desktop build never blocks
+      # the addon from being released on its own.
+      - name: Wait for the desktop workflow to create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 36); do
+            if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "release $GITHUB_REF_NAME exists"; exit 0
+            fi
+            sleep 10
+          done
+          echo "no release for $GITHUB_REF_NAME after 6 minutes; the packager will create one"
+
       - name: Package and release
         uses: BigWigsMods/packager@v2
         env:
