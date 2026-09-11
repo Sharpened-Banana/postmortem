@@ -257,7 +257,19 @@ class Store:
         # own connector already sets it, so a shared database was in WAL
         # anyway; a purely local desktop history was not, which is exactly
         # where a long backfill blocked the app's own reads.
-        self._conn.execute("PRAGMA journal_mode = WAL")
+        #
+        # Switching journal mode needs a brief exclusive lock and does NOT
+        # honour busy_timeout, so several processes opening the same fresh
+        # database at once can collide here -- which is precisely what CI
+        # hit at 8 concurrent opens where a local machine did not. The mode
+        # is persistent once any connection sets it, so losing this race is
+        # harmless: somebody else is setting it, or already has.
+        try:
+            mode = self._conn.execute("PRAGMA journal_mode").fetchone()[0]
+            if str(mode).lower() != "wal":
+                self._conn.execute("PRAGMA journal_mode = WAL")
+        except sqlite3.OperationalError:
+            pass
         self._conn.executescript(_SCHEMA)
         _migrate(self._conn)
         self._conn.commit()

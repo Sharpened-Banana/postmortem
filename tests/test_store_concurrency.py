@@ -73,7 +73,11 @@ class TestMigrationUnderConcurrency:
         _old_database(db_path, rows=5)
 
         errors: list[BaseException] = []
-        barrier = threading.Barrier(8)
+        # Sixteen, and repeated below: CI reproduced a collision at eight
+        # that a local machine did not, so this leans on the race harder
+        # than the environment that first found it.
+        threads_per_round = 16
+        barrier = threading.Barrier(threads_per_round)
 
         def open_it():
             barrier.wait()
@@ -82,7 +86,7 @@ class TestMigrationUnderConcurrency:
             except BaseException as exc:  # noqa: BLE001 -- recording, not handling
                 errors.append(exc)
 
-        threads = [threading.Thread(target=open_it) for _ in range(8)]
+        threads = [threading.Thread(target=open_it) for _ in range(threads_per_round)]
         for t in threads:
             t.start()
         for t in threads:
