@@ -119,42 +119,116 @@ def _leaderboard_fields(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Rows backfilled per committed batch. Small enough that the write lock is
+# never held for long -- the public site opens a Store on essentially every
+# request, so a long-held lock there is a failed upload, not a slow one --
+# and large enough that a big local history does not turn into thousands of
+# tiny transactions.
+# How long a caller waits for the single write lock before giving up.
+BUSY_TIMEOUT_S = 30.0
+
+_BACKFILL_BATCH = 100
+
+# What a row whose report_json cannot be parsed gets written into `party`,
+# so it is not picked up again on every single open forever. It is valid
+# JSON and an empty party, which is what _to_index_row() would produce for
+# it anyway -- the run stays listed, just without leaderboard detail.
+_UNPARSEABLE = "[]"
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
-    """Add any ``_RUNS_ADDED_COLUMNS`` missing from ``runs`` and backfill
-    them from ``report_json`` for the rows that predate them. Idempotent:
-    a second call finds every column present and no row left to fill."""
-    present = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
-    for name, coltype in _RUNS_ADDED_COLUMNS:
-        if name not in present:
-            conn.execute(f"ALTER TABLE runs ADD COLUMN {name} {coltype}")
+    """Add any ``_RUNS_ADDED_COLUMNS`` missing from ``runs``, then backfill
+    them for the rows that predate them.
+
+    Serialised with BEGIN IMMEDIATE, because adding a column is a
+    check-then-act: read PRAGMA table_info, then ALTER TABLE. Two processes
+    opening the store at the same moment both saw the column missing and
+    both tried to add it, and the loser raised "duplicate column name"
+    (reproduced at 8 concurrent opens, 2026-09-11). The site opens a Store
+    on essentially every request, so the first deploy after any future
+    column addition would have errored on a share of them. The duplicate is
+    also caught, since another process may have committed between our
+    transaction starting and the ALTER running.
+    """
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+    except sqlite3.OperationalError:
+        # Somebody else holds the write lock and is very likely doing this
+        # exact work. Their migration is as good as ours.
+        return
+    try:
+        present = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
+        for name, coltype in _RUNS_ADDED_COLUMNS:
+            if name not in present:
+                try:
+                    conn.execute(f"ALTER TABLE runs ADD COLUMN {name} {coltype}")
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column" not in str(exc).lower():
+                        raise
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     _backfill_leaderboard_columns(conn)
 
 
 def _backfill_leaderboard_columns(conn: sqlite3.Connection) -> None:
     """Fill ``party``/``threshold``/``margin_ms``/``deaths_json`` on rows
-    where ``party`` is still NULL (rows inserted before the columns
-    existed). One row at a time so the full report_json of only one run
-    is in memory at once -- the same reason the site's feed never selects
-    that column. A row whose report_json won't parse is left alone rather
-    than failing the whole open."""
-    ids = [r[0] for r in conn.execute("SELECT id FROM runs WHERE party IS NULL")]
-    for run_id in ids:
-        row = conn.execute("SELECT report_json FROM runs WHERE id = ?", (run_id,)).fetchone()
-        if row is None:
-            continue
+    that predate those columns.
+
+    Committed in batches, which is load-bearing in two ways. It bounds how
+    long the single write lock is held -- this reads one whole report_json
+    (~1.2MB on real data) per row, so a few thousand rows in one
+    transaction meant a multi-second-to-minute lock during which every
+    concurrent upload failed. And because each batch is committed, another
+    process opening the store mid-backfill sees the work already done
+    instead of starting the whole thing again from scratch, which is what
+    six concurrent opens each did before (2026-09-11).
+
+    One row is in memory at a time -- the same reason the site's feed never
+    selects report_json.
+    """
+    while True:
+        ids = [r[0] for r in conn.execute(
+            "SELECT id FROM runs WHERE party IS NULL LIMIT ?", (_BACKFILL_BATCH,),
+        )]
+        if not ids:
+            return
         try:
-            report = json.loads(row[0])
-        except (TypeError, ValueError):
-            continue
-        if not isinstance(report, dict):
-            continue
-        fields = _leaderboard_fields(report)
-        conn.execute(
-            "UPDATE runs SET party = ?, threshold = ?, margin_ms = ?, deaths_json = ? "
-            "WHERE id = ?",
-            (fields["party"], fields["threshold"], fields["margin_ms"],
-             fields["deaths_json"], run_id),
-        )
+            conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError:
+            return  # another opener is working through the same rows
+        try:
+            for run_id in ids:
+                row = conn.execute(
+                    "SELECT report_json FROM runs WHERE id = ? AND party IS NULL",
+                    (run_id,),
+                ).fetchone()
+                if row is None:
+                    continue  # filled by another process since we listed it
+                try:
+                    report = json.loads(row[0])
+                except (TypeError, ValueError):
+                    report = None
+                if not isinstance(report, dict):
+                    # Mark it rather than skipping it. A skipped row stays
+                    # NULL, so it was re-read on every open forever -- and
+                    # with a LIMIT that would also loop here without end.
+                    conn.execute(
+                        "UPDATE runs SET party = ? WHERE id = ?", (_UNPARSEABLE, run_id),
+                    )
+                    continue
+                fields = _leaderboard_fields(report)
+                conn.execute(
+                    "UPDATE runs SET party = ?, threshold = ?, margin_ms = ?, "
+                    "deaths_json = ? WHERE id = ?",
+                    (fields["party"], fields["threshold"], fields["margin_ms"],
+                     fields["deaths_json"], run_id),
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
 
 class Store:
@@ -167,13 +241,23 @@ class Store:
     the CLI.
     """
 
-    def __init__(self, db_path: str | Path):
+    def __init__(self, db_path: str | Path):  # noqa: D107 -- see class docstring
         self.path = Path(db_path)
         if self.path.parent and not self.path.parent.exists():
             self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self.path))
+        self._conn = sqlite3.connect(str(self.path), timeout=BUSY_TIMEOUT_S)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
+        # Wait for the single write lock rather than failing on it. The
+        # library default is five seconds, which a slow write elsewhere
+        # exceeds easily -- and the caller then sees "database is locked"
+        # and loses the run rather than waiting a moment (2026-09-11).
+        self._conn.execute(f"PRAGMA busy_timeout = {int(BUSY_TIMEOUT_S * 1000)}")
+        # WAL lets readers carry on while a write is in flight. The site's
+        # own connector already sets it, so a shared database was in WAL
+        # anyway; a purely local desktop history was not, which is exactly
+        # where a long backfill blocked the app's own reads.
+        self._conn.execute("PRAGMA journal_mode = WAL")
         self._conn.executescript(_SCHEMA)
         _migrate(self._conn)
         self._conn.commit()
