@@ -593,9 +593,12 @@ try {
     exit 1
 }
 
-# The Inno Setup uninstaller (unins000.exe/.dat) lived in the old folder
-# and just moved out with it; without it Settings > Apps > Uninstall
-# stops working. Bring it along so the installed app stays uninstallable.
+# Installs made by an older installer kept the Inno Setup uninstaller
+# (unins000.exe/.dat) inside the app folder, so it just moved out with the
+# backup; without it Settings > Apps > Uninstall stops working. Bring it
+# along. Installers from 2026-09-13 on put it under %APPDATA% instead
+# (see build/postmortem.iss), where nothing here touches it -- then this
+# simply finds nothing to copy.
 try {
     Get-ChildItem -LiteralPath $BackupDir -Filter "unins*" -ErrorAction SilentlyContinue | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination $OldDir -Force

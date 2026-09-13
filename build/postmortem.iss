@@ -52,6 +52,16 @@ OutputDir=..\installer
 OutputBaseFilename=Postmortem-Setup
 SetupIconFile=postmortem.ico
 UninstallDisplayIcon={app}\{#AppExeName}
+; The uninstaller lives OUTSIDE {app}. The in-app updater replaces the
+; whole {app} folder with a downloaded build that never contains
+; unins000.exe/.dat, and the update helper on builds before 36 did not
+; carry them over -- so Settings > Apps > Uninstall pointed at a file
+; that no longer existed ("Windows cannot find ...unins000.exe",
+; 2026-09-13). Keeping it under %APPDATA% (where the app's own settings
+; already live) means no update can ever move it out from under the
+; registry entry. Installing over an older layout still works: Setup
+; writes a fresh uninstaller here and repairs the entry.
+UninstallFilesDir={userappdata}\postmortem\uninstall
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -95,6 +105,24 @@ Filename: "{tmp}\dotnet-desktop-runtime.exe"; Parameters: "/install /quiet /nore
 Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [Code]
+// Setup can only replace files nobody has open. With the app still running
+// (the obvious state to be in when you download an update from inside it)
+// Inno's fallback is to queue the locked files for the next boot and end
+// with "Setup must restart your computer" -- for no reason the app itself
+// has (2026-09-13). Close it first instead: the app's window is a plain
+// pywebview host that does not answer Inno's own close request reliably,
+// so this is a hard kill of our own executable, nothing else.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  Result := '';
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM {#AppExeName} /T', '',
+       SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // taskkill exits 128 when nothing matched; that is the normal case.
+  Sleep(500);
+end;
+
 // True when a .NET Desktop Runtime new enough for pythonnet's CoreCLR
 // hoster (6 or later) is registered. Inno runs in 64-bit mode here, so
 // HKLM is the 64-bit hive where the x64 runtime registers itself.
