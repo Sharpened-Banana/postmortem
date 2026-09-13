@@ -105,6 +105,24 @@ Filename: "{tmp}\dotnet-desktop-runtime.exe"; Parameters: "/install /quiet /nore
 Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [Code]
+// Setup can only replace files nobody has open. With the app still running
+// (the obvious state to be in when you download an update from inside it)
+// Inno's fallback is to queue the locked files for the next boot and end
+// with "Setup must restart your computer" -- for no reason the app itself
+// has (2026-09-13). Close it first instead: the app's window is a plain
+// pywebview host that does not answer Inno's own close request reliably,
+// so this is a hard kill of our own executable, nothing else.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  Result := '';
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM {#AppExeName} /T', '',
+       SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // taskkill exits 128 when nothing matched; that is the normal case.
+  Sleep(500);
+end;
+
 // True when a .NET Desktop Runtime new enough for pythonnet's CoreCLR
 // hoster (6 or later) is registered. Inno runs in 64-bit mode here, so
 // HKLM is the 64-bit hive where the x64 runtime registers itself.
