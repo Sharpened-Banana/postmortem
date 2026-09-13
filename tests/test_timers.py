@@ -336,14 +336,14 @@ class TestTimerCLI:
         def fake_fetcher(url):
             calls.append(url)
             if "static-data" in url:
-                return {"dungeons": [{"id": 587, "par_time_ms": 42000}]}
+                return {"dungeons": [{"id": 587, "par_time_ms": 1980000}]}
             return None  # character profile lookups: irrelevant here
 
         monkeypatch.setattr("postmortem.raiderio._default_fetcher", fake_fetcher)
         assert main(["analyze", str(log_file), "--raiderio", "us",
                      "--expansion-id", "5", "--format", "json"]) == 0
         out = json.loads(capsys.readouterr().out)
-        assert out["timer"]["par_ms"] == 42000
+        assert out["timer"]["par_ms"] == 1980000
         assert any("static-data" in c and "expansion_id=5" in c for c in calls)
 
     def test_expansion_id_without_raiderio_is_a_no_op(self, log_file, capsys):

@@ -301,6 +301,14 @@ local function AnnounceIfPresent()
   local r = _G.PostmortemResults
   if type(r) == "table" and type(r.run) == "table" then
     local run = r.run
+    -- Once per results FILE, not once per login: there was no gate at
+    -- all, so this printed on every login and /reload for as long as a
+    -- results file existed. generated_at changes whenever the companion
+    -- app writes a new one, which is exactly when the line is news.
+    local stamp = tonumber(r.generated_at) or 0
+    local db = MA.db
+    if db and db.announcedResultsAt == stamp then return end
+    if db then db.announcedResultsAt = stamp end
     local label = (run.zone or "run") .. (run.level and (" +" .. run.level) or "")
     print(string.format(
       "|cffd7a94cPostmortem|r: stats loaded for %s -- |cffffff00/pm results|r to view.",

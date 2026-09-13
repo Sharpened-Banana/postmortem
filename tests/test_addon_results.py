@@ -47,7 +47,10 @@ class TestLuaSerializer:
         assert to_lua_literal("Keléthas-Área52") == '"Keléthas-Área52"'
 
     def test_control_char_is_decimal_escaped(self):
-        assert to_lua_literal("a\x07b") == '"a\\7b"'
+        # Zero-padded to three digits: Lua's decimal escape consumes up to
+        # three digits, so "\\7" followed by a digit would swallow it.
+        assert to_lua_literal("a\x07b") == '"a\\007b"'
+        assert to_lua_literal("a\x077b") == '"a\\0077b"'
 
     def test_empty_containers(self):
         assert to_lua_literal([]) == "{}"

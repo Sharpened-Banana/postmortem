@@ -53,9 +53,30 @@ from ..history.store import has_uploaded_run as _has_uploaded_run
 from ..history.store import mark_uploaded as _mark_uploaded
 from ..recorder import Recorder
 from ..report.html import render_html
-from ..report.index import collect_reports, render_index
+from ..report.index import collect_report_files, render_index
 from . import config as _config
 from . import updater as _updater
+
+
+#: What a History row's link carries instead of a file name -- see
+#: list_history(). Not a real URL scheme: the frame's click handler below
+#: intercepts it before the browser tries to navigate anywhere.
+_HISTORY_REF_SCHEME = "pm-run:"
+
+#: Appended to the History page. The frame is sandboxed without
+#: same-origin, so the app cannot reach into it; the page tells the app
+#: which run was clicked instead. Only the opaque ref crosses.
+_HISTORY_OPEN_SCRIPT = """<script>
+document.addEventListener("click", function (e) {
+  var a = e.target && e.target.closest ? e.target.closest("a[href]") : null;
+  if (!a) return;
+  var href = a.getAttribute("href") || "";
+  if (href.indexOf("pm-run:") !== 0) return;
+  e.preventDefault();
+  e.stopPropagation();
+  window.parent.postMessage({type: "postmortem-open-run", ref: href.slice(7)}, "*");
+}, true);
+</script>"""
 
 
 #: How many already-finished keys a starting watch will replay. A fresh
@@ -167,6 +188,11 @@ class DesktopAPI:
         self._watch_thread: Optional[threading.Thread] = None
         # Auto-update state (see check_for_update/start_update below).
         self._update_thread: Optional[threading.Thread] = None
+        # Opaque ref -> where that History row's report lives, for the rows
+        # the last list_history() call produced. The History page asks to
+        # open a run by ref, never by path, so a script in that frame can
+        # only ever open something this class itself just listed.
+        self._history_refs: dict[str, tuple[str, str, Optional[int]]] = {}
 
     # -- run listing --------------------------------------------------------
 
@@ -458,15 +484,75 @@ class DesktopAPI:
         """
         try:
             if db_path:
-                from ..history.store import query_runs
-                rows = query_runs(db_path)
+                from ..history.store import Store
+                with Store(db_path) as store:
+                    located = [(("db", str(db_path), run_id), row)
+                               for run_id, row in store.query_runs_with_ids()]
             elif directory:
-                rows = collect_reports(directory)
+                located = [(("file", str(path), None), row)
+                           for path, row in collect_report_files(directory)]
             else:
                 return {"ok": False, "error": "db_path or directory is required"}
-            return {"ok": True, "rows": rows, "html": render_index(rows)}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+
+        # Every row's "open" link used to be the report's bare HTML file
+        # NAME, which only resolves when the index page sits in the same
+        # folder as the reports (the CLI's `serve`). Inside this app the
+        # page is a srcdoc frame, so the link resolved against the app's
+        # own shell and every click was a 404 -- and a run saved without
+        # an HTML file (every Watch Live run in a database) had no link at
+        # all. Each row now carries an opaque ref instead, the page posts
+        # it to the app on click, and open_history_run() renders the
+        # report from its stored JSON.
+        import secrets
+
+        refs: dict[str, tuple[str, str, Optional[int]]] = {}
+        rows = []
+        for where, row in located:
+            ref = secrets.token_urlsafe(9)
+            refs[ref] = where
+            rows.append({**row, "html": f"{_HISTORY_REF_SCHEME}{ref}"})
+        self._history_refs = refs
+        html = render_index(rows)
+        marker = "</body>"
+        cut = html.rfind(marker)
+        html = (html[:cut] + _HISTORY_OPEN_SCRIPT + html[cut:]) if cut != -1 \
+            else html + _HISTORY_OPEN_SCRIPT
+        return {"ok": True, "rows": rows, "html": html}
+
+    def open_history_run(self, ref: str) -> dict:
+        """Render one run the last ``list_history()`` call listed.
+
+        ``ref`` is the opaque token that call put in the row -- never a
+        path, so the History frame cannot use this to read an arbitrary
+        file. Returns ``{"ok": True, "html", "report", "label"}`` or
+        ``{"ok": False, "error"}``. Never raises.
+        """
+        where = self._history_refs.get(ref) if isinstance(ref, str) else None
+        if where is None:
+            return {"ok": False,
+                    "error": "that run is no longer listed -- reload History and try again"}
+        kind, location, run_id = where
+        try:
+            if kind == "db":
+                from ..history.store import Store
+                with Store(location) as store:
+                    report = store.get_report(int(run_id))
+            else:
+                with open(location, "r", encoding="utf-8") as fh:
+                    report = json.load(fh)
+            if not isinstance(report, dict):
+                return {"ok": False, "error": "that run's saved report could not be found"}
+            run = report.get("run") or {}
+            level = run.get("keystone_level")
+            label = " ".join(
+                part for part in (run.get("zone"), f"+{level}" if level is not None else None)
+                if part
+            )
+            return {"ok": True, "html": render_html(report), "report": report, "label": label}
+        except Exception as exc:  # never raise across the bridge
+            return {"ok": False, "error": f"could not open that run: {exc}"}
 
     # -- public tracker upload -----------------------------------------------
 
@@ -1082,7 +1168,12 @@ class DesktopAPI:
                 "url": f"{site_url.rstrip('/')}{result.get('url', '')}",
             })
         else:
-            self._emit_watch_event({"type": "upload_failed", "error": result.get("error")})
+            # A response with no error key rendered as the word "null" in
+            # the watch log.
+            self._emit_watch_event({
+                "type": "upload_failed",
+                "error": result.get("error") or "the site rejected the upload",
+            })
 
     def _emit_watch_event(self, event: dict) -> None:
         """Push a live status update to the UI (``window.onWatchEvent``
@@ -1240,6 +1331,24 @@ class DesktopAPI:
         """
         if not isinstance(url, str) or not url.lower().startswith(("http://", "https://")):
             return {"ok": False, "error": "only http(s) URLs may be opened"}
+        # Same origin as the configured site, too. The one caller opens a
+        # verify_url that comes straight out of the site's own response,
+        # so a compromised (or mistyped) site could otherwise hand the app
+        # any address and get a drive-by navigation out of a click the
+        # user believes goes to Postmortem.
+        import urllib.parse
+
+        try:
+            configured = _normalized_site_url(_config.load_settings().get("site_url"))
+        except (ValueError, OSError):
+            configured = ""
+        if not configured:
+            return {"ok": False, "error": "no site URL is configured"}
+        want = urllib.parse.urlsplit(configured)
+        got = urllib.parse.urlsplit(url)
+        if (got.scheme.lower(), got.netloc.lower()) != (want.scheme.lower(), want.netloc.lower()):
+            return {"ok": False,
+                    "error": "refusing to open a URL outside the configured site"}
         try:
             import webbrowser
             webbrowser.open(url)

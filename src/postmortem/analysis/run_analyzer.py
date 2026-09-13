@@ -639,12 +639,16 @@ def analyze_run(
     wall = segment.wall_duration
     active = stats.total_combat_s if stats.total_combat_s > 0 else wall
     report["run"]["active_duration_s"] = round(active, 1)
-    if wall > 0:
-        for player in report["players"]:
-            healing = player["healing_done"] + player["absorbs_granted"]
-            player["dps"] = round(player["damage_done"] / active, 1)
-            player["hps"] = round(healing / active, 1)
-            player["cpm"] = round(player["casts_total"] * 60.0 / active, 1)
-            player["dps_wall"] = round(player["damage_done"] / wall, 1)
-            player["hps_wall"] = round(healing / wall, 1)
+    # A zero-length run (a key reset the instant it started, a truncated
+    # slice) still gets the rate keys, as zeros: leaving them absent made
+    # every consumer that indexes rather than gets raise.
+    for player in report["players"]:
+        healing = player["healing_done"] + player["absorbs_granted"]
+        player["dps"] = round(player["damage_done"] / active, 1) if active > 0 else 0.0
+        player["hps"] = round(healing / active, 1) if active > 0 else 0.0
+        player["cpm"] = (
+            round(player["casts_total"] * 60.0 / active, 1) if active > 0 else 0.0
+        )
+        player["dps_wall"] = round(player["damage_done"] / wall, 1) if wall > 0 else 0.0
+        player["hps_wall"] = round(healing / wall, 1) if wall > 0 else 0.0
     return report

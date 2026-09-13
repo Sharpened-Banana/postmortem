@@ -63,7 +63,19 @@ def deaths_summary(report: dict[str, Any]) -> list[dict[str, Any]]:
 
 def collect_reports(directory: str | Path) -> list[dict[str, Any]]:
     """Load every run-report JSON under ``directory`` into index rows."""
-    rows: list[dict[str, Any]] = []
+    return [row for _path, row in collect_report_files(directory)]
+
+
+def collect_report_files(directory: str | Path) -> list[tuple[Path, dict[str, Any]]]:
+    """``collect_reports``, keeping each row's JSON path alongside it.
+
+    The desktop app's History screen needs to open a run it listed, and
+    the row alone only carries the file's bare *name* -- ambiguous under
+    ``rglob`` once two subfolders hold same-named reports. Rows are
+    identical to ``collect_reports``'s, so that function stays the one
+    shape every consumer (and the site's contract test) relies on.
+    """
+    rows: list[tuple[Path, dict[str, Any]]] = []
     root = Path(directory)
     for path in sorted(root.rglob("*.json")):
         try:
@@ -89,7 +101,7 @@ def collect_reports(directory: str | Path) -> list[dict[str, Any]]:
         enemy_casts = report.get("enemy_casts") or {}
         death_cost = report.get("death_cost") or {}
         timer = report.get("timer") or {}
-        rows.append({
+        rows.append((path, {
             "file": path.name,
             "html": html_sibling.name if html_sibling.exists() else None,
             "zone": run.get("zone"),
@@ -112,8 +124,8 @@ def collect_reports(directory: str | Path) -> list[dict[str, Any]]:
             "threshold": timer.get("threshold"),
             "margin_ms": timer.get("margin_ms"),
             "deaths_detail": deaths_summary(report),
-        })
-    rows.sort(key=lambda r: r.get("start_ts") or 0, reverse=True)
+        }))
+    rows.sort(key=lambda pr: pr[1].get("start_ts") or 0, reverse=True)
     return rows
 
 
@@ -209,6 +221,9 @@ select { background:var(--panel); color:var(--text); border:1px solid var(--line
 .affix { display:inline-block; font-size:10.5px; padding:1px 6px; margin-right:4px;
   border:1px solid var(--line); border-radius:4px; color:var(--dim);
   background:var(--bg); letter-spacing:.02em; cursor:default; }
+.affix.base { color:var(--text); }
+.affix.season { color:var(--accent); border-color:var(--accent); }
+.affix.harsh { color:var(--warn); border-color:var(--warn); }
 .run-row .party { overflow:hidden; text-overflow:ellipsis; min-width:0; }
 .pname { margin-right:8px; font-weight:500; }
 .pname.unk { color:var(--dim); font-weight:400; }
@@ -287,11 +302,22 @@ let openKey = null;
 const AFFIXES = {
   9: "Tyrannical", 10: "Fortified", 147: "Xal'atath's Guile", 148: "Ascendant",
   152: "Challenger's Peril", 158: "Voidbound", 159: "Oblivion", 160: "Devour",
-  162: "Pulsar",
+  162: "Xal'atath's Bargain: Pulsar", 165: "Lindormi's Guidance",
 };
 const AFFIX_SHORT = {
   9: "Tyr", 10: "Fort", 147: "Guile", 148: "Asc", 152: "Peril", 158: "Void",
-  159: "Obliv", 160: "Devour", 162: "Pulsar",
+  159: "Obliv", 160: "Devour", 162: "Pulsar", 165: "Guidance",
+};
+// Chips are colored by what the affix DOES, not with Blizzard's own icon
+// art: the report page has to render offline from a single file (and the
+// site serves it under a CSP that allows no remote images), so a remote
+// icon URL would simply fail to load. Base = the weekly Tyrannical/
+// Fortified pair, season = the seasonal/bargain affix, harsh = one that
+// costs time on death.
+const AFFIX_KIND = {
+  9: "base", 10: "base", 147: "harsh", 152: "harsh",
+  148: "season", 158: "season", 159: "season", 160: "season",
+  162: "season", 165: "season",
 };
 // Standard WoW class colors, keyed by class name normalized to lowercase
 // with spaces removed so "Death Knight" / "DeathKnight" / "DEATHKNIGHT"
@@ -368,7 +394,11 @@ function partyCell(list) {
 
 function affixCell(ids) {
   if (!ids || !ids.length) return '<span class="dim">—</span>';
-  return ids.map(id => `<span class="affix" title="${esc(AFFIXES[id] || ("Affix #" + id))}">${esc(AFFIX_SHORT[id] || ("#" + id))}</span>`).join("");
+  return ids.map(id => {
+    const kind = AFFIX_KIND[id] || "";
+    return `<span class="affix${kind ? " " + kind : ""}" title="${
+      esc(AFFIXES[id] || ("Affix #" + id))}">${esc(AFFIX_SHORT[id] || ("#" + id))}</span>`;
+  }).join("");
 }
 
 // The score columns. These read a percentage out of the report, so a

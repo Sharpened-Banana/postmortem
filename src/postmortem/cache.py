@@ -42,7 +42,16 @@ def _resolve_cache_dir() -> Path:
     override = os.environ.get(ENV_VAR)
     if override:
         return Path(override)
-    return Path.home() / ".cache" / "postmortem"
+    from .appdirs import cache_dir as _platform_cache_dir
+
+    # A cache written by an older build lives at ~/.cache/postmortem on
+    # every platform. Keep using it when it is there, so nobody's warm
+    # cache is silently abandoned; new installs get the platform's own
+    # location.
+    legacy = Path.home() / ".cache" / "postmortem"
+    if legacy.is_dir():
+        return legacy
+    return _platform_cache_dir()
 
 
 def cache_dir() -> Path:
