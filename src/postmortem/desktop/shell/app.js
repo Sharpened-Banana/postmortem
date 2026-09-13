@@ -341,6 +341,7 @@ async function onAnalyze() {
       state.lastReport = result.report;
       resetUploadStatus();
       showSavedStatus(result.saved);
+      setReportBack("new");
       showScreen("report");
     } else {
       showBanner(na.errorBanner, (result && result.error) || "Analysis failed for an unknown reason.");
@@ -376,8 +377,21 @@ function showSavedStatus(saved) {
   el.hidden = false;
 }
 
+// Which screen "Back" on the report screen returns to, and what the button
+// says: New Analysis opens reports, and so does History now.
+const REPORT_BACK = {
+  new: "← Back to New Analysis",
+  history: "← Back to History",
+};
+
+function setReportBack(screen) {
+  state.reportBack = REPORT_BACK[screen] ? screen : "new";
+  document.getElementById("report-back-btn").textContent = REPORT_BACK[state.reportBack];
+}
+
 function initReportScreen() {
-  document.getElementById("report-back-btn").addEventListener("click", () => showScreen("new"));
+  document.getElementById("report-back-btn").addEventListener(
+    "click", () => showScreen(state.reportBack || "new"));
   document.getElementById("report-upload-btn").addEventListener("click", onUploadToSite);
 }
 
@@ -727,6 +741,55 @@ function initHistory() {
     hist.resultsView.hidden = true;
     hist.formView.hidden = false;
   });
+
+  // The History page is a sandboxed frame, so its "open full report" links
+  // can't navigate anywhere useful -- they used to be bare file names that
+  // resolved against this shell and 404'd. The page posts the row's
+  // opaque ref here instead; only a message from that exact frame counts.
+  window.addEventListener("message", (e) => {
+    if (!hist.frame || e.source !== hist.frame.contentWindow) return;
+    const data = e.data;
+    if (!data || data.type !== "postmortem-open-run" || typeof data.ref !== "string") return;
+    openHistoryRun(data.ref);
+  });
+
+  // Open straight onto the list: every analyzed and watched run is already
+  // recorded to the default database, so a History button that shows a
+  // form first looks like history needs setting up. Once per session --
+  // "New search" still gets you back to the form.
+  document.querySelectorAll('[data-screen="history"], [data-nav="history"]').forEach(btn => {
+    btn.addEventListener("click", () => {
+      if (hist.autoLoaded || !hist.resultsView.hidden) return;
+      if (!hist.dbPath.value.trim() && !hist.directory.value.trim()) return;
+      hist.autoLoaded = true;
+      onLoadHistory();
+    });
+  });
+}
+
+async function openHistoryRun(ref) {
+  hideBanner(hist.errorBanner);
+  try {
+    const result = await api().open_history_run(ref);
+    if (!result || !result.ok) {
+      // The banner lives on the form view; show it there so it is seen.
+      hist.resultsView.hidden = true;
+      hist.formView.hidden = false;
+      showBanner(hist.errorBanner, (result && result.error) || "Could not open that run.");
+      return;
+    }
+    document.getElementById("report-context-label").textContent = result.label || "";
+    document.getElementById("report-frame").srcdoc = result.html;
+    state.lastReport = result.report;
+    resetUploadStatus();
+    showSavedStatus(null);
+    setReportBack("history");
+    showScreen("report");
+  } catch (e) {
+    hist.resultsView.hidden = true;
+    hist.formView.hidden = false;
+    showBanner(hist.errorBanner, "Unexpected error while opening that run: " + describeError(e));
+  }
 }
 
 async function applySettingsToHistory() {
