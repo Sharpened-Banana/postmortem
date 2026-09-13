@@ -121,6 +121,40 @@ class TestSegmenter:
         assert not runs[0].completed
         assert runs[1].completed
 
+    def test_map_change_before_start_is_carried_into_the_run(self):
+        """WoW logs MAP_CHANGE on entering the dungeon, minutes before the
+        key's CHALLENGE_MODE_START -- often while the previous key is still
+        open. Those bounds are what calibrates the route map's player
+        paths; dropping them (everything pre-START used to be) made the
+        whole run fall back to a global fit that drew every path off the
+        canvas. Real log 2026-08-30: MAP_CHANGE 2500 at 22:15, START at
+        22:17, nothing after."""
+        from postmortem.analysis.mapping import collect_map_bounds
+
+        b = LogBuilder()
+        b.raw(0, 'MAP_CHANGE,2574,"Voidscar Arena",4691.67,4358.33,-204.99,-705.01')
+        b.start(10, zone="Voidscar Arena", instance=2923, cm=585)
+        b.player_damage(15, DPS1, b.npc_guid(1, "1"), "X", 1, "S", 10)
+        # walked into the next dungeon while the old key is still "open"
+        b.raw(100, 'MAP_CHANGE,2500,"The Blinding Vale",1675.0,916.67,2341.67,1202.08')
+        b.raw(101, 'MAP_CHANGE,2500,"The Blinding Vale",1675.0,916.67,2341.67,1202.08')
+        b.raw(220, "CHALLENGE_MODE_END,2859,0,0,0,0.000000,0.000000")  # phantom
+        b.start(221, zone="The Blinding Vale", instance=2859, cm=584)
+        b.player_damage(230, DPS1, b.npc_guid(2, "2"), "Y", 2, "S", 10)
+        b.end(300, instance=2859)
+
+        first, second = list(segment_runs(iter_events(b.lines)))
+        assert first.events[0].name == "CHALLENGE_MODE_START"
+        assert 2574 in collect_map_bounds(first.events)
+        assert second.events[0].name == "CHALLENGE_MODE_START"
+        bounds = collect_map_bounds(second.events)
+        assert bounds[2500] == (1675.0, 916.67, 2341.67, 1202.08)
+        # the earlier dungeon's map rides along too -- harmless, keyed by id
+        assert 2574 in bounds
+        # carried once each, not once per repeated MAP_CHANGE line
+        assert sum(e.name == "MAP_CHANGE" for e in second.events) == 2
+        assert second.completed
+
     def test_reload_same_key_merges(self):
         b = LogBuilder()
         b.start(0)

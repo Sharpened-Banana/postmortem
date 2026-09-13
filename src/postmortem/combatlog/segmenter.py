@@ -112,7 +112,24 @@ def segment_runs(
     desktop run never needs (see config.py's MAX_RUN_EVENTS comment).
     """
     current: Optional[RunSegment] = None
+    # The latest MAP_CHANGE seen per uiMapID, whether or not a run is open.
+    # WoW writes MAP_CHANGE (the sub-map's world-coordinate rectangle the
+    # route map's player-path calibration needs -- analysis/mapping.py's
+    # collect_map_bounds) when the player *enters* the map, which is
+    # normally a minute or two BEFORE the key's CHALLENGE_MODE_START --
+    # and often while the previous key is still open in this segmenter
+    # (real log, 2026-08-30: MAP_CHANGE 2500 "The Blinding Vale" at
+    # 22:15:11, its START at 22:17:12, no MAP_CHANGE after). Only keeping
+    # the events from START onward silently lost those bounds, and a
+    # dungeon whose main map has none fell back to the legacy global fit
+    # that draws every path crushed into a corner and off the canvas. So
+    # every run starts with the most recent MAP_CHANGE for each map seen
+    # so far; maps from other dungeons are harmless (bounds are looked up
+    # by the uiMapID the position samples carry).
+    latest_map_change: dict[str, Event] = {}
     for event in events:
+        if event.name == "MAP_CHANGE" and event.params:
+            latest_map_change[event.params[0].strip()] = event
         if (
             max_run_events is not None
             and current is not None
@@ -144,6 +161,9 @@ def segment_runs(
                 yield current  # abandoned run
             current = new_run
             current.events.append(event)
+            # Carry the pre-START map bounds in (see latest_map_change);
+            # the START stays events[0].
+            current.events.extend(latest_map_change.values())
         elif event.name == "CHALLENGE_MODE_END":
             if current is None:
                 continue
