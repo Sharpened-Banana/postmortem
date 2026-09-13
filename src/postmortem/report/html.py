@@ -481,7 +481,7 @@ function mapSection() {
   // here inside the uploaded report like everything else -- so require
   // the shape rather than trusting it, and escape what is left.
   const safeBg = bg && typeof bg.data_uri === "string"
-    && /^data:image[/](png|jpeg|webp);base64,[A-Za-z0-9+=]+$/.test(bg.data_uri)
+    && /^data:image[/](png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(bg.data_uri)
     ? bg.data_uri : null;
   const image = safeBg
     ? `<image href="${esc(safeBg)}" x="0" y="0" width="${cw}" height="${ch}" preserveAspectRatio="none" />`

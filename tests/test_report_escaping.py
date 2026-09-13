@@ -219,6 +219,22 @@ class TestRunReportEscaping:
         out = _run(script, "report-data", json.dumps(report), extra="render();")
         assert "javascript:" not in out
 
+    def test_map_background_accepts_a_real_jpeg_data_uri(self, real_report):
+        """The check above must still let the real thing through. The
+        base64 alphabet includes '/', and every JPEG mapart.py produces
+        has one -- the first version of the validator left it out, so the
+        desktop app embedded the map art and the page silently dropped it
+        on every single run (2026-09-13)."""
+        import base64
+        report = json.loads(json.dumps(real_report))
+        payload = base64.b64encode(bytes(range(256))).decode("ascii")
+        assert "/" in payload
+        report.setdefault("map", {}).setdefault("backgrounds", {})["1"] = \
+            {"data_uri": "data:image/jpeg;base64," + payload}
+        script = _extract_script(render_html(report))
+        out = _run(script, "report-data", json.dumps(report), extra="render();")
+        assert "<image href=\"data:image/jpeg;base64," + payload[:20] in out
+
     def test_embedded_json_cannot_close_its_own_script_tag(self, real_report):
         """Belt to the braces above: the report is also embedded as JSON, so
         a payload must not be able to end the <script> block either."""
