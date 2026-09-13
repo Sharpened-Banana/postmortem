@@ -63,7 +63,19 @@ def deaths_summary(report: dict[str, Any]) -> list[dict[str, Any]]:
 
 def collect_reports(directory: str | Path) -> list[dict[str, Any]]:
     """Load every run-report JSON under ``directory`` into index rows."""
-    rows: list[dict[str, Any]] = []
+    return [row for _path, row in collect_report_files(directory)]
+
+
+def collect_report_files(directory: str | Path) -> list[tuple[Path, dict[str, Any]]]:
+    """``collect_reports``, keeping each row's JSON path alongside it.
+
+    The desktop app's History screen needs to open a run it listed, and
+    the row alone only carries the file's bare *name* -- ambiguous under
+    ``rglob`` once two subfolders hold same-named reports. Rows are
+    identical to ``collect_reports``'s, so that function stays the one
+    shape every consumer (and the site's contract test) relies on.
+    """
+    rows: list[tuple[Path, dict[str, Any]]] = []
     root = Path(directory)
     for path in sorted(root.rglob("*.json")):
         try:
@@ -89,7 +101,7 @@ def collect_reports(directory: str | Path) -> list[dict[str, Any]]:
         enemy_casts = report.get("enemy_casts") or {}
         death_cost = report.get("death_cost") or {}
         timer = report.get("timer") or {}
-        rows.append({
+        rows.append((path, {
             "file": path.name,
             "html": html_sibling.name if html_sibling.exists() else None,
             "zone": run.get("zone"),
@@ -112,8 +124,8 @@ def collect_reports(directory: str | Path) -> list[dict[str, Any]]:
             "threshold": timer.get("threshold"),
             "margin_ms": timer.get("margin_ms"),
             "deaths_detail": deaths_summary(report),
-        })
-    rows.sort(key=lambda r: r.get("start_ts") or 0, reverse=True)
+        }))
+    rows.sort(key=lambda pr: pr[1].get("start_ts") or 0, reverse=True)
     return rows
 
 

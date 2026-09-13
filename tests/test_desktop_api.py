@@ -9,6 +9,8 @@ be meaningfully unit tested (see api.py's module docstring).
 from __future__ import annotations
 
 import json
+import subprocess
+import shutil
 import textwrap
 import threading
 from pathlib import Path
@@ -554,6 +556,108 @@ class TestListHistory:
         db_result = api.list_history(db_path=str(db_path))
 
         assert set(dir_result["rows"][0]) == set(db_result["rows"][0])
+
+    # -- opening a listed run (2026-09-13) --------------------------------
+    #
+    # Every History row's "open full report" link used to be the report's
+    # bare HTML file name. Inside the app the page is a srcdoc frame, so
+    # the link resolved against the app's own shell and 404'd -- and a run
+    # stored without an HTML file had no link at all.
+
+    def _analyzed(self, api, log_file, route_string, dungeon_data_file):
+        analyzed = api.analyze({
+            "log_path": str(log_file),
+            "route": route_string,
+            "dungeon_data_path": str(dungeon_data_file),
+        })
+        assert analyzed["ok"] is True
+        return analyzed["report"]
+
+    def test_db_rows_link_to_an_opaque_ref_not_a_file_name(
+        self, api, log_file, route_string, dungeon_data_file, tmp_path,
+    ):
+        db_path = tmp_path / "runs.db"
+        # No html_path: exactly how a Watch Live run lands in the database,
+        # and the case that used to render with no link at all.
+        history_ingest(self._analyzed(api, log_file, route_string, dungeon_data_file), db_path)
+
+        result = api.list_history(db_path=str(db_path))
+        link = result["rows"][0]["html"]
+        assert link.startswith("pm-run:")
+        assert not link.endswith(".html")
+        # The page builds its rows client-side from embedded JSON, so the
+        # ref appears in that data rather than as a literal href.
+        assert link in result["html"]
+        assert "postmortem-open-run" in result["html"]
+
+    def test_a_db_run_opens_from_its_stored_report(
+        self, api, log_file, route_string, dungeon_data_file, tmp_path,
+    ):
+        db_path = tmp_path / "runs.db"
+        history_ingest(self._analyzed(api, log_file, route_string, dungeon_data_file), db_path)
+        listed = api.list_history(db_path=str(db_path))
+        ref = listed["rows"][0]["html"][len("pm-run:"):]
+
+        opened = api.open_history_run(ref)
+        assert opened["ok"] is True, opened
+        assert opened["report"]["run"]["zone"] == "Murder Row"
+        assert opened["label"].startswith("Murder Row")
+        assert "<html" in opened["html"].lower()
+
+    def test_a_folder_run_opens_from_its_own_json_even_in_a_subfolder(
+        self, api, log_file, route_string, dungeon_data_file, tmp_path,
+    ):
+        report = self._analyzed(api, log_file, route_string, dungeon_data_file)
+        nested = tmp_path / "reports" / "watch"
+        nested.mkdir(parents=True)
+        (nested / "run.json").write_text(json.dumps(report), encoding="utf-8")
+
+        listed = api.list_history(directory=str(tmp_path / "reports"))
+        ref = listed["rows"][0]["html"][len("pm-run:"):]
+        opened = api.open_history_run(ref)
+        assert opened["ok"] is True, opened
+        assert opened["report"]["run"]["zone"] == "Murder Row"
+
+    def test_an_unknown_ref_is_refused_rather_than_read_as_a_path(self, api, tmp_path):
+        secret = tmp_path / "secret.json"
+        secret.write_text('{"run": {"zone": "x"}}', encoding="utf-8")
+        for ref in ("nope", str(secret), "../../etc/passwd", None, 3):
+            result = api.open_history_run(ref)
+            assert result["ok"] is False
+            assert "report" not in result
+
+    def test_refs_from_an_older_listing_stop_working(
+        self, api, log_file, route_string, dungeon_data_file, tmp_path,
+    ):
+        db_path = tmp_path / "runs.db"
+        history_ingest(self._analyzed(api, log_file, route_string, dungeon_data_file), db_path)
+        old_ref = api.list_history(db_path=str(db_path))["rows"][0]["html"][len("pm-run:"):]
+        api.list_history(db_path=str(db_path))
+        assert api.open_history_run(old_ref)["ok"] is False
+
+    @pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+    def test_the_page_posts_the_clicked_ref_to_the_app(self):
+        """Run the injected click handler itself against a stub DOM."""
+        from postmortem.desktop.api import _HISTORY_OPEN_SCRIPT
+
+        body = _HISTORY_OPEN_SCRIPT.split(">", 1)[1].rsplit("</script>", 1)[0]
+        harness = """
+let handler, posted = [], prevented = false;
+global.document = { addEventListener: (type, fn) => { if (type === "click") handler = fn; } };
+global.window = { parent: { postMessage: (msg, origin) => posted.push(msg) } };
+""" + body + """
+function click(href) {
+  const a = { getAttribute: () => href };
+  handler({ target: { closest: () => a }, preventDefault() { prevented = true; }, stopPropagation() {} });
+}
+click("pm-run:abc123");
+click("https://example.test/");
+console.log(JSON.stringify({ posted, prevented }));
+"""
+        out = subprocess.run(["node", "-e", harness], capture_output=True, text=True, check=True)
+        result = json.loads(out.stdout)
+        assert result["posted"] == [{"type": "postmortem-open-run", "ref": "abc123"}]
+        assert result["prevented"] is True
 
     def test_bad_db_path_does_not_raise(self, api, tmp_path):
         # a directory that can't hold a sqlite file (parent missing, no

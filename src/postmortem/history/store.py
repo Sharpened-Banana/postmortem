@@ -394,6 +394,16 @@ class Store:
         out.sort(key=lambda r: r.get("start_ts") or 0, reverse=True)
         return out
 
+    def query_runs_with_ids(self) -> list[tuple[int, dict[str, Any]]]:
+        """``query_runs()``, keeping each row's database id alongside it --
+        for a caller that has to open a run it listed (the desktop app's
+        History screen). The rows themselves are unchanged, so
+        ``_to_index_row``'s shape stays the one contract."""
+        rows = self._conn.execute("SELECT * FROM runs").fetchall()
+        out = [(int(r["id"]), _to_index_row(r)) for r in rows]
+        out.sort(key=lambda pr: pr[1].get("start_ts") or 0, reverse=True)
+        return out
+
     def get_report(self, run_id: int) -> Optional[dict[str, Any]]:
         """Return the full stored report JSON for one run, if it exists."""
         cur = self._conn.execute("SELECT report_json FROM runs WHERE id = ?", (run_id,))
