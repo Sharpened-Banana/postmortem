@@ -1082,7 +1082,12 @@ class DesktopAPI:
                 "url": f"{site_url.rstrip('/')}{result.get('url', '')}",
             })
         else:
-            self._emit_watch_event({"type": "upload_failed", "error": result.get("error")})
+            # A response with no error key rendered as the word "null" in
+            # the watch log.
+            self._emit_watch_event({
+                "type": "upload_failed",
+                "error": result.get("error") or "the site rejected the upload",
+            })
 
     def _emit_watch_event(self, event: dict) -> None:
         """Push a live status update to the UI (``window.onWatchEvent``
@@ -1240,6 +1245,24 @@ class DesktopAPI:
         """
         if not isinstance(url, str) or not url.lower().startswith(("http://", "https://")):
             return {"ok": False, "error": "only http(s) URLs may be opened"}
+        # Same origin as the configured site, too. The one caller opens a
+        # verify_url that comes straight out of the site's own response,
+        # so a compromised (or mistyped) site could otherwise hand the app
+        # any address and get a drive-by navigation out of a click the
+        # user believes goes to Postmortem.
+        import urllib.parse
+
+        try:
+            configured = _normalized_site_url(_config.load_settings().get("site_url"))
+        except (ValueError, OSError):
+            configured = ""
+        if not configured:
+            return {"ok": False, "error": "no site URL is configured"}
+        want = urllib.parse.urlsplit(configured)
+        got = urllib.parse.urlsplit(url)
+        if (got.scheme.lower(), got.netloc.lower()) != (want.scheme.lower(), want.netloc.lower()):
+            return {"ok": False,
+                    "error": "refusing to open a URL outside the configured site"}
         try:
             import webbrowser
             webbrowser.open(url)

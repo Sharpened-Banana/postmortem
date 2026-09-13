@@ -46,7 +46,9 @@ def _lua_string(s: str) -> str:
         elif ch == "\t":
             out.append("\\t")
         elif ord(ch) < 0x20:
-            out.append(f"\\{ord(ch)}")  # Lua decimal escape for other control chars
+            # Zero-padded: Lua's decimal escape consumes up to three
+            # digits, so "\\1" followed by a digit in the name swallows it.
+            out.append(f"\\{ord(ch):03d}")
         else:
             out.append(ch)
     out.append('"')

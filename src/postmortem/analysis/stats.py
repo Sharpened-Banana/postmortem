@@ -349,7 +349,16 @@ def compute_stats(
     run_start_ts = events[0].ts if events else 0.0
     run_end_ts = events[-1].ts if events else 0.0
 
-    def close_enemy_cast(caster_guid: str, outcome: str) -> bool:
+    # caster guid -> (spell_id, ts) of the cast most recently closed as
+    # "expired". The log does not guarantee that the caster's UNIT_DIED
+    # comes after the SPELL_INTERRUPT that stopped it: when it comes
+    # first, the cast was already counted as expired by the time the kick
+    # arrived, so the same cast landed in BOTH columns. The interrupt
+    # handler retracts that count when it sees its own cast here.
+    last_expired: dict[str, tuple[int, float]] = {}
+    EXPIRED_RETRACT_S = 3.0
+
+    def close_enemy_cast(caster_guid: str, outcome: str, ts: float = 0.0) -> bool:
         """Close an in-flight enemy HARD cast. Returns whether there was
         one -- False lets the caller fall back to the channel bookkeeping
         above (see open_enemy_channels)."""
@@ -361,7 +370,22 @@ def compute_stats(
             "name": spell_name, "kicked": 0, "landed": 0, "expired": 0,
         })
         entry[outcome] += 1
+        if outcome == "expired":
+            last_expired[caster_guid] = (spell_id, ts)
         return True
+
+    def retract_expired(caster_guid: str, spell_id: int, ts: float) -> None:
+        """Undo an "expired" count for a cast that turns out to have been
+        kicked, when the two events arrive in that order."""
+        recent = last_expired.get(caster_guid)
+        if recent is None or recent[0] != spell_id:
+            return
+        if ts - recent[1] > EXPIRED_RETRACT_S:
+            return
+        entry = stats.enemy_cast_outcomes.get(spell_id)
+        if entry and entry["expired"] > 0:
+            entry["expired"] -= 1
+        last_expired.pop(caster_guid, None)
 
     def close_cc(target_guid: str, spell_id: int, end_ts: float) -> None:
         window = open_cc.pop((target_guid, spell_id), None)
@@ -536,7 +560,7 @@ def compute_stats(
                 ))
             elif g.is_npc and dst_guid not in killed_guids:
                 killed_guids.add(dst_guid)
-                close_enemy_cast(dst_guid, "expired")
+                close_enemy_cast(dst_guid, "expired", event.ts)
                 # a dead unit's active auras don't get an explicit
                 # SPELL_AURA_REMOVED -- count any open CC as having held
                 # for its full duration up to death, not lost entirely.
@@ -720,6 +744,17 @@ def compute_stats(
                 kicked_name = (extra.spell_name if extra and extra.spell_name else
                                cast[1] if cast else channel[1] if channel else
                                "unknown spell")
+                # The kicked spell can differ from the cast this loop had
+                # open (a cast the log never closed, a stale channel).
+                # Popping it and walking away counted it as neither landed
+                # nor expired -- it vanished from the table entirely -- so
+                # close it honestly as "expired" instead.
+                if cast is not None and cast[0] != kicked_id:
+                    stale = stats.enemy_cast_outcomes.setdefault(cast[0], {
+                        "name": cast[1], "kicked": 0, "landed": 0, "expired": 0,
+                    })
+                    stale["expired"] += 1
+                retract_expired(dst_guid, kicked_id, event.ts)
                 if channel is not None and channel[0] == kicked_id:
                     # a channel: routed through channel_kicked so its
                     # "got through" count (channels started minus kicked)
@@ -798,7 +833,7 @@ def compute_stats(
                 sp = spell_info(event)
                 if sp is not None:
                     # a new hard-cast supersedes any stale open one
-                    close_enemy_cast(src_guid, "expired")
+                    close_enemy_cast(src_guid, "expired", event.ts)
                     open_enemy_casts[src_guid] = (sp.spell_id, sp.spell_name, event.ts)
             continue
 

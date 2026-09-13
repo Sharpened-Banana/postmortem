@@ -11,9 +11,24 @@ from postmortem.cache import (
 
 
 class TestCacheDir:
-    def test_default_is_under_home_cache(self, monkeypatch):
+    def test_default_follows_the_platform_convention(self, monkeypatch, tmp_path):
+        # Windows put its cache in a dot-directory under the home folder
+        # like every other platform, which is not where it belongs; the
+        # default now goes through appdirs.cache_dir().
         monkeypatch.delenv(ENV_VAR, raising=False)
-        assert cache_dir() == Path.home() / ".cache" / "postmortem"
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+        import postmortem.appdirs as appdirs
+
+        assert cache_dir() == appdirs.cache_dir()
+
+    def test_an_existing_legacy_cache_is_still_used(self, monkeypatch, tmp_path):
+        # Nobody's warm cache is abandoned by the move.
+        monkeypatch.delenv(ENV_VAR, raising=False)
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        legacy = tmp_path / ".cache" / "postmortem"
+        legacy.mkdir(parents=True)
+        assert cache_dir() == legacy
 
     def test_env_var_overrides_and_is_a_directory(self, monkeypatch, tmp_path):
         monkeypatch.setenv(ENV_VAR, str(tmp_path / "somewhere"))

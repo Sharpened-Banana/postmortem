@@ -1633,10 +1633,25 @@ class TestAccountLinking:
         result = api.open_url("file:///etc/passwd")
         assert result == {"ok": False, "error": "only http(s) URLs may be opened"}
 
-    def test_open_url_opens_http_and_https(self, api, monkeypatch):
+    def test_open_url_opens_the_configured_site(self, api, monkeypatch):
         import webbrowser
         seen = []
         monkeypatch.setattr(webbrowser, "open", lambda url: seen.append(url))
+        api.save_settings({"site_url": "https://example.test"})
         assert api.open_url("https://example.test/link?code=X") == {"ok": True}
-        assert api.open_url("http://example.test") == {"ok": True}
-        assert seen == ["https://example.test/link?code=X", "http://example.test"]
+        assert seen == ["https://example.test/link?code=X"]
+
+    def test_open_url_refuses_another_origin(self, api, monkeypatch):
+        # The one caller opens a verify_url straight out of the site's own
+        # response, so a compromised site could otherwise get a drive-by
+        # navigation anywhere out of a click meant for Postmortem.
+        import webbrowser
+        seen = []
+        monkeypatch.setattr(webbrowser, "open", lambda url: seen.append(url))
+        api.save_settings({"site_url": "https://example.test"})
+        result = api.open_url("https://evil.test/link")
+        assert result["ok"] is False
+        assert "outside the configured site" in result["error"]
+        # http:// to the same host is a different origin too.
+        assert api.open_url("http://example.test")["ok"] is False
+        assert seen == []

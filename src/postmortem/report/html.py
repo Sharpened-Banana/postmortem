@@ -405,14 +405,29 @@ function mapSection() {
   const playerColor = i => ["var(--blue)","var(--accent)","var(--good)","var(--warn)",
     "#c774e8","#4fd1c5"][i % 6];
 
-  const pois = (m.pois||[]).map(p => {
+  // Points carry the floor (sublevel) they live on. Multi-floor dungeons
+  // stack several 840x555 canvases on the same coordinates, so drawing
+  // them all at once overlays unrelated rooms and only ever loads floor
+  // 1's art. Draw the floor most of the planned pull sits on, and say so
+  // when there are others. (Every dungeon MDT bundles today is single
+  // floor, so this normally changes nothing.)
+  const floorOf = o => Number(o && o.sublevel) || 1;
+  const floorCounts = {};
+  (m.enemies||[]).forEach(e => { const f = floorOf(e); floorCounts[f] = (floorCounts[f]||0) + 1; });
+  const floors = Object.keys(floorCounts).map(Number).sort((a,b) => a-b);
+  const primaryFloor = floors.length
+    ? floors.reduce((best, f) => floorCounts[f] > floorCounts[best] ? f : best, floors[0])
+    : 1;
+  const onFloor = o => floors.length < 2 || floorOf(o) === primaryFloor;
+
+  const pois = (m.pois||[]).filter(onFloor).map(p => {
     const s = Math.max(w, h) * 0.02 * (p.size_mult || 1);
     return `<rect x="${(p.x - s/2).toFixed(1)}" y="${(p.y - s/2).toFixed(1)}"
       width="${s.toFixed(1)}" height="${s.toFixed(1)}" transform="rotate(45 ${Number(p.x) || 0} ${Number(p.y) || 0})"
       fill="var(--warn)" stroke="var(--bg)" stroke-width="1"><title>${esc(p.type)}</title></rect>`;
   }).join("");
 
-  const enemyDots = m.enemies.map(e => {
+  const enemyDots = m.enemies.filter(onFloor).map(e => {
     const fill = pullColor(e.plan_pull);
     const r = (e.is_boss ? 1.8 : 1.0) * Math.max(w, h) * 0.01;
     // deviated pulls get a dashed red ring in addition to their fill color
@@ -460,7 +475,7 @@ function mapSection() {
   // 840x555 canvas at (0,0) in the flipped frame, so it lines up with
   // every dot with no further transform; the viewBox still crops to the
   // planned pack extents as before.
-  const bg = (m.backgrounds || {})["1"];
+  const bg = (m.backgrounds || {})[String(primaryFloor)];
   const cw = Number((m.canvas || {}).width) || 840, ch = Number((m.canvas || {}).height) || 555;
   // The background is a data: URI built by mapart.py, but it arrives
   // here inside the uploaded report like everything else -- so require
@@ -480,7 +495,8 @@ function mapSection() {
     <div class="legend">dot = planned enemy (color = plan pull; dashed red ring = route deviation)
       <i style="background:var(--warn)"></i>POI (entrance / marker)
       ${calibrated ? '<i style="background:var(--bad)"></i>death (×) · colored lines = player paths' : ""}
-      ${image ? " · map art from your MDT install" : ""}</div>`;
+      ${image ? " · map art from your MDT install" : ""}
+      ${floors.length > 1 ? ` · floor ${primaryFloor} of ${floors.length} (other floors not drawn)` : ""}</div>`;
 }
 
 function pullsTable() {

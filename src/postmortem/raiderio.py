@@ -254,6 +254,21 @@ def _extract_map_id(entry: dict) -> Optional[int]:
     return None
 
 
+# A Mythic+ par time is between five minutes and an hour in every dungeon
+# Blizzard has ever shipped. The unit of the ambiguous keys below is a
+# guess (see the module notes), so a payload that already publishes
+# milliseconds under a seconds-shaped key would be multiplied again and
+# yield a par time a thousand times too long -- which silently grades
+# every run in that dungeon as a three-chest with an enormous margin.
+# Anything outside this range is treated as "unknown unit", not as a timer.
+MIN_PAR_MS = 5 * 60 * 1000
+MAX_PAR_MS = 60 * 60 * 1000
+
+
+def _plausible_par_ms(ms: int) -> bool:
+    return MIN_PAR_MS <= ms <= MAX_PAR_MS
+
+
 def _extract_par_ms(entry: dict) -> Optional[int]:
     for key in _MS_KEYS:
         if key in entry:
@@ -261,7 +276,7 @@ def _extract_par_ms(entry: dict) -> Optional[int]:
                 ms = int(entry[key])
             except (TypeError, ValueError):
                 continue
-            if ms > 0:
+            if ms > 0 and _plausible_par_ms(ms):
                 return ms
     for key in _SECONDS_KEYS:
         if key in entry:
@@ -269,8 +284,16 @@ def _extract_par_ms(entry: dict) -> Optional[int]:
                 seconds = float(entry[key])
             except (TypeError, ValueError):
                 continue
-            if seconds > 0:
-                return int(round(seconds * 1000))
+            if seconds <= 0:
+                continue
+            ms = int(round(seconds * 1000))
+            if _plausible_par_ms(ms):
+                return ms
+            # The value may already have been milliseconds under a
+            # seconds-shaped key; accept it unmultiplied if that reading
+            # is the plausible one.
+            if _plausible_par_ms(int(seconds)):
+                return int(seconds)
     return None
 
 

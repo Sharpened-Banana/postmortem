@@ -46,6 +46,10 @@ local defaults = {
     -- the not-yet-built minimap button and info window respectively -- no
     -- functionality for either is implemented here.
     infoPopupSeen = false,
+    -- generated_at of the PostmortemResults.lua file whose "stats loaded"
+    -- line has already been printed, so it is announced once per results
+    -- file rather than on every login (Results.lua).
+    announcedResultsAt = 0,
     minimapIcon = { hide = false, showInCompartment = true },
     infoWindowPosition = { point = "CENTER", relativePoint = "CENTER", x = 0, y = 0 },
     -- Results.lua's in-game crunched-stats window (fed by the desktop
