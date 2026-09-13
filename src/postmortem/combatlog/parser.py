@@ -73,12 +73,24 @@ def split_params(text: str) -> list[str]:
 
 @dataclass
 class _ClockState:
-    """Tracks inferred year for year-less logs (and month rollover)."""
+    """Tracks inferred year for year-less logs (and month rollover).
+
+    ``year`` is the year the log *finished* in, because that is what the
+    file's mtime tells us. A log that starts in December and ends in
+    January therefore has to begin a year earlier: ``end_month`` (the
+    mtime's month) lets the first event detect that up front. Without it
+    the December lines took January's year and the rollover below then
+    advanced them again, putting both sides of the boundary a year in the
+    future.
+    """
 
     year: int
     last_month: int = 0
+    end_month: int = 0
 
     def observe(self, month: int) -> int:
+        if not self.last_month and self.end_month and month > self.end_month:
+            self.year -= 1
         if self.last_month and month < self.last_month and self.last_month == 12:
             self.year += 1
         self.last_month = month
@@ -161,8 +173,9 @@ def parse_line(
 def iter_events(
     lines: Iterable[str],
     base_year: Optional[int] = None,
+    end_month: int = 0,
 ) -> Iterator[Event]:
-    clock = _ClockState(year=base_year or datetime.now().year)
+    clock = _ClockState(year=base_year or datetime.now().year, end_month=end_month)
     for line_no, line in enumerate(lines, start=1):
         event = parse_line(line, line_no, clock)
         if event is not None:
@@ -172,10 +185,13 @@ def iter_events(
 def parse_file(path: str | Path, base_year: Optional[int] = None) -> Iterator[Event]:
     """Stream events from a WoWCombatLog.txt file."""
     path = Path(path)
+    end_month = 0
     if base_year is None:
         try:
-            base_year = time.localtime(os.path.getmtime(path)).tm_year
+            finished = time.localtime(os.path.getmtime(path))
+            base_year = finished.tm_year
+            end_month = finished.tm_mon
         except OSError:
             base_year = datetime.now().year
     with open(path, "r", encoding="utf-8", errors="replace") as fh:
-        yield from iter_events(fh, base_year)
+        yield from iter_events(fh, base_year, end_month)

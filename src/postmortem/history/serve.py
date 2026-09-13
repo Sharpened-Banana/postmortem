@@ -41,10 +41,16 @@ def _needs_rebuild(directory: Path, index_path: Path) -> bool:
     if not index_path.exists():
         return True
     index_mtime = index_path.stat().st_mtime
-    return any(
-        report_path.stat().st_mtime > index_mtime
-        for report_path in directory.rglob("*.json")
-    )
+
+    def newer(report_path: Path) -> bool:
+        try:
+            return report_path.stat().st_mtime > index_mtime
+        except OSError:
+            # Deleted (or became unreadable) between the walk and the
+            # stat: it raised straight out of the request handler.
+            return False
+
+    return any(newer(report_path) for report_path in directory.rglob("*.json"))
 
 
 class _Handler(http.server.SimpleHTTPRequestHandler):

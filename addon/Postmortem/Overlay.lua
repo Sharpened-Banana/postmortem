@@ -170,7 +170,10 @@ local function CreateOverlayFrame()
   -- first visible row's own `gap` then supplies the top padding, the same
   -- way each later row supplies its own.
   local topAnchor = CreateFrame("Frame", nil, f)
-  topAnchor:SetHeight(0)
+  -- One pixel, not zero: a zero-height frame with only top-corner anchors
+  -- has no unambiguously resolvable bottom edge, and every row below
+  -- chains from that edge.
+  topAnchor:SetHeight(1)
   topAnchor:SetPoint("TOPLEFT", f, "TOPLEFT", PADDING, 0)
   topAnchor:SetPoint("TOPRIGHT", f, "TOPRIGHT", -PADDING, 0)
 
@@ -341,10 +344,13 @@ function MA:Overlay_Refresh()
   -- SetMinMaxValues' range aren't guaranteed to render sensibly, even
   -- though the *text* below still shows the real, unclamped percent.
   frame.forcesBar:SetValue(math.min(1, math.max(0, pct / 100)))
+  -- math.floor at the call site: "%d" on a fractional value truncates on
+  -- WoW's Lua 5.1 but raises on newer ones, which is how the test harness
+  -- found it -- and weighted criteria can hand us a fraction.
   frame.forcesTextFS:SetText(string.format(
     "%d / %d (%.1f%%)",
-    forces.current or 0,
-    forces.total or 0,
+    math.floor(forces.current or 0),
+    math.floor(forces.total or 0),
     pct
   ))
   -- Overall dungeon time: counts DOWN against the key's own limit

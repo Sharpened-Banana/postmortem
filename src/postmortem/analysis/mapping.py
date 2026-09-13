@@ -1116,9 +1116,12 @@ def plan_geometry(
                 "is_boss": enemy.is_boss,
                 "plan_pull": plan_pull,
                 "deviated": plan_pull in deviated_pulls if plan_pull is not None else False,
-                # Which floor's 840x555 canvas this point lives on -- the
-                # renderer draws one panel per floor (each with its own
-                # background art when available, see mapart.py).
+                # Which floor's 840x555 canvas this point lives on. The
+                # renderer draws the floor most of the route sits on (with
+                # that floor's background art when available, see
+                # mapart.py) and labels the map when there are others --
+                # stacking every floor on one canvas overlaid unrelated
+                # rooms.
                 "sublevel": clone.sublevel if clone.sublevel is not None else 1,
             })
 
@@ -1152,12 +1155,26 @@ def plan_geometry(
     }
 
 
+# How stale a position sample may be and still be trusted to say where a
+# player died. Position lines are emitted several times a second while a
+# player is doing anything at all, so a gap this wide means we genuinely
+# do not know where they were -- and drawing the marker at their last
+# known spot, with nothing saying it is minutes old, is worse than not
+# drawing it.
+MAX_DEATH_SAMPLE_GAP_S = 5.0
+
+
 def _nearest_sample(
-    samples: list[list[float]], t_rel: float
+    samples: list[list[float]],
+    t_rel: float,
+    max_gap_s: Optional[float] = None,
 ) -> Optional[list[float]]:
     if not samples:
         return None
-    return min(samples, key=lambda s: abs(s[0] - t_rel))
+    best = min(samples, key=lambda s: abs(s[0] - t_rel))
+    if max_gap_s is not None and abs(best[0] - t_rel) > max_gap_s:
+        return None
+    return best
 
 
 def build_map_report(
@@ -1242,7 +1259,7 @@ def build_map_report(
             samples = [s for s in (position_samples.get(death.player_guid) or [])
                        if transform_for(s) is not None]
             t_rel = round(death.ts - run_start_ts, 1)
-            nearest = _nearest_sample(samples, t_rel)
+            nearest = _nearest_sample(samples, t_rel, MAX_DEATH_SAMPLE_GAP_S)
             if nearest is None:
                 continue
             cx, cy = transform_for(nearest).apply(nearest[1], nearest[2])

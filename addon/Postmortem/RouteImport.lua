@@ -238,7 +238,15 @@ function MA:RouteImport_OnTick()
 
   MA:Debug("Route: pull %d done -- %d engaged vs %s planned; now on pull %d",
     route.currentPullIndex, engagedCount, tostring(planned), route.currentPullIndex + 1)
-  route.currentPullIndex = route.currentPullIndex + 1
+  -- Clamped to the plan: an overpulled route used to display "pull 19 of
+  -- 16". Past the end the counter simply stays on the last planned pull;
+  -- the extra engagement still shows up as a size delta above.
+  local plannedCount = #route.plannedPulls
+  if plannedCount > 0 and route.currentPullIndex >= plannedCount then
+    route.currentPullIndex = plannedCount
+  else
+    route.currentPullIndex = route.currentPullIndex + 1
+  end
   route.currentPullCloneCount = 0
   ResetEngagement()
 end

@@ -32,9 +32,15 @@ MAX_DEPTH = 100
 
 
 def loads(data: bytes) -> Any:
-    value, _ = _decode_item(data, 0)
+    value, offset = _decode_item(data, 0)
     if value is _BREAK:
         raise CBORError("unexpected 'break' code at top level")
+    # A route that decodes one valid item and then carries garbage is not a
+    # route: accepting it silently hid whatever produced the extra bytes.
+    if offset != len(data):
+        raise CBORError(
+            f"{len(data) - offset} trailing byte(s) after the top-level CBOR item"
+        )
     return value
 
 

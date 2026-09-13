@@ -275,7 +275,12 @@ def cmd_import_route(args: argparse.Namespace) -> int:
 
 
 def cmd_extract_data(args: argparse.Namespace) -> int:
-    payload = write_dungeon_data(args.addon_path, args.output)
+    try:
+        payload = write_dungeon_data(args.addon_path, args.output)
+    except (OSError, ValueError, KeyError) as exc:
+        # Every sibling subcommand reports a bad path or an unwritable
+        # output this way; this one printed a stack trace.
+        raise SystemExit(f"error: could not extract dungeon data: {exc}")
     n = len(payload["dungeons"])
     print(f"extracted {n} dungeons -> {args.output}")
     for d in sorted(payload["dungeons"].values(), key=lambda d: d["dungeon_idx"]):
@@ -1122,6 +1127,12 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         print(f"raider.io: enriched {n} players", file=sys.stderr)
 
     formats = [f.strip() for f in args.format.split(",") if f.strip()]
+    # Validate the WHOLE list first. Checking inside the write loop meant
+    # "--format json,bogus" wrote the JSON, then exited with an error --
+    # half the work done, with no way to tell from the exit code.
+    unknown = [f for f in formats if f not in ("text", "json", "html")]
+    if unknown:
+        raise SystemExit(f"error: unknown format {unknown[0]!r} (text, json, html)")
     out_dir = Path(args.out) if args.out else None
     if out_dir:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -1150,12 +1161,15 @@ def cmd_analyze(args: argparse.Namespace) -> int:
                 print(payload)
         elif fmt == "html":
             html = render_html(report)
-            path = (out_dir or Path(".")) / f"{base}.html"
-            path.write_text(html, encoding="utf-8")
-            wrote.append(path)
-            html_path = path
-        else:
-            raise SystemExit(f"error: unknown format {fmt!r} (text, json, html)")
+            if out_dir:
+                path = out_dir / f"{base}.html"
+                path.write_text(html, encoding="utf-8")
+                wrote.append(path)
+                html_path = path
+            else:
+                # Was always written to ./<base>.html, silently clobbering
+                # any file of that name; text and json both print instead.
+                print(html)
     for path in wrote:
         print(f"wrote {path}", file=sys.stderr)
 
@@ -1346,6 +1360,13 @@ def _write_recorded_reports(
 
 
 def cmd_record(args: argparse.Namespace) -> int:
+    if args.upload and not args.analyze:
+        # There is nothing to upload without a report: the analysis step
+        # returns immediately, so the flag was accepted and ignored.
+        raise SystemExit(
+            "error: --upload needs --analyze (there is no report to upload "
+            "without it)"
+        )
     route = _load_route(args.route) if args.route else None
     store = _load_store(args.dungeon_data)
     out_dir = Path(args.out)

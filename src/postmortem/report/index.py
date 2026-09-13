@@ -209,6 +209,9 @@ select { background:var(--panel); color:var(--text); border:1px solid var(--line
 .affix { display:inline-block; font-size:10.5px; padding:1px 6px; margin-right:4px;
   border:1px solid var(--line); border-radius:4px; color:var(--dim);
   background:var(--bg); letter-spacing:.02em; cursor:default; }
+.affix.base { color:var(--text); }
+.affix.season { color:var(--accent); border-color:var(--accent); }
+.affix.harsh { color:var(--warn); border-color:var(--warn); }
 .run-row .party { overflow:hidden; text-overflow:ellipsis; min-width:0; }
 .pname { margin-right:8px; font-weight:500; }
 .pname.unk { color:var(--dim); font-weight:400; }
@@ -287,11 +290,22 @@ let openKey = null;
 const AFFIXES = {
   9: "Tyrannical", 10: "Fortified", 147: "Xal'atath's Guile", 148: "Ascendant",
   152: "Challenger's Peril", 158: "Voidbound", 159: "Oblivion", 160: "Devour",
-  162: "Pulsar",
+  162: "Xal'atath's Bargain: Pulsar", 165: "Lindormi's Guidance",
 };
 const AFFIX_SHORT = {
   9: "Tyr", 10: "Fort", 147: "Guile", 148: "Asc", 152: "Peril", 158: "Void",
-  159: "Obliv", 160: "Devour", 162: "Pulsar",
+  159: "Obliv", 160: "Devour", 162: "Pulsar", 165: "Guidance",
+};
+// Chips are colored by what the affix DOES, not with Blizzard's own icon
+// art: the report page has to render offline from a single file (and the
+// site serves it under a CSP that allows no remote images), so a remote
+// icon URL would simply fail to load. Base = the weekly Tyrannical/
+// Fortified pair, season = the seasonal/bargain affix, harsh = one that
+// costs time on death.
+const AFFIX_KIND = {
+  9: "base", 10: "base", 147: "harsh", 152: "harsh",
+  148: "season", 158: "season", 159: "season", 160: "season",
+  162: "season", 165: "season",
 };
 // Standard WoW class colors, keyed by class name normalized to lowercase
 // with spaces removed so "Death Knight" / "DeathKnight" / "DEATHKNIGHT"
@@ -368,7 +382,11 @@ function partyCell(list) {
 
 function affixCell(ids) {
   if (!ids || !ids.length) return '<span class="dim">—</span>';
-  return ids.map(id => `<span class="affix" title="${esc(AFFIXES[id] || ("Affix #" + id))}">${esc(AFFIX_SHORT[id] || ("#" + id))}</span>`).join("");
+  return ids.map(id => {
+    const kind = AFFIX_KIND[id] || "";
+    return `<span class="affix${kind ? " " + kind : ""}" title="${
+      esc(AFFIXES[id] || ("Affix #" + id))}">${esc(AFFIX_SHORT[id] || ("#" + id))}</span>`;
+  }).join("");
 }
 
 // The score columns. These read a percentage out of the report, so a

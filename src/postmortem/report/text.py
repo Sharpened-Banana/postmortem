@@ -16,6 +16,16 @@ def _fmt_time(seconds: float | None) -> str:
     return f"{m}:{s:02d}"
 
 
+def _pull_label(pull: object) -> str:
+    """A death outside any pull window carries pull=None, not a missing key.
+
+    ``dict.get(key, "?")`` never fired for it, so the text report printed
+    "(pull None)". The HTML renderer already treated null and missing the
+    same way.
+    """
+    return "?" if pull is None else str(pull)
+
+
 def _fmt_num(n: float | int | None) -> str:
     if n is None:
         return "?"
@@ -165,7 +175,7 @@ def render_text(report: dict[str, Any]) -> str:
         for d in deaths:
             kb = d.get("killing_blow") or {}
             add(f"{_fmt_time(d.get('t'))}  {d['player']}"
-                f"  (pull {d.get('pull', '?')})"
+                f"  (pull {_pull_label(d.get('pull'))})"
                 + (f"  killed by {kb.get('spell')} from {kb.get('source')}"
                    f" for {_fmt_num(kb.get('amount'))}" if kb else ""))
             detail = []
@@ -213,7 +223,7 @@ def render_text(report: dict[str, Any]) -> str:
         add("-- CLOSE CALLS " + "-" * 57)
         for c in close_calls:
             add(f"{_fmt_time(c.get('t'))}  {c['player']} dropped to {c['hp_pct']}% hp"
-                f"  (pull {c.get('pull', '?')})  -- {c['spell']} from {c['source']}"
+                f"  (pull {_pull_label(c.get('pull'))})  -- {c['spell']} from {c['source']}"
                 f" for {_fmt_num(c['amount'])}")
 
     # --- enemy casts / kick efficiency ---

@@ -112,6 +112,30 @@ def site_base_url(url: str) -> str:
     return base
 
 
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]", ""}
+
+
+def _token_transport_error(endpoint: str) -> Optional[str]:
+    """Why this endpoint must not carry the upload token, or None.
+
+    The token identifies this install to the site and the report is the
+    whole run; sending either over plain HTTP hands both to anyone on the
+    path. A local site (someone running the site themselves) never leaves
+    the machine, so it stays allowed.
+    """
+    parsed = urllib.parse.urlsplit(endpoint)
+    if parsed.scheme == "https":
+        return None
+    host = (parsed.hostname or "").lower()
+    if host in _LOCAL_HOSTS or host.endswith(".localhost"):
+        return None
+    return (
+        f"refusing to upload over {parsed.scheme or 'an unknown scheme'}: "
+        "the site URL must be https (this would send your upload token in "
+        "the clear)"
+    )
+
+
 def upload_report(
     report: dict[str, Any],
     url: str,
@@ -142,6 +166,9 @@ def upload_report(
         token = load_or_create_token()
 
     endpoint = f"{site_base_url(url)}/api/runs"
+    transport_error = _token_transport_error(endpoint)
+    if transport_error:
+        return {"ok": False, "error": transport_error}
     # Never ship embedded dungeon map art to the site: it's Blizzard's
     # art read from the user's own MDT install for their own local report
     # (see mapart.py). Stripped here, at the one choke point every upload
