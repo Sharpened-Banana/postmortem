@@ -224,13 +224,29 @@ jobs:
       #
       # Each platform job appends its own line; --clobber on the upload
       # below lets a re-run replace its own entry.
+      #
+      # Python, not shasum: Git Bash on the Windows runner has no shasum,
+      # which failed alpha-desktop-41's Windows job at this step -- the
+      # first real release to run it. setup-python is already on both
+      # runners, and the output is the same "<hex>  <name>" line
+      # updater.py parses. An empty file (no assets matched) fails the job
+      # rather than publishing a SHA256SUMS that verifies nothing.
       - name: Record asset digests
         shell: bash
         run: |
-          shopt -s nullglob
-          for f in Postmortem-*.zip Postmortem-Setup-*.exe; do
-            shasum -a 256 "$f" >> "SHA256SUMS-${{ runner.os }}.txt"
-          done
+          python - "SHA256SUMS-${{ runner.os }}.txt" <<'PY'
+          import glob, hashlib, sys
+          names = sorted(glob.glob("Postmortem-*.zip") + glob.glob("Postmortem-Setup-*.exe"))
+          if not names:
+              sys.exit("no release assets found to digest")
+          with open(sys.argv[1], "a", encoding="ascii", newline="\n") as out:
+              for name in names:
+                  digest = hashlib.sha256()
+                  with open(name, "rb") as fh:
+                      for chunk in iter(lambda: fh.read(1 << 20), b""):
+                          digest.update(chunk)
+                  out.write(f"{digest.hexdigest()}  {name}\n")
+          PY
           cat "SHA256SUMS-${{ runner.os }}.txt"
 
       # Provenance, not just a digest. SHA256SUMS says "these bytes are the
