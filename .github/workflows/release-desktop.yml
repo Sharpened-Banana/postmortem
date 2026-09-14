@@ -59,8 +59,17 @@ jobs:
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "release $GITHUB_REF_NAME already exists"
           else
+            # A FULL release, explicitly marked "Latest" -- not --prerelease.
+            # GitHub's /releases/latest (what every installed app before
+            # alpha-desktop-45 polls, and what the site's download link
+            # points at) is the newest non-draft, non-prerelease release.
+            # While desktop builds were pre-releases, the addon pipeline's
+            # first full release (addon-v0.3.1, 2026-09-13) became "latest"
+            # forever and no installed app was offered another update.
+            # release-addon.yml un-marks its own releases as latest so a
+            # later addon tag can't take it back.
             gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-              --title "$GITHUB_REF_NAME" --prerelease \
+              --title "$GITHUB_REF_NAME" --latest \
               --notes "Desktop app (macOS + Windows) and WoW addon build $GITHUB_REF_NAME."
           fi
 

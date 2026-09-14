@@ -66,3 +66,17 @@ jobs:
           WOWI_API_TOKEN: ${{ secrets.WOWI_API_TOKEN }}
           WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
           GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+      - name: Keep the desktop build as the repo's "Latest" release
+        # The packager just created a full GitHub release for this tag,
+        # and GitHub then makes it /releases/latest by date -- which is
+        # what installed desktop apps (before alpha-desktop-45) and the
+        # site's download link resolve. Both must keep pointing at the
+        # newest alpha-desktop-N (release-desktop.yml marks those
+        # --latest), so un-mark this one. Best-effort: a failure here
+        # must not fail a published addon release.
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --latest=false \
+            || echo "::warning::could not un-mark $GITHUB_REF_NAME as latest"

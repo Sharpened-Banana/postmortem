@@ -129,6 +129,38 @@ class TestCheckForUpdate:
         }
         assert updater.check_for_update(fetcher=fetcher) is None
 
+    def test_desktop_prereleases_are_found_behind_a_full_addon_release(self, monkeypatch):
+        """Regression (2026-09-13): the check used /releases/latest, which
+        GitHub defines as the newest NON-prerelease -- and desktop builds
+        are all pre-releases. Once the addon pipeline published a full
+        release, "latest" was addon-v0.3.1 and no app was ever offered
+        alpha-desktop-43/44. The listing is walked for the highest
+        published alpha-desktop-N instead; drafts don't count."""
+        monkeypatch.setattr(updater, "VERSION", "alpha-desktop-42")
+        monkeypatch.setattr(sys, "platform", "darwin")
+        seen = []
+        def fetcher(url):
+            seen.append(url)
+            asset = lambda tag: [{"name": "Postmortem-macos.zip",
+                                  "browser_download_url": f"https://github.com/Sharpened-Banana/postmortem/releases/download/{tag}/Postmortem-macos.zip"}]
+            return [
+                {"tag_name": "alpha-desktop-45", "draft": True, "prerelease": True, "assets": asset("alpha-desktop-45")},
+                {"tag_name": "addon-v0.3.1", "draft": False, "prerelease": False, "assets": []},
+                {"tag_name": "alpha-desktop-43", "draft": False, "prerelease": True, "assets": asset("alpha-desktop-43")},
+                {"tag_name": "alpha-desktop-44", "draft": False, "prerelease": True, "body": "n", "assets": asset("alpha-desktop-44")},
+                {"tag_name": "alpha-desktop-9", "draft": False, "prerelease": True, "assets": asset("alpha-desktop-9")},
+            ]
+        result = updater.check_for_update(fetcher=fetcher)
+        assert seen == [updater._RELEASES_URL]
+        assert "/releases/latest" not in updater._RELEASES_URL
+        assert result["tag"] == "alpha-desktop-44"
+        assert result["download_url"].endswith("/alpha-desktop-44/Postmortem-macos.zip")
+
+    def test_a_listing_with_no_desktop_build_reports_nothing(self, monkeypatch):
+        monkeypatch.setattr(updater, "VERSION", "alpha-desktop-5")
+        fetcher = lambda url: [{"tag_name": "addon-v0.3.1", "assets": []}]
+        assert updater.check_for_update(fetcher=fetcher) is None
+
     def test_malformed_tag_reports_nothing(self, monkeypatch):
         monkeypatch.setattr(updater, "VERSION", "alpha-desktop-5")
         fetcher = lambda url: {"tag_name": "v2.0.0", "assets": []}
