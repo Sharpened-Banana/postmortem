@@ -1,0 +1,624 @@
+{
+ "_comment": "Avoidable-damage spell ids, as classified by Blizzard's own damage meter and captured in-game by the Postmortem addon (PostmortemAvoidableDB). Built by `postmortem extract-avoidable`; safe to hand-edit -- re-runs merge, they don't overwrite.",
+ "spells": [
+  {
+   "id": 264206,
+   "name": "Burrow",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  },
+  {
+   "id": 265914,
+   "name": "Molten Gold",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  },
+  {
+   "id": 266191,
+   "name": "Whirling Axe",
+   "note": "captured from Blizzard's damage meter (seen in 4 keys)"
+  },
+  {
+   "id": 266206,
+   "name": "Whirling Axes",
+   "note": "captured from Blizzard's damage meter (seen in 4 keys)"
+  },
+  {
+   "id": 267105,
+   "name": "Torrent",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 269230,
+   "name": "Hunting Leap",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 270003,
+   "name": "Suppression Slam",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  },
+  {
+   "id": 270485,
+   "name": "Violent Lunge",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 270503,
+   "name": "Hunting Leap",
+   "note": "captured from Blizzard's damage meter (seen in 4 keys)"
+  },
+  {
+   "id": 270514,
+   "name": "Seismic Upheaval",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 270891,
+   "name": "Overload",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 270928,
+   "name": "Bladestorm",
+   "note": "captured from Blizzard's damage meter (seen in 4 keys)"
+  },
+  {
+   "id": 272021,
+   "name": "Erupting Darkness",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 372088,
+   "name": "Blazing Rush",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 372796,
+   "name": "Blazing Rush",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 372811,
+   "name": "Molten Boulder",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 372820,
+   "name": "Scorched Earth",
+   "note": "captured from Blizzard's damage meter (seen in 4 keys)"
+  },
+  {
+   "id": 373087,
+   "name": "Burnout",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 373614,
+   "name": "Burnout",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 373973,
+   "name": "Blaze of Glory",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 373977,
+   "name": "Blaze of Glory",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 381526,
+   "name": "Roaring Firebreath",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 384024,
+   "name": "Hailbombs",
+   "note": "captured from Blizzard's damage meter (seen in 4 keys)"
+  },
+  {
+   "id": 384773,
+   "name": "Flaming Embers",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  },
+  {
+   "id": 385292,
+   "name": "Molten Steel",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 391724,
+   "name": "Flame Breath",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  },
+  {
+   "id": 391727,
+   "name": "Storm Breath",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 474234,
+   "name": "Burning Steps",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  },
+  {
+   "id": 474740,
+   "name": "Murder in a Row",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  },
+  {
+   "id": 474768,
+   "name": "Delivery!",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1215985,
+   "name": "Fel Beam",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  },
+  {
+   "id": 1216538,
+   "name": "Fel Detonation",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  },
+  {
+   "id": 1216955,
+   "name": "Eye Beam",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1222724,
+   "name": "Noxious Breath",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 1222755,
+   "name": "Void Cascade",
+   "note": "captured from Blizzard's damage meter (seen in 5 keys)"
+  },
+  {
+   "id": 1223906,
+   "name": "Fel Nova",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 1226031,
+   "name": "Poison Splash",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  },
+  {
+   "id": 1228126,
+   "name": "Macestorm",
+   "note": "captured from Blizzard's damage meter (seen in 6 keys)"
+  },
+  {
+   "id": 1231353,
+   "name": "Felfire Core",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 1233264,
+   "name": "Blisterburst",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  },
+  {
+   "id": 1234802,
+   "name": "Fertile Loam",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1234833,
+   "name": "Ravenous Swarm",
+   "note": "captured from Blizzard's damage meter (seen in 5 keys)"
+  },
+  {
+   "id": 1234917,
+   "name": "Smashing Charge",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1235405,
+   "name": "Bonespiked",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1235546,
+   "name": "Lightsower Dash",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1235641,
+   "name": "Raging Squall",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 1235795,
+   "name": "Shattering Frostspike",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1236289,
+   "name": "Blizzard's Wrath",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 1237093,
+   "name": "Crushing Footfalls",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  },
+  {
+   "id": 1237267,
+   "name": "Incise",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1238638,
+   "name": "Bullet Seeds",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 1239919,
+   "name": "Lightfire Beams",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1240152,
+   "name": "Lightfall",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  },
+  {
+   "id": 1242138,
+   "name": "Solar Breath",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 1246753,
+   "name": "Lightsap",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1247030,
+   "name": "Poison Spear Volley",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 1247366,
+   "name": "Earthquake",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1249712,
+   "name": "Venomous Spit",
+   "note": "captured from Blizzard's damage meter (seen in 5 keys)"
+  },
+  {
+   "id": 1252825,
+   "name": "Harsh Winds",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1253813,
+   "name": "Fel Spray",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 1261013,
+   "name": "Fan Of Thorns",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  },
+  {
+   "id": 1262253,
+   "name": "Demoralizing Scream",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 1263597,
+   "name": "Rime Detonation",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 1263642,
+   "name": "Belch Spores",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  },
+  {
+   "id": 1264188,
+   "name": "Unstable Singularity",
+   "note": "captured from Blizzard's damage meter (seen in 6 keys)"
+  },
+  {
+   "id": 1266241,
+   "name": "Freight Explosion",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 1289589,
+   "name": "Lingering Storm",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  },
+  {
+   "id": 1291622,
+   "name": "Storm Catalyst",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 1291734,
+   "name": "Thunder Spit",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 1291815,
+   "name": "Induction Field",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  },
+  {
+   "id": 1293133,
+   "name": "Lingering Storm",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1294197,
+   "name": "Experimental Toxin",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 1294836,
+   "name": "Defiled Detonation",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  },
+  {
+   "id": 1296069,
+   "name": "Regurgitate",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1296963,
+   "name": "Umbral Rupture",
+   "note": "captured from Blizzard's damage meter (seen in 4 keys)"
+  },
+  {
+   "id": 1297691,
+   "name": "Whirlwind",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  },
+  {
+   "id": 1298104,
+   "name": "Putrid Seekers",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  },
+  {
+   "id": 1299080,
+   "name": "Death Rattle",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1299145,
+   "name": "Earthsplitter",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1300044,
+   "name": "Venom Jet",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 1300262,
+   "name": "Dark Bloom",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1300684,
+   "name": "Hex Muck",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  },
+  {
+   "id": 1301114,
+   "name": "Axegrinder",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1301230,
+   "name": "Bloodletting",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1301253,
+   "name": "Agony of Sethraliss",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  },
+  {
+   "id": 1302945,
+   "name": "Impaling Spear",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  },
+  {
+   "id": 1303452,
+   "name": "Venom Shrapnel",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1305637,
+   "name": "Septic Spatter",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1306235,
+   "name": "Septic Spatter",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 1306669,
+   "name": "Toxic Breath",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1306856,
+   "name": "Toxic Beam",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 1307372,
+   "name": "Fiery Demise",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  },
+  {
+   "id": 1307532,
+   "name": "Bloodletting",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1307915,
+   "name": "Ravenous Stomp",
+   "note": "captured from Blizzard's damage meter (seen in 1 key)"
+  },
+  {
+   "id": 1309382,
+   "name": "Infest",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1310489,
+   "name": "Blast Chunks",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1310758,
+   "name": "Necrotic Energy",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1312143,
+   "name": "Explosive Acids",
+   "note": "captured from Blizzard's damage meter (seen in 2 keys)"
+  },
+  {
+   "id": 1312669,
+   "name": "Flaming Embers",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  },
+  {
+   "id": 1312684,
+   "name": "Roaring Firebreath",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  },
+  {
+   "id": 1314885,
+   "name": "Hunting Leap",
+   "note": "captured from Blizzard's damage meter (seen in 3 keys)"
+  }
+ ],
+ "dungeons": {
+  "17": [
+   265914,
+   266191,
+   266206,
+   267105,
+   269230,
+   270003,
+   270485,
+   270503,
+   270514,
+   270891,
+   270928,
+   272021,
+   1298104,
+   1302945,
+   1310758,
+   1312143
+  ],
+  "20": [
+   264206,
+   1289589,
+   1291622,
+   1291734,
+   1291815,
+   1293133,
+   1300684,
+   1301253,
+   1303452
+  ],
+  "42": [
+   372088,
+   372796,
+   372811,
+   372820,
+   373087,
+   373614,
+   373973,
+   373977,
+   381526,
+   384024,
+   384773,
+   385292,
+   391724,
+   391727,
+   1307372,
+   1310489,
+   1312669,
+   1312684
+  ],
+  "160": [
+   474234,
+   474740,
+   474768,
+   1215985,
+   1216538,
+   1216955,
+   1223906,
+   1231353,
+   1253813,
+   1266241,
+   1294836,
+   1297691
+  ],
+  "161": [
+   1235405,
+   1235641,
+   1235795,
+   1236289,
+   1247030,
+   1247366,
+   1252825,
+   1262253,
+   1263597
+  ],
+  "162": [
+   1234802,
+   1235546,
+   1237093,
+   1237267,
+   1238638,
+   1239919,
+   1240152,
+   1242138,
+   1246753,
+   1261013,
+   1263642,
+   1314885
+  ],
+  "163": [
+   1222724,
+   1222755,
+   1226031,
+   1228126,
+   1233264,
+   1234833,
+   1234917,
+   1249712,
+   1264188,
+   1296963,
+   1299145,
+   1300262
+  ],
+  "164": [
+   1296069,
+   1299080,
+   1301114,
+   1301230,
+   1305637,
+   1306669,
+   1307532,
+   1309382
+  ]
+ }
+}

@@ -866,7 +866,7 @@ class TestRecorder:
         on_disk = json.loads(Path(f"{base}.json").read_text(encoding="utf-8"))
         assert report == on_disk
 
-    def test_write_recorded_reports_threads_avoidable_data(self, tmp_path):
+    def test_write_recorded_reports_threads_avoidable_data(self, tmp_path, monkeypatch):
         """Regression (2026-09-01 debug sweep): Watch Live loaded and
         validated the avoidable-damage data file but never passed it into
         analysis -- _write_recorded_reports had no `avoidable` param, so a
@@ -890,7 +890,11 @@ class TestRecorder:
         assert "avoidable_damage" in with_av
 
         # same run, no avoidable data -> no section (proves it's threaded,
-        # not incidentally always present)
+        # not incidentally always present). The packaged list would
+        # otherwise fill the gap (load_bundled fallback), so hide it.
+        from postmortem import bundled
+        monkeypatch.setattr(bundled, "bundled_avoidable_data_path",
+                            lambda: tmp_path / "no-bundled-list.json")
         without_av = _write_recorded_reports(run, route=None, store=None)
         assert "avoidable_damage" not in without_av
 
