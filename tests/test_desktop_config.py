@@ -179,8 +179,18 @@ class TestResolveAvoidableDataPath:
         default.write_text("{}", encoding="utf-8")
         assert config.resolve_avoidable_data_path({"avoidable_data_path": None}) == default
 
-    def test_none_when_nothing_configured_or_present(self, isolated_config_dir):
-        assert config.resolve_avoidable_data_path({"avoidable_data_path": None}) is None
+    def test_bundled_list_is_the_zero_config_fallback(self, isolated_config_dir):
+        """Nothing configured, nothing in the config dir -> the packaged
+        list (shipped since 2026-09-13, built by `extract-avoidable`)."""
+        got = config.resolve_avoidable_data_path({"avoidable_data_path": None})
+        assert got == config.bundled_avoidable_data_path()
+        assert got is not None and got.is_file()
+
+    def test_none_when_nothing_configured_or_present(self, isolated_config_dir, tmp_path):
+        # ...and only without a packaged copy does the resolver give up
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(config, "bundled_avoidable_data_path", lambda: tmp_path / "missing.json")
+            assert config.resolve_avoidable_data_path({"avoidable_data_path": None}) is None
 
 
 class TestResolveStealableDataPath:
