@@ -577,7 +577,11 @@ class DesktopAPI:
             return {"ok": False, "error": str(exc)}
         from .. import upload as _upload
         try:
-            return _upload.upload_report(report, target)
+            result = _upload.upload_report(report, target)
+            groupmate_url = _upload.duplicate_of(result, target)
+            if groupmate_url:
+                result["url"] = groupmate_url
+            return result
         except Exception as exc:  # noqa: BLE001
             # upload_report() is documented never to raise, and now does
             # not -- but this method is called across the JS bridge, where
@@ -624,6 +628,8 @@ class DesktopAPI:
     #        to see them in-game. Only emitted when the addon is installed
     #        (addon_dir derivable + exists); silently absent otherwise.
     #   {"type": "uploaded", "url": str}
+    #   {"type": "uploaded_by_groupmate", "url": str}  -- someone in the
+    #       group uploaded this key first; url is their copy
     #     -- the full URL (site_url + the site's own path) of the report.
     #   {"type": "scanning", "bytes_read": int, "bytes_total": int}
     #     -- the initial scan of a pre-existing log is in progress. Only
@@ -1155,18 +1161,26 @@ class DesktopAPI:
 
         from .. import upload as _upload
         result = _upload.upload_report(report, site_url)
-        if result.get("ok"):
+        groupmate_url = _upload.duplicate_of(result, site_url)
+        if result.get("ok") or groupmate_url:
             # ...and record that it got there, so catch-up knows this run
-            # needs no further work (see already_processed above).
+            # needs no further work (see already_processed above). A key
+            # a groupmate uploaded first IS there -- marking it too is
+            # what stops every restart from re-trying it (2026-09-14).
             try:
                 _mark_uploaded(history_db_path, report["run"].get("zone"),
                                report["run"].get("start_ts"))
             except Exception:
                 pass
-            self._emit_watch_event({
-                "type": "uploaded",
-                "url": f"{site_url.rstrip('/')}{result.get('url', '')}",
-            })
+            if groupmate_url:
+                self._emit_watch_event({
+                    "type": "uploaded_by_groupmate", "url": groupmate_url,
+                })
+            else:
+                self._emit_watch_event({
+                    "type": "uploaded",
+                    "url": f"{site_url.rstrip('/')}{result.get('url', '')}",
+                })
         else:
             # A response with no error key rendered as the word "null" in
             # the watch log.

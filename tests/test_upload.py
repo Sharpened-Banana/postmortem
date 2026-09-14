@@ -139,6 +139,19 @@ class TestUploadReport:
         result = upload.upload_report({}, "https://example.com", token="tok")
         assert result == error_body
 
+    def test_http_error_body_without_ok_gets_ok_false(self, monkeypatch):
+        # The site's error bodies are {"error": ...} with no "ok" key;
+        # every caller tests result.get("ok"), so it must be there.
+        def fake_urlopen(request, timeout=None, context=None):
+            raise urllib.error.HTTPError(
+                request.full_url, 409, "Conflict", hdrs=None,
+                fp=io.BytesIO(json.dumps({"error": "nope"}).encode("utf-8")),
+            )
+
+        monkeypatch.setattr(upload.urllib.request, "urlopen", fake_urlopen)
+        result = upload.upload_report({}, "https://example.com", token="tok")
+        assert result == {"ok": False, "error": "nope"}
+
     def test_http_error_with_non_json_body_falls_back(self, monkeypatch):
         def fake_urlopen(request, timeout=None, context=None):
             raise urllib.error.HTTPError(
@@ -224,6 +237,28 @@ class TestSiteBaseUrl:
         assert result["ok"] is True
 
 
+class TestDuplicateOf:
+    """A 409 that says a groupmate already uploaded this key is not a
+    failure: the run is on the site, at their url."""
+
+    def test_duplicate_conflict_yields_the_groupmates_url(self):
+        result = {"ok": False, "duplicate": True, "run_id": 7, "url": "/runs/7",
+                  "error": "already uploaded by a groupmate"}
+        assert upload.duplicate_of(result, "https://example.com/upload") == (
+            "https://example.com/runs/7"
+        )
+
+    def test_an_absolute_url_is_kept(self):
+        result = {"ok": False, "duplicate": True, "url": "https://x.test/runs/1"}
+        assert upload.duplicate_of(result, "https://example.com") == "https://x.test/runs/1"
+
+    def test_every_other_outcome_is_none(self):
+        assert upload.duplicate_of({"ok": True, "url": "/runs/1"}, "https://e.com") is None
+        assert upload.duplicate_of({"ok": False, "error": "offline"}, "https://e.com") is None
+        assert upload.duplicate_of({"ok": False, "duplicate": True}, "https://e.com") is None
+        assert upload.duplicate_of("garbage", "https://e.com") is None  # type: ignore[arg-type]
+
+
 class TestCLIUploadFlag:
     """cmd_analyze's --upload wiring: uploading is a best-effort bonus
     step that never changes the command's exit code or suppresses its
@@ -250,6 +285,20 @@ class TestCLIUploadFlag:
         assert exit_code == 0
         out = capsys.readouterr().out
         assert "uploaded: https://example.com/runs/7" in out
+
+    def test_groupmate_duplicate_is_reported_as_uploaded(self, log_file, monkeypatch, capsys):
+        monkeypatch.setattr(
+            "postmortem.upload.upload_report",
+            lambda report, url, **kwargs: {
+                "ok": False, "duplicate": True, "run_id": 7, "url": "/runs/7",
+                "error": "already uploaded by a groupmate",
+            },
+        )
+        exit_code = main(["analyze", str(log_file), "--upload", "https://example.com"])
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "already uploaded by a groupmate: https://example.com/runs/7" in captured.out
+        assert "upload failed" not in captured.err
 
     def test_upload_token_flag_is_passed_through(self, log_file, monkeypatch):
         seen = {}

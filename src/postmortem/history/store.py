@@ -31,6 +31,38 @@ from typing import Any, Optional
 # construction rather than by two hand-kept copies.
 from ..report.index import deaths_summary, party_summary
 
+
+def party_fingerprint(players: Any) -> Optional[str]:
+    """One string that identifies WHO was in a run, the same from every
+    groupmate's log.
+
+    A run's identity used to be ``(zone, start_ts)`` alone, and start_ts
+    is the CHALLENGE_MODE_START line's timestamp as *that* client wrote
+    it: five players' logs disagree by the milliseconds it takes the
+    event to reach each of them, so three people uploading one key made
+    three rows (2026-09-14). The party is what all their logs agree on.
+
+    Player GUIDs, sorted and joined with ``|``; a player with no guid
+    (older logs) contributes ``name:<name>`` instead. The shared pets
+    bucket (guid ``_pets``, analysis/stats.py) is skipped. ``None`` when
+    nothing identifies anyone -- a caller must then fall back to the
+    exact key rather than treat every party-less run as the same party.
+    """
+    ids: list[str] = []
+    for p in players or []:
+        if not isinstance(p, dict):
+            continue
+        guid = str(p.get("guid") or "")
+        if guid.startswith("_"):
+            continue
+        if guid:
+            ids.append(guid)
+        elif p.get("name"):
+            ids.append(f"name:{p['name']}")
+    if not ids:
+        return None
+    return "|".join(sorted(set(ids)))
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -299,9 +331,19 @@ class Store:
         *,
         source_path: Optional[str | Path] = None,
         html_path: Optional[str | Path] = None,
+        replace_run_id: Optional[int] = None,
     ) -> int:
         """Insert (or, if a run with the same zone+start_ts already exists,
         update) one run, replacing its players and deaths rows.
+
+        ``replace_run_id`` names an existing row to update *instead of*
+        the zone+start_ts lookup: the caller has already decided this
+        report is a re-upload of that run under a slightly different
+        start_ts (a groupmate's log, see ``party_fingerprint``), and the
+        row keeps its id -- and therefore its share link -- while its
+        start_ts moves to the new report's. A row that does not exist is
+        an error, not a silent insert, so the caller cannot end up with
+        the very duplicate it was avoiding.
 
         ``source_path`` is the path to the report's own JSON (if any --
         used the same way ``collect_reports`` derives ``file``/``html``:
@@ -314,11 +356,18 @@ class Store:
         Returns the run's row id either way.
         """
         row = _row_values(report, source_path, html_path)
-        cur = self._conn.execute(
-            "SELECT id FROM runs WHERE zone IS ? AND start_ts IS ?",
-            (row["zone"], row["start_ts"]),
-        )
+        if replace_run_id is not None:
+            cur = self._conn.execute(
+                "SELECT id FROM runs WHERE id = ?", (int(replace_run_id),)
+            )
+        else:
+            cur = self._conn.execute(
+                "SELECT id FROM runs WHERE zone IS ? AND start_ts IS ?",
+                (row["zone"], row["start_ts"]),
+            )
         existing = cur.fetchone()
+        if replace_run_id is not None and existing is None:
+            raise LookupError(f"no run with id {replace_run_id} to replace")
 
         columns = list(row)
         if existing is None:

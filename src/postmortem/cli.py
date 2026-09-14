@@ -1185,11 +1185,14 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         # Local import: keeps upload.py's urllib/secrets usage (and its
         # first-use token-file write) off the hot path for every other
         # `analyze` invocation that doesn't pass --upload.
-        from .upload import upload_report
+        from .upload import duplicate_of, upload_report
 
         result = upload_report(report, args.upload, token=args.upload_token)
+        groupmate_url = duplicate_of(result, args.upload)
         if result.get("ok"):
             print(f"uploaded: {args.upload.rstrip('/')}{result['url']}")
+        elif groupmate_url:
+            print(f"already uploaded by a groupmate: {groupmate_url}")
         else:
             # Uploading is a best-effort bonus step, same philosophy as
             # --raiderio enrichment above: a failure here (offline, the
@@ -1386,11 +1389,14 @@ def cmd_record(args: argparse.Namespace) -> int:
             # Same best-effort philosophy as cmd_analyze's own --upload
             # handling: a failed upload is printed as a warning and never
             # interrupts the recording session.
-            from .upload import upload_report
+            from .upload import duplicate_of, upload_report
 
             result = upload_report(report, args.upload, token=args.upload_token)
+            groupmate_url = duplicate_of(result, args.upload)
             if result.get("ok"):
                 print(f"uploaded: {args.upload.rstrip('/')}{result['url']}")
+            elif groupmate_url:
+                print(f"already uploaded by a groupmate: {groupmate_url}")
             else:
                 print(f"upload failed: {result.get('error')}", file=sys.stderr)
 

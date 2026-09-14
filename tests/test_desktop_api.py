@@ -1376,6 +1376,43 @@ class TestWatchMode:
         assert failed_event["error"] == "offline"
         api.stop_watch()
 
+    def test_groupmate_duplicate_counts_as_uploaded(
+        self, api, events, tmp_path, monkeypatch, isolated_config_dir,
+    ):
+        """Three people in one group each run the app; the site keeps the
+        first upload and answers the other two with a 409 + the url. That
+        is "uploaded", not "failed" -- and it is marked in history so the
+        catch-up never re-tries it on the next watch (2026-09-14)."""
+        import time as _time
+        from conftest import build_run_log
+
+        uploads = []
+        monkeypatch.setattr(
+            "postmortem.upload.upload_report",
+            lambda report, url, **kw: uploads.append(report["run"]["zone"]) or {
+                "ok": False, "duplicate": True, "run_id": 42, "url": "/runs/42",
+                "error": "already uploaded by a groupmate",
+            },
+        )
+        log = tmp_path / "WoWCombatLog.txt"
+        log.write_text(build_run_log().text(), encoding="utf-8")   # already complete
+
+        api.start_watch({"log_path": str(log), "site_url": "https://example.test",
+                         "out_dir": str(tmp_path / "watch-runs")})
+        event = self._wait_for(events, "uploaded_by_groupmate")
+        assert event["url"] == "https://example.test/runs/42"
+        api.stop_watch()
+        assert uploads == ["Murder Row"]
+        assert not any(e["type"] == "upload_failed" for e in events)
+
+        events.clear()
+        api.start_watch({"log_path": str(log), "site_url": "https://example.test",
+                         "out_dir": str(tmp_path / "watch-runs")})
+        _time.sleep(0.6)
+        api.stop_watch()
+        assert uploads == ["Murder Row"]             # not re-tried
+        assert not any(e["type"] in ("uploaded", "uploaded_by_groupmate") for e in events)
+
     def test_bad_route_string_is_reported_not_raised(self, api, events, tmp_path):
         log = tmp_path / "WoWCombatLog.txt"
         log.write_text("", encoding="utf-8")
