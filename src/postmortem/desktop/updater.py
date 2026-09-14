@@ -67,7 +67,15 @@ from ..net import https_context
 _SSL_CONTEXT = https_context()
 
 REPO = "Sharpened-Banana/postmortem"
-_RELEASES_LATEST_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
+# The release LIST, not ``/releases/latest``. GitHub's "latest" is the
+# newest release that is neither a draft nor a pre-release -- and every
+# desktop build is published ``--prerelease`` (release-desktop.yml). The
+# moment the addon pipeline published its first full release
+# (addon-v0.3.1, 2026-09-13) "latest" became that tag forever, the
+# alpha-desktop regex below never matched again, and no installed app
+# was offered another update. Listing lets us pick the newest desktop
+# build ourselves; 30 is far more than one release cadence's worth.
+_RELEASES_URL = f"https://api.github.com/repos/{REPO}/releases?per_page=30"
 _TAG_RE = re.compile(r"^alpha-desktop-(\d+)$")
 _DOWNLOAD_CHUNK_BYTES = 262_144
 # A sums file holds a handful of lines; anything larger is not one.
@@ -128,8 +136,11 @@ def check_for_update(fetcher: Fetcher = _default_fetcher) -> Optional[dict]:
     asset_name = _asset_name_for_platform()
     if asset_name is None:
         return None
-    payload = fetcher(_RELEASES_LATEST_URL)
+    payload = fetcher(_RELEASES_URL)
     if not payload:
+        return None
+    payload = _newest_desktop_release(payload)
+    if payload is None:
         return None
     tag = payload.get("tag_name", "")
     m = _TAG_RE.match(tag)
@@ -151,6 +162,23 @@ def check_for_update(fetcher: Fetcher = _default_fetcher) -> Optional[dict]:
         # verify_digest().
         "sha256": _expected_digest(payload, asset_name),
     }
+
+
+def _newest_desktop_release(payload) -> Optional[dict]:
+    """The published (non-draft) ``alpha-desktop-N`` release with the
+    highest N out of a GitHub release listing. A single release dict is
+    accepted too, so a caller holding one ``/releases/<x>`` payload gets
+    the same treatment. None when nothing in it is a desktop build."""
+    releases = payload if isinstance(payload, list) else [payload]
+    best: Optional[dict] = None
+    best_n = -1
+    for release in releases:
+        if not isinstance(release, dict) or release.get("draft"):
+            continue
+        m = _TAG_RE.match(str(release.get("tag_name", "")))
+        if m and int(m.group(1)) > best_n:
+            best, best_n = release, int(m.group(1))
+    return best
 
 
 def _expected_digest(payload: dict, asset_name: str) -> Optional[str]:
