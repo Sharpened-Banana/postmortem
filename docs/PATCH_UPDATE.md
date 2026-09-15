@@ -26,6 +26,7 @@ is still stale.
 | **Dispellable-debuff list** | Every season, from the same Method-derived file as the interrupt database (its dispel rows). Drives the dispel-efficiency section. | `build-dispel-data` — run automatically alongside `build-interrupt-data` |
 | **Avoidable-damage list** | Every season (new dungeons = new avoidable spells). Grows with every key you play; a refresh just merges what the addon captured. | `extract-avoidable` — reads the addon's SavedVariables (auto-found under `WTF/`) |
 | **Spell damage** | Occasionally. Only the kick-value *fallback* when a spell never landed in your own run. | `build-spell-damage` — samples Warcraft Logs |
+| **Stealable buffs, kick proof, dispel evidence** | Every season. Which enemy buffs get spellstolen/purged/soothed (the only source of a stealable list), which casts have provably been kicked, which debuffs get dispelled and by what. Merges into the interrupt and dispel databases. | `build-event-data` — samples Warcraft Logs events |
 | **Addon `## Interface:`** | Every patch, or WoW marks the addon out of date. | `--toc-interface` |
 
 Not on this list, deliberately:

@@ -29,7 +29,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 
 @dataclass
@@ -59,6 +59,23 @@ class StealableData:
             }
 
         return cls(spells=spells)
+
+    @classmethod
+    def load_bundled(cls) -> Optional["StealableData"]:
+        """The packaged list built from public Warcraft Logs (see
+        wcl_events.py), or None when it was never built / is empty -- a
+        zero-config default, never a requirement. Until 2026-09-15 there
+        was no such list at all (see the module docstring); now every
+        buff anyone has spellstolen or purged in a public key is in it."""
+        from ..bundled import bundled_stealable_data_path
+        path = bundled_stealable_data_path()
+        if not path.is_file():
+            return None
+        try:
+            data = cls.load(path)
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+            return None
+        return data if data.spells else None
 
     def is_stealable(self, spell_id: int) -> bool:
         return spell_id in self.spells
