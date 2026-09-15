@@ -92,6 +92,25 @@ What each platform does:
 - Both: the signed bytes are what `SHA256SUMS-*.txt` and the build
   attestation cover, since those are computed last.
 
+## The entitlements file
+
+`build/entitlements.plist` is deliberately comment-free: Apple's
+entitlement parser (AMFI) rejects XML it does not like, and a `--` inside
+an XML comment broke signing on the first local test. What it grants,
+and why, lives here instead. Notarization requires the hardened runtime,
+and a PyInstaller-frozen Python needs three exceptions under it:
+
+- `allow-unsigned-executable-memory` -- the interpreter maps executable
+  memory (ctypes, JIT-like paths in some extensions).
+- `disable-library-validation` -- the app loads its own `.so`/`.dylib`
+  extension modules and pywebview's bridge, none of which Apple signed.
+- `allow-dyld-environment-variables` -- PyInstaller's bootloader sets
+  dyld variables to find the bundled libraries.
+
+None of these grant access to anything (the app is not sandboxed); they
+only relax code-loading checks for our own bundle. Keep the list to this
+minimum; every addition is a question a notarization reviewer may ask.
+
 ## Things to know
 
 - The in-app updater is unaffected by signing: it verifies the SHA-256
