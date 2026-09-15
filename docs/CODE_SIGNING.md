@@ -69,8 +69,18 @@ What each platform does:
    once). Overview shows the Application (client) ID and the Directory
    (tenant) ID.
 6. **Give it signing rights.** Back on the Trusted Signing account ->
-   Access control (IAM) -> Add role assignment -> role *Trusted Signing
-   Certificate Profile Signer* -> assign to the `postmortem-ci` app.
+   Access control (IAM) -> Add role assignment -> role *Artifact Signing
+   Certificate Profile Signer* (Microsoft is renaming the service to
+   "Artifact Signing"; the old "Trusted Signing ..." role name no longer
+   resolves, 2026-09-15) -> assign to the `postmortem-ci` app.
+
+Steps 2, 4, 5 and 6 can be scripted with the Azure CLI (`az extension add
+--name trustedsigning`, `az trustedsigning create`, `az ad sp
+create-for-rbac --role "Artifact Signing Certificate Profile Signer"
+--scopes <account id>`); that is how the live setup was done. Two things
+cannot: the subscription must be pay-as-you-go (the free trial refuses
+with "Artifact Signing is not available for free, trial or sponsored
+subscriptions"), and identity validation is portal-only.
 7. **Secrets:**
 
    | secret | value |
