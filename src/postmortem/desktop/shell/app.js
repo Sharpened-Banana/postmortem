@@ -417,6 +417,11 @@ async function onUploadToSite() {
     if (result && result.ok) {
       status.classList.add("ok");
       status.textContent = `Uploaded — ${result.url || "see the site"}`;
+    } else if (result && result.duplicate && result.url) {
+      // A groupmate's upload of this same key is already on the site;
+      // theirs is the copy everyone shares.
+      status.classList.add("ok");
+      status.textContent = `Already uploaded by a groupmate — ${result.url}`;
     } else {
       status.classList.add("err");
       status.textContent = (result && result.error) || "Upload failed for an unknown reason.";
@@ -695,6 +700,9 @@ window.onWatchEvent = function (event) {
       break;
     case "uploaded":
       addWatchLogEntry("ok", `Uploaded — ${esc(event.url)}`);
+      break;
+    case "uploaded_by_groupmate":
+      addWatchLogEntry("ok", `Already uploaded by a groupmate — ${esc(event.url)}`);
       break;
     case "run_failed":
       addWatchLogEntry("err", `Run failed: ${esc(event.error)}`);

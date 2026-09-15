@@ -155,9 +155,13 @@ def upload_report(
     is parsed and returned directly when possible (e.g. a 409 conflict
     or 429 rate-limit's own ``{"error": "..."}"``), falling back to a
     synthesized ``{"ok": False, "error": "HTTP <code>: <reason>"}`` when
-    it doesn't parse as JSON. On a network-level failure (no
-    connection, DNS failure, timeout, etc.) or an unparseable *success*
-    response, returns ``{"ok": False, "error": "..."}`` as well -- every
+    it doesn't parse as JSON. One such body is worth knowing about: a
+    409 with ``"duplicate": true`` and a ``"url"`` means a groupmate's
+    upload of this same key already exists at that url -- the run IS on
+    the site, just not from this install (see ``duplicate_of``). On a
+    network-level failure (no connection, DNS failure, timeout, etc.) or
+    an unparseable *success* response, returns ``{"ok": False, "error":
+    "..."}`` as well -- every
     failure path is a plain dict, never an exception, so callers (e.g.
     ``cli.py``'s ``cmd_analyze``) can treat uploading as a best-effort
     step that never disrupts the rest of their work.
@@ -194,15 +198,44 @@ def upload_report(
         return json.loads(body.decode("utf-8"))
     except urllib.error.HTTPError as exc:
         try:
-            return json.loads(exc.read().decode("utf-8"))
+            body = json.loads(exc.read().decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
             return {"ok": False, "error": f"HTTP {exc.code}: {exc.reason}"}
+        if not isinstance(body, dict):
+            return {"ok": False, "error": f"HTTP {exc.code}: {exc.reason}"}
+        # The site's error bodies carry no "ok" key; callers test for it.
+        body.setdefault("ok", False)
+        return body
     except urllib.error.URLError as exc:
         return {"ok": False, "error": str(exc.reason)}
     except (ValueError, OSError) as exc:
         # A 2xx response whose body wasn't valid JSON/UTF-8, or some
         # other low-level I/O hiccup not already covered above.
         return {"ok": False, "error": str(exc)}
+
+
+def duplicate_of(result: dict[str, Any], site_url: str) -> Optional[str]:
+    """The full URL of the run a groupmate already uploaded, when
+    ``result`` (from ``upload_report``) says this key is already on the
+    site under someone else's upload; ``None`` for every other outcome.
+
+    Three people running the app in one group used to see two "Upload
+    failed: already submitted by another uploader" lines per key -- and
+    the desktop's catch-up re-tried them on every restart, since only a
+    successful upload was ever marked as done (2026-09-14). This is not a
+    failure: the key is there, so callers treat it as uploaded and link
+    to it.
+    """
+    if not isinstance(result, dict) or result.get("ok"):
+        return None
+    if not result.get("duplicate"):
+        return None
+    path = result.get("url")
+    if not isinstance(path, str) or not path:
+        return None
+    if "://" in path:
+        return path
+    return f"{site_base_url(site_url)}{path}"
 
 
 # -- device-code sign-in (phase 3 of ACCOUNTS_AND_PROGRESSION_PLAN.md) ------

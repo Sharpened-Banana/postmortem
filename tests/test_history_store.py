@@ -16,7 +16,7 @@ from postmortem.analysis.run_analyzer import analyze_run
 from postmortem.cli import main
 from postmortem.combatlog.parser import iter_events
 from postmortem.combatlog.segmenter import segment_runs
-from postmortem.history.store import Store, ingest, query_runs
+from postmortem.history.store import Store, ingest, party_fingerprint, query_runs
 from postmortem.mdt.dungeon_data import DungeonDataStore
 from postmortem.mdt.route import Route
 from postmortem.report.index import collect_reports, render_index
@@ -68,6 +68,58 @@ class TestIngestIdempotent:
         ingest(report, db_path)
         ingest(report, db_path)
         assert _table_counts(db_path)["runs"] == 1
+
+
+class TestReplaceRunId:
+    """A groupmate's log stamps the same key with a start_ts a few
+    milliseconds off. The site decides those are one run; the store must
+    then update THAT row (keeping its id and share link) rather than
+    insert a second one keyed on the new timestamp."""
+
+    def test_replaces_the_named_row_and_moves_its_start_ts(self, tmp_path, report):
+        db_path = tmp_path / "runs.db"
+        groupmate = copy.deepcopy(report)
+        groupmate["run"]["start_ts"] = report["run"]["start_ts"] + 0.317
+        with Store(db_path) as store:
+            first = store.ingest(report)
+            second = store.ingest(groupmate, replace_run_id=first)
+        assert second == first
+        counts = _table_counts(db_path)
+        assert counts["runs"] == 1
+        assert counts["players"] == len(report["players"])
+        conn = sqlite3.connect(str(db_path))
+        try:
+            (start_ts,) = conn.execute("SELECT start_ts FROM runs").fetchone()
+        finally:
+            conn.close()
+        assert start_ts == pytest.approx(groupmate["run"]["start_ts"])
+
+    def test_a_missing_row_is_an_error_not_a_silent_insert(self, tmp_path, report):
+        with Store(tmp_path / "runs.db") as store:
+            with pytest.raises(LookupError):
+                store.ingest(report, replace_run_id=999)
+        assert _table_counts(tmp_path / "runs.db")["runs"] == 0
+
+
+class TestPartyFingerprint:
+    def test_same_players_in_any_order_give_one_key(self):
+        a = [{"guid": "Player-1-B", "name": "Bee"}, {"guid": "Player-1-A", "name": "Ay"}]
+        b = [{"guid": "Player-1-A", "name": "Ay"}, {"guid": "Player-1-B", "name": "Bee"}]
+        assert party_fingerprint(a) == party_fingerprint(b) == "Player-1-A|Player-1-B"
+
+    def test_pets_bucket_is_ignored_and_names_stand_in_for_missing_guids(self):
+        players = [{"guid": "_pets", "name": "Pets"}, {"guid": "", "name": "Solo"}]
+        assert party_fingerprint(players) == "name:Solo"
+
+    def test_nothing_identifiable_is_none(self):
+        assert party_fingerprint([]) is None
+        assert party_fingerprint(None) is None
+        assert party_fingerprint([{"guid": "_pets"}]) is None
+
+    def test_a_different_party_is_a_different_key(self, report):
+        other = copy.deepcopy(report["players"])
+        other[0]["guid"] = "Player-9999-DEADBEEF"
+        assert party_fingerprint(report["players"]) != party_fingerprint(other)
 
 
 class TestQueryRunsShape:
