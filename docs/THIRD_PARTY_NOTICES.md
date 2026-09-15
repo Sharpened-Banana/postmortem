@@ -34,6 +34,31 @@ whole keystone runs only (boss pulls inside a key are skipped). First
 built 2026-09-06: 1,124 fights, all eight Season 2 dungeons, 8 per
 (dungeon, level) through key 19; keys 20+ are sparse in public logs.
 
+## `src/postmortem/data/stealable_spells.json` (and the Warcraft Logs rows in `interrupt_data.json` / `dispel_data.json`)
+
+Built by `postmortem build-event-data` (see `cli.py`, `wcl.py` and
+`wcl_events.py`) from the same public Warcraft Logs reports, this time
+from their events rather than their tables: dispel events (which enemy
+buff a Spellsteal, purge or soothe removed; which debuff a friendly
+dispel removed, and with what), interrupt events (which enemy cast was
+stopped), enemy begin-casts (the denominator for "never interrupted"),
+and deaths (the killing ability). The bundled files hold only per-spell
+counts and names; the build's `--samples` file, not bundled, keeps one
+compact per-fight summary and the report codes for resumption. No
+player names or per-event data are bundled.
+
+What each contributes: `stealable_spells.json` is the whole stealable/
+purgeable list (nothing else publishes one), plus an `enrages` list from
+soothes; `interrupt_data.json` gains `wcl_interrupts` (proof a cast is
+kickable, and new kickable spells the Method source lacked) and, only
+with `--mark-uninterruptible`, `interruptible: false` rows for spells
+that began hundreds of casts across many keys without ever being
+interrupted; `dispel_data.json` gains `seen_dispelled` on curated rows
+and new rows whose school is unambiguous from which dispels removed them
+(a debuff only ever removed by multi-school dispels is reported, not
+guessed). Same API client, points budget and resumption as
+`build-spell-damage`.
+
 ## `src/postmortem/data/interrupt_data.json`
 
 Built by `postmortem build-interrupt-data` (see `cli.py`) from

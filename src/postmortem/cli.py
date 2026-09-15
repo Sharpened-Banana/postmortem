@@ -143,12 +143,11 @@ def _load_community_spell_damage() -> Optional["SpellDamageData"]:
 def _load_stealable(path: Optional[str]) -> Optional[StealableData]:
     """Load --stealable-data. Like --avoidable-data, an explicitly-passed
     path that fails to load is a clear CLI error (SystemExit). Omitting
-    the flag entirely just skips stealable-buff tagging (see
-    analyze_run) -- there's no bundled/extracted fallback for this one,
-    same posture as avoidable-damage tagging (see stealable.py's module
-    docstring for why)."""
+    the flag falls back to the bundled list built from public Warcraft
+    Logs by ``build-event-data`` (None when that was never built, which
+    skips stealable-buff tagging as before)."""
     if not path:
-        return None
+        return StealableData.load_bundled()
     try:
         return StealableData.load(path)
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
@@ -973,6 +972,243 @@ def cmd_build_spell_damage(args: argparse.Namespace) -> int:
     return 0
 
 
+def _with_wcl_source(source: Any) -> str:
+    """'method.gg' -> 'method.gg + warcraftlogs.com'; idempotent."""
+    source = str(source or "")
+    if "warcraftlogs.com" in source:
+        return source
+    return f"{source} + warcraftlogs.com" if source else "warcraftlogs.com"
+
+
+def cmd_build_event_data(args: argparse.Namespace) -> int:
+    """Sample public Warcraft Logs keystone runs for what their EVENTS
+    say about enemy spells -- see wcl_events.py for the three questions
+    this answers (stealable buffs, interruptibility evidence, dispellable
+    debuffs) and why nothing else could. Same shape as
+    build-spell-damage: ``--samples`` is the resumable unit (one compact
+    summary per fight, never raw events), the outputs are rebuilt from
+    it every time, and ``--offline`` skips the network.
+    """
+    import os
+    from .wcl import (WCLClient, WCLError, fetch_fight_events, fetch_report_names,
+                      find_mplus_zone, iter_keystone_fights)
+    from .wcl_events import (aggregate_dispels, aggregate_interrupt_evidence,
+                             aggregate_killing_blows, aggregate_stealable,
+                             summarize_fight)
+
+    samples_path = Path(args.samples)
+    try:
+        samples = json.loads(samples_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        samples = {"fights": {}}
+    fights: dict[str, Any] = samples.setdefault("fights", {})
+    zone_id, zone_name = samples.get("zone_id"), str(samples.get("zone_name") or "")
+    fetched = skipped = 0
+    stopped_for_budget = False
+    client = None
+
+    if args.offline:
+        if not fights:
+            raise SystemExit(f"error: --offline needs an existing samples file; "
+                             f"{samples_path} has no fights")
+        print(f"offline: re-aggregating {len(fights)} sampled fight(s) from {samples_path}")
+    else:
+        try:
+            client = WCLClient(os.environ.get("WCL_CLIENT_ID", ""),
+                               os.environ.get("WCL_CLIENT_SECRET", ""))
+        except WCLError as exc:
+            raise SystemExit(f"error: {exc} -- register an API client at "
+                             "https://www.warcraftlogs.com/api/clients/ and export both")
+
+    def save() -> None:
+        samples_path.write_text(json.dumps(samples, indent=0), encoding="utf-8")
+
+    try:
+      if client is not None:
+        if args.zone_id:
+            zone_id, zone_name = int(args.zone_id), ""
+        else:
+            zone_id, zone_name = find_mplus_zone(client)
+        samples["zone_id"] = zone_id
+        if zone_name:
+            samples["zone_name"] = zone_name
+        print(f"zone {zone_id} {zone_name}".rstrip())
+
+        have: dict[tuple[int, int], int] = {}
+        for f in fights.values():
+            key = (int(f.get("encounter_id") or 0), int(f.get("level") or 0))
+            have[key] = have.get(key, 0) + 1
+        # master data is per REPORT; a report holds several keys
+        names_cache: dict[str, dict[str, Any]] = {}
+
+        for fight in iter_keystone_fights(client, zone_id, max_pages=args.max_pages):
+            if not (args.min_level <= fight["level"] <= args.max_level):
+                continue
+            key = (fight["encounter_id"], fight["level"])
+            fkey = f"{fight['code']}:{fight['fight_id']}"
+            if fkey in fights:
+                skipped += 1
+                continue
+            if have.get(key, 0) >= args.per_level:
+                continue
+            left = client.points_left()
+            if left is not None and left < args.reserve_points:
+                stopped_for_budget = True
+                break
+            master = names_cache.get(fight["code"])
+            if master is None:
+                master = fetch_report_names(client, fight["code"])
+                names_cache[fight["code"]] = master
+            code, fid = fight["code"], fight["fight_id"]
+            summary = summarize_fight(
+                dispels=fetch_fight_events(client, code, fid, "Dispels", "Friendlies"),
+                interrupts=fetch_fight_events(client, code, fid, "Interrupts", "Friendlies"),
+                begincasts=fetch_fight_events(client, code, fid, "Casts", "Enemies",
+                                              filter_expression="type = 'begincast'"),
+                deaths=fetch_fight_events(client, code, fid, "Deaths", "Friendlies"),
+                names=master["abilities"], actors=master["actors"],
+            )
+            if args.dump_raw and fetched == 0:
+                # first fetched fight only: a look at the real field names
+                print(json.dumps(summary, indent=1)[:4000])
+            summary.update({
+                "level": fight["level"], "encounter_id": fight["encounter_id"],
+                "encounter": fight["encounter"], "kill": fight["kill"],
+            })
+            fights[fkey] = summary
+            have[key] = have.get(key, 0) + 1
+            fetched += 1
+            save()
+    except WCLError as exc:
+        save()
+        raise SystemExit(f"error: {exc} (samples so far kept in {samples_path})")
+    save()
+
+    today = __import__("datetime").date.today().isoformat()
+    season = zone_name or f"zone {zone_id}"
+    out_dir = Path(args.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. stealable / purgeable buffs (+ enrages for soothes)
+    stealable = aggregate_stealable(samples, min_removals=args.min_removals)
+    stealable_payload = {
+        "_comment": "Built by `postmortem build-event-data` from public Warcraft Logs "
+                    "dispel events: every enemy buff removed by Spellsteal or a purge "
+                    "(see wcl_events.py). 'enrages' are buffs removed by a soothe.",
+        "source": "warcraftlogs.com", "season": season, "source_version": today,
+        "spells": stealable["spells"], "enrages": stealable["enrages"],
+    }
+    stealable_path = out_dir / "stealable_spells.json"
+    stealable_path.write_text(json.dumps(stealable_payload, indent=1), encoding="utf-8")
+    print(f"stealable: {sum(1 for s in stealable['spells'] if s['stealable'])} spellstolen + "
+          f"{sum(1 for s in stealable['spells'] if not s['stealable'])} purge-only buff(s), "
+          f"{len(stealable['enrages'])} enrage(s) -> {stealable_path}")
+
+    # 2. interruptibility evidence, merged INTO the bundled database
+    evidence = aggregate_interrupt_evidence(samples, min_casts=args.min_casts,
+                                            min_fights=args.min_fights)
+    from .bundled import bundled_interrupt_data_path
+    interrupt_path = out_dir / "interrupt_data.json"
+    base_path = Path(args.interrupt_data) if args.interrupt_data else bundled_interrupt_data_path()
+    try:
+        interrupt_payload = json.loads(base_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        interrupt_payload = {"spells": {}, "source": None, "season": season}
+    ispells = interrupt_payload.setdefault("spells", {})
+    added = confirmed = 0
+    for sid, entry in evidence["proven"].items():
+        row = ispells.get(sid)
+        if row is None:
+            ispells[sid] = {"name": entry["name"], "interruptible": True,
+                            "wcl_interrupts": entry["interrupts"]}
+            added += 1
+        else:
+            row["interruptible"] = True
+            row["wcl_interrupts"] = entry["interrupts"]
+            confirmed += 1
+    marked = 0
+    for sid, entry in evidence["never"].items():
+        row = ispells.get(sid)
+        if row is not None and row.get("interruptible"):
+            continue  # the curated source says kickable; evidence is only absence
+        if args.mark_uninterruptible:
+            ispells[sid] = {"name": entry["name"], "interruptible": False,
+                            "note": f"never interrupted in {entry['casts']} begin-casts "
+                                    f"across {entry['fights']} public keys (Warcraft Logs)"}
+            marked += 1
+    interrupt_payload["source"] = _with_wcl_source(interrupt_payload.get("source"))
+    interrupt_payload["wcl_version"] = today
+    interrupt_path.write_text(json.dumps(interrupt_payload, indent=1), encoding="utf-8")
+    print(f"interrupts: {confirmed} curated spell(s) confirmed kicked, {added} kickable "
+          f"spell(s) added, {len(evidence['never'])} never-interrupted candidate(s)"
+          + (f", {marked} marked uninterruptible" if args.mark_uninterruptible else
+             " (listed below; pass --mark-uninterruptible to record them)")
+          + f" -> {interrupt_path}")
+    for sid, entry in list(evidence["never"].items())[:25]:
+        print(f"  never interrupted: {entry['name']} ({sid}) -- "
+              f"{entry['casts']} begin-casts in {entry['fights']} keys")
+
+    # 3. dispellable debuffs, merged INTO the bundled list
+    dispels = aggregate_dispels(samples, min_removals=args.min_removals)
+    from .bundled import bundled_dispel_data_path
+    dispel_path = out_dir / "dispel_data.json"
+    base_path = Path(args.dispel_data) if args.dispel_data else bundled_dispel_data_path()
+    try:
+        dispel_payload = json.loads(base_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        dispel_payload = {"spells": {}, "source": None, "season": season}
+    dspells = dispel_payload.setdefault("spells", {})
+    d_added = d_confirmed = 0
+    for sid, entry in dispels["spells"].items():
+        row = dspells.get(sid)
+        if row is None:
+            dspells[sid] = entry
+            d_added += 1
+        else:
+            row["seen_dispelled"] = True
+            if row.get("school") != entry["school"]:
+                print(f"warning: {entry['name']} ({sid}) is {row.get('school')} in the curated "
+                      f"list but only {entry['school']} dispels removed it in public logs -- "
+                      "keeping the curated school", file=sys.stderr)
+            d_confirmed += 1
+    dispel_payload["source"] = _with_wcl_source(dispel_payload.get("source"))
+    dispel_payload["wcl_version"] = today
+    dispel_path.write_text(json.dumps(dispel_payload, indent=1), encoding="utf-8")
+    print(f"dispels: {d_confirmed} curated debuff(s) seen dispelled, {d_added} added, "
+          f"{len(dispels['ambiguous'])} with an ambiguous school (not guessed) -> {dispel_path}")
+    for sid, entry in list(dispels["ambiguous"].items())[:15]:
+        print(f"  ambiguous school: {entry['name']} ({sid}) -- one of "
+              f"{'/'.join(entry['candidates'])}, {entry['removals']} removals")
+
+    # 4. killing blows: reported, not bundled (no consumer yet)
+    blows = aggregate_killing_blows(samples)
+    if blows:
+        print("deadliest enemy spells in the sample:")
+        for sid, entry in list(blows.items())[:10]:
+            print(f"  {entry['name']} ({sid}): {entry['deaths']} deaths")
+
+    if client is not None:
+        print(f"fetched {fetched} new fight(s), {skipped} already sampled; "
+              f"{len(fights)} sampled fights total")
+        if client.rate_limit:
+            rl = client.rate_limit
+            print(f"API points: {rl.get('pointsSpentThisHour')}/{rl.get('limitPerHour')} "
+                  f"used this hour, reset in {rl.get('pointsResetIn')}s")
+    if stopped_for_budget:
+        print("stopped early to stay inside the hourly points budget -- rerun "
+              "after the reset to keep sampling (already-sampled fights are skipped)")
+    if not args.no_bundle:
+        from .bundled import bundled_stealable_data_path
+        for src, dst in ((stealable_path, bundled_stealable_data_path()),
+                         (interrupt_path, bundled_interrupt_data_path()),
+                         (dispel_path, bundled_dispel_data_path())):
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if src.resolve() != dst.resolve():
+                shutil.copyfile(src, dst)
+        print("also copied all three into the bundled package data/ folder")
+    return 0
+
+
 def aggregate_spell_damage_samples(samples: dict[str, Any],
                                    keep: Optional[set[int]] = None) -> "SpellDamageData":
     """Fold a build-spell-damage samples file into SpellDamageData: per
@@ -1627,6 +1863,61 @@ def build_parser() -> argparse.ArgumentParser:
                     help="don't also copy the result into this package's "
                          "own data/ folder (see bundled.py)")
     p.set_defaults(func=cmd_build_spell_damage)
+
+    p = sub.add_parser(
+        "build-event-data",
+        help="sample public Warcraft Logs Mythic+ reports' EVENTS for which "
+             "enemy buffs get spellstolen/purged/soothed, which casts have "
+             "ever been interrupted, and which debuffs get dispelled (and by "
+             "what) -- bundles a stealable list and merges evidence into the "
+             "interrupt and dispel databases; needs WCL_CLIENT_ID/"
+             "WCL_CLIENT_SECRET (see wcl_events.py)",
+    )
+    p.add_argument("--output-dir", default=".", metavar="DIR",
+                    help="where stealable_spells.json / interrupt_data.json / "
+                         "dispel_data.json are written (default: cwd)")
+    p.add_argument("--samples", metavar="JSON", default="wcl_event_samples.json",
+                    help="per-fight summaries, kept between runs so a build "
+                         "resumes and only fetches fights it hasn't seen")
+    p.add_argument("--zone-id", type=int,
+                    help="Warcraft Logs zone id of the Mythic+ season "
+                         "(default: the newest zone named 'Mythic+')")
+    p.add_argument("--per-level", type=int, default=8, metavar="N",
+                    help="fights to sample per (dungeon, key level) (default 8)")
+    p.add_argument("--min-level", type=int, default=2)
+    p.add_argument("--max-level", type=int, default=30)
+    p.add_argument("--max-pages", type=int, default=50,
+                    help="pages of 40 reports to scan at most (default 50)")
+    p.add_argument("--reserve-points", type=float, default=200,
+                    help="stop when fewer than this many API points remain "
+                         "this hour (default 200); rerun later to resume")
+    p.add_argument("--offline", action="store_true",
+                    help="don't contact Warcraft Logs; just re-aggregate the "
+                         "existing --samples file (no credentials needed)")
+    p.add_argument("--min-removals", type=int, default=2, metavar="N",
+                    help="a buff/debuff must have been removed this many times "
+                         "across the sample to be listed (default 2)")
+    p.add_argument("--min-casts", type=int, default=200, metavar="N",
+                    help="begin-casts before a never-interrupted spell is even "
+                         "reported as a candidate (default 200)")
+    p.add_argument("--min-fights", type=int, default=10, metavar="N",
+                    help="...and across at least this many keys (default 10)")
+    p.add_argument("--mark-uninterruptible", action="store_true",
+                    help="record never-interrupted candidates as "
+                         "interruptible=false in the interrupt database "
+                         "(default: only list them for review)")
+    p.add_argument("--interrupt-data", metavar="JSON",
+                    help="interrupt database to merge evidence into "
+                         "(default: the bundled one)")
+    p.add_argument("--dispel-data", metavar="JSON",
+                    help="dispel list to merge into (default: the bundled one)")
+    p.add_argument("--dump-raw", action="store_true",
+                    help="print the first fetched fight's summary, to eyeball "
+                         "the field mapping on a first live run")
+    p.add_argument("--no-bundle", action="store_true",
+                    help="don't also copy the results into this package's "
+                         "own data/ folder (see bundled.py)")
+    p.set_defaults(func=cmd_build_event_data)
 
     p = sub.add_parser(
         "learn-interrupts",
