@@ -37,6 +37,13 @@ import sys
 SPEC_DIR = os.path.abspath(SPECPATH)
 REPO_ROOT = os.path.dirname(SPEC_DIR)
 
+# See the codesign_identity= comment on EXE() below. Both empty/unset
+# means "no signing" (PyInstaller's default ad-hoc signature on macOS).
+CODESIGN_IDENTITY = os.environ.get("POSTMORTEM_CODESIGN_IDENTITY") or None
+ENTITLEMENTS_FILE = (
+    os.path.join(REPO_ROOT, "build", "entitlements.plist") if CODESIGN_IDENTITY else None
+)
+
 entry_script = os.path.join(SPEC_DIR, "entry.py")
 
 # App icon: .icns on macOS (BUNDLE() below needs that exact format), .ico
@@ -132,8 +139,15 @@ exe = EXE(
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
+    # macOS signing is driven by the release workflow through the
+    # environment: the identity is the "Developer ID Application: ..."
+    # name of a certificate it imported into the runner's keychain, and
+    # the entitlements are build/entitlements.plist. With an identity set
+    # PyInstaller signs every Mach-O it bundles (hardened runtime,
+    # timestamped), which is what notarization requires; unset, as in a
+    # local build, PyInstaller ad-hoc signs as it always has.
+    codesign_identity=CODESIGN_IDENTITY,
+    entitlements_file=ENTITLEMENTS_FILE,
     icon=icon_path,
 )
 
@@ -151,13 +165,16 @@ coll = COLLECT(
 # macOS only: wrap the onedir COLLECT() output in a real .app bundle.
 # A bare Unix executable has no dock icon and awkward Finder
 # double-click behavior -- BUNDLE() is the standard PyInstaller way to
-# get a proper double-clickable macOS app. Not code-signed/notarized
-# (no paid Apple Developer account available) -- see release-desktop.yml's
-# top comment for the resulting Gatekeeper-warning caveat.
+# get a proper double-clickable macOS app. Signed with the same identity
+# as the executable above (BUNDLE re-signs the whole .app so the bundle
+# seal covers Info.plist and resources); release-desktop.yml then
+# notarizes and staples it. See docs/CODE_SIGNING.md.
 if sys.platform == "darwin":
     app = BUNDLE(
         coll,
         name="Postmortem.app",
         icon=icon_path,
         bundle_identifier="com.postmortem.desktop",
+        codesign_identity=CODESIGN_IDENTITY,
+        entitlements_file=ENTITLEMENTS_FILE,
     )

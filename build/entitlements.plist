@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  Hardened-runtime entitlements for the notarized macOS build. Notarization
+  requires the hardened runtime, and a PyInstaller-frozen Python needs these
+  three exceptions under it: the interpreter maps executable memory and
+  loads its own .so/.dylib extension modules (plus pywebview's bridge),
+  none of which Apple signed. Nothing here grants access to anything --
+  the app is not sandboxed -- they only relax the runtime's code-loading
+  checks for our own bundle. Kept to the minimum PyInstaller documents.
+-->
+<dict>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+</dict>
+</plist>
