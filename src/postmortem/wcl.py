@@ -318,3 +318,99 @@ def fetch_fight_tables(client: WCLClient, code: str, fight_id: int) -> dict[str,
         "casts": {sid: total for sid, (_n, total) in casts.items()},
         "names": names,
     }
+
+
+# --- events -------------------------------------------------------------------
+#
+# Used by `postmortem build-event-data` (cli.py, wcl_events.py). Where the
+# tables above answer "how much", these answer "which": which enemy buffs
+# got spellstolen or purged, which debuffs got dispelled and by what,
+# which enemy casts have ever been interrupted, and what dealt the
+# killing blows. WCL returns events as raw JSON objects whose field
+# names follow its own log format (``abilityGameID``,
+# ``extraAbilityGameID``, ``targetIsFriendly`` ...); only the handful
+# wcl_events.summarize_fight reads are relied on, and every one is read
+# tolerantly.
+
+#: Events per page. WCL's maximum; a keystone's dispels/interrupts/deaths
+#: fit in one page, enemy begin-casts usually do too.
+EVENTS_PAGE_LIMIT = 10000
+
+
+def fetch_report_names(client: WCLClient, code: str) -> dict[str, dict[int, Any]]:
+    """The report's master data as ``{"abilities": {id: name},
+    "actors": {id: {"name", "game_id", "friendly"}}}``. Event rows carry
+    ids only; this is the one lookup per report that turns them into
+    names (and NPC ids for enemies)."""
+    body = (
+        "reportData { report(code: $code) { masterData { "
+        "abilities { gameID name } "
+        "actors { id gameID name type subType } } } }"
+    )
+    data = client.query(body, {"code": ("String!", code)})
+    master = ((data.get("reportData") or {}).get("report") or {}).get("masterData") or {}
+    abilities: dict[int, Any] = {}
+    for a in master.get("abilities") or []:
+        try:
+            abilities[int(a.get("gameID"))] = str(a.get("name") or "")
+        except (TypeError, ValueError, AttributeError):
+            continue
+    actors: dict[int, Any] = {}
+    for a in master.get("actors") or []:
+        try:
+            aid = int(a.get("id"))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        try:
+            game_id = int(a.get("gameID") or 0)
+        except (TypeError, ValueError):
+            game_id = 0
+        actors[aid] = {
+            "name": str(a.get("name") or ""),
+            "game_id": game_id,
+            "type": str(a.get("type") or ""),
+        }
+    return {"abilities": abilities, "actors": actors}
+
+
+def fetch_fight_events(client: WCLClient, code: str, fight_id: int, data_type: str,
+                       hostility: str = "Friendlies",
+                       filter_expression: Optional[str] = None) -> list[dict[str, Any]]:
+    """Every event of ``data_type`` (``Dispels``, ``Interrupts``,
+    ``Deaths``, ``Casts`` ...) in one fight, following
+    ``nextPageTimestamp`` until the fight is exhausted. ``hostility``
+    picks whose events: ``Friendlies`` (the group's) or ``Enemies``."""
+    out: list[dict[str, Any]] = []
+    start: Optional[float] = None
+    filt = ""
+    variables: dict[str, Any] = {"code": ("String!", code), "fight": ("Int!", fight_id)}
+    if filter_expression:
+        variables["filt"] = ("String", filter_expression)
+        filt = ", filterExpression: $filt"
+    for _page in range(50):  # a fight has nowhere near 50 pages of one event type
+        window = ""
+        if start is not None:
+            variables["start"] = ("Float", start)
+            window = ", startTime: $start"
+        body = (
+            f"reportData {{ report(code: $code) {{ events(fightIDs: [$fight], "
+            f"dataType: {data_type}, hostilityType: {hostility}, "
+            f"limit: {EVENTS_PAGE_LIMIT}{window}{filt}) {{ data nextPageTimestamp }} }} }}"
+        )
+        data = client.query(body, variables)
+        events = ((data.get("reportData") or {}).get("report") or {}).get("events") or {}
+        rows = events.get("data")
+        if isinstance(rows, str):
+            try:
+                rows = json.loads(rows)
+            except json.JSONDecodeError:
+                rows = []
+        out.extend(r for r in (rows or []) if isinstance(r, dict))
+        nxt = events.get("nextPageTimestamp")
+        if nxt is None:
+            break
+        try:
+            start = float(nxt)
+        except (TypeError, ValueError):
+            break
+    return out

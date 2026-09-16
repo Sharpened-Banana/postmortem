@@ -48,6 +48,26 @@ from .combatlog.parser import parse_line
 _START_RE = re.compile(r"  CHALLENGE_MODE_START,")
 _END_RE = re.compile(r"  CHALLENGE_MODE_END,")
 _DEATH_RE = re.compile(r"  UNIT_DIED,")
+# WoW writes one of these every time combat logging is switched on. The
+# addon's snapshot keybind switches it off/on N times inside ~1.5 s to
+# plant a marker whose header COUNT is the presser's role -- see
+# docs/SNAPSHOT.md and analysis/snapshot.py (the same rule, applied to
+# parsed events). A lone header is any ordinary toggle.
+_HEADER_RE = re.compile(r"  COMBAT_LOG_VERSION,")
+#: Consecutive headers closer together than this belong to one marker
+#: (the addon's toggles are 0.25 s apart). The 2 s-apart login pair and
+#: the addon's 1.0 s-apart re-assert at key start must NOT -- same rule
+#: and reasoning as analysis/snapshot.MARKER_GAP_S.
+MARKER_GAP_S = 0.6
+_MARKER_ROLES = {2: "healer", 3: "tank"}
+
+
+def marker_role(header_count: int) -> Optional[str]:
+    """The role a cluster of ``header_count`` headers encodes, or None
+    when it is not a marker at all."""
+    if header_count < 2:
+        return None
+    return _MARKER_ROLES.get(header_count, "general")
 
 #: How much of a pre-existing log to read between on_scan_progress calls.
 #: The initial scan is a whole-file read; on a multi-gigabyte log that is
@@ -223,6 +243,11 @@ class Recorder:
     # tailing a real file. CLI usage doesn't need this (the echo() message
     # below already covers it); left None there.
     on_waiting_for_log: Optional[Callable[[], None]] = None
+    # A snapshot marker planted by the addon's keybind (see _HEADER_RE):
+    # ``(run, marker_ts, role)`` with the first header's timestamp. Fired
+    # once the cluster is known to be complete, i.e. when a later line
+    # is more than MARKER_GAP_S past its last header (or the run closes).
+    on_snapshot_marker: Optional[Callable[["RecordedRun", float, str], None]] = None
     _current: Optional[RecordedRun] = None
     _out_fh: Optional[object] = field(default=None, repr=False)
     _obs: Optional[object] = field(default=None, repr=False)  # live OBSClient for this run
@@ -603,6 +628,8 @@ class Recorder:
         self._out_fh.write(line)
         self._current.line_count += 1
 
+        self._track_marker(line)
+
         if _DEATH_RE.search(line):
             # crude but cheap live counter; the real analysis is authoritative
             if re.search(r'UNIT_DIED,[^,]*,[^,]*,[^,]*,[^,]*,Player-', line):
@@ -667,9 +694,49 @@ class Recorder:
         if self._obs is not None and self.on_start_cmd is None:
             self._obs_call(self._obs.start_record, "StartRecord")
 
+    # -- snapshot markers ----------------------------------------------------
+    # (the cluster list lives in an instance attribute created on first
+    # use -- a dataclass annotation here would make it a constructor field)
+
+    def _track_marker(self, line: str) -> None:
+        """Group COMBAT_LOG_VERSION lines into clusters and report a
+        finished cluster of 2+ as a snapshot marker (see docs/SNAPSHOT.md).
+        Only the line's timestamp is needed, so the full parser is used
+        just for that; a line whose stamp does not parse is ignored."""
+        cluster = getattr(self, "_marker_cluster", None)
+        if cluster is None:
+            cluster = self._marker_cluster = []
+        is_header = bool(_HEADER_RE.search(line))
+        if not is_header and not cluster:
+            return
+        event = parse_line(line)
+        if event is None:
+            return
+        if cluster and event.ts - cluster[-1] > MARKER_GAP_S:
+            self._flush_marker_cluster()
+            cluster = self._marker_cluster
+        if is_header:
+            cluster.append(event.ts)
+
+    def _flush_marker_cluster(self) -> None:
+        cluster = getattr(self, "_marker_cluster", None)
+        if not cluster:
+            return
+        role = marker_role(len(cluster))
+        first = cluster[0]
+        self._marker_cluster = []
+        if role is None or self.on_snapshot_marker is None or self._current is None:
+            return
+        self.echo(f"  snapshot marker ({role})")
+        try:
+            self.on_snapshot_marker(self._current, first, role)
+        except Exception as exc:  # a UI hook must never stop the recording
+            self.echo(f"warning: on_snapshot_marker raised: {exc}")
+
     def _close_run(self, completed: bool) -> None:
         if self._current is None:
             return
+        self._flush_marker_cluster()
         self._out_fh.close()
         self._current.completed = completed
         state = "complete" if completed else "incomplete (interrupted)"

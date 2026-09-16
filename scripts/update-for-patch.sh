@@ -139,6 +139,11 @@ if [[ "$WITH_SPELL_DAMAGE" -eq 1 ]]; then
   if [[ -n "${WCL_CLIENT_ID:-}" && -n "${WCL_CLIENT_SECRET:-}" ]]; then
     pm build-spell-damage
     ok "spell_damage.json rebuilt"
+    # Same credentials, same budget: events for the stealable list and
+    # the interrupt/dispel evidence (wcl_events.py). Its outputs land in
+    # the package data/ folder directly.
+    pm build-event-data --output-dir "$DATA_DIR"
+    ok "stealable_spells.json built; interrupt_data.json + dispel_data.json enriched"
   else
     skip "WCL_CLIENT_ID/WCL_CLIENT_SECRET not set"
   fi

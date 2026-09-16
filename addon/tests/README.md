@@ -36,6 +36,14 @@ every one of those has to produce no panel rather than a broken one.
 (including overtime and the no-time-limit fallback), and the order the rows
 actually reflow into, both during a key and in the post-key recap window.
 
+`snapshot_mark.lua` covers `Snapshot.lua` (docs/SNAPSHOT.md): a keybind
+press must toggle combat logging off/on exactly N times for the presser's
+role (2 healer / 3 tank / 4 other), 0.25 s apart, ending ON, record one
+capped `snapshotMarks` entry, honour the 5 s cooldown, and do nothing but
+print when no key is active or logging is off. `LoggingCombat` is stubbed
+as a call recorder and `C_Timer.After` as a hand-advanced scheduler; the
+real `CombatLogging.lua` is loaded underneath so its state rules apply.
+
 Syntax-check every file alongside this:
 
     for f in addon/Postmortem/*.lua; do luac -p "$f"; done
@@ -44,3 +52,8 @@ Note that `luac` on a dev machine is usually Lua 5.5, not WoW's 5.1 VM, so a
 clean parse does not prove client compatibility on its own -- `luacheck
 --std lua51` is the closer check (its "accessing undefined variable" list is
 all WoW globals and expected).
+
+`interrupts_secret.lua` -- Interrupts.lua under Secret Values: names/GUIDs
+the client refuses as table keys (simulated by overriding `rawset`/`rawget`),
+`canaccessvalue()` as a secrecy signal, and the "keep last good values"
+behaviour on a bad tick.

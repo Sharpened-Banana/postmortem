@@ -96,6 +96,14 @@ in-game:
   addon table and isn't accessible from outside it, so this addon can't
   resolve *which* pack you pulled, only how many enemies and which pull
   number.
+- **Snapshot keybind** — bind "Mark a snapshot" (Key Bindings → AddOns →
+  Postmortem) or type `/pm snapshot` mid-key when something just went
+  wrong. The desktop app's Watch Live then writes a snapshot report of the
+  2 minutes before and 1 minute after the press (adjustable in
+  `/pm options` and in the app's Settings), focused on your role: a healer
+  gets healing, mana, who took what and cooldown use; a tank gets damage
+  intake, mitigation uptime and the biggest hits. How it works and the
+  CLI form (`postmortem snapshot`) are in `docs/SNAPSHOT.md`.
 
 Click the minimap icon (or run `/pm`) to open an in-game window laying out
 exactly what's live in the addon vs. what needs the companion app.
@@ -200,13 +208,13 @@ will both warn on first launch.
   picks up automatically (the CLI, desktop app, Watch Live, the site).
   `analyze --avoidable-data FILE` overrides it with your own list (format
   in `docs/avoidable_spells.example.json`).
-- **Spellsteal targets** — `analyze --stealable-data FILE` tags spell ids
-  worth Spellstealing (same community/user-maintained shape as avoidable
-  damage, format + example in `docs/stealable_spells.example.json` — we
-  don't ship a real list here either, and unlike interrupt data there's
-  no addon/database to build one from, see that file's own comment) and
-  highlights them in the enemy-casts table with a star and a colored
-  accent; omit the flag and the report is unaffected.
+- **Spellsteal targets** — enemy buffs worth Spellstealing (or purging)
+  get a star and a colored accent in the enemy-casts table. The bundled
+  list is built from public Warcraft Logs dispel events by
+  `build-event-data` (every buff anyone has spellstolen or purged in a
+  public key — no guide or addon publishes such a list, and Patch 12.1
+  stops addons reading the live flag); `analyze --stealable-data FILE`
+  overrides it with your own (format in `docs/stealable_spells.example.json`).
 - **Kick value** — each interrupt is priced: the estimated damage (or enemy
   healing) it prevented, based on the average amount per completed cast of
   that spell observed elsewhere in the same run — the up-front hit plus its

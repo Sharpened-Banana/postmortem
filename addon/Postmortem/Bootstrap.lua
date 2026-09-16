@@ -91,6 +91,18 @@ local defaults = {
     -- Bounded run-history array (RunHistory.lua), newest entries appended,
     -- oldest trimmed once it exceeds runHistoryLimit above.
     runHistory = {},
+
+    -- Snapshot.lua (docs/SNAPSHOT.md): how many seconds before / after a
+    -- keybind press the snapshot report covers. Only the in-game message
+    -- reads them here; the analyzer and desktop app carry their own copies
+    -- (CLI flags / desktop Settings). Options.lua exposes both as sliders
+    -- and MUST restate these same defaults (see its header).
+    snapshotBeforeS = 120,
+    snapshotAfterS = 60,
+    -- Offline record of every press: {at, role, zone, level, elapsed},
+    -- newest last, capped at 50 by Snapshot.lua. Empty is the only
+    -- meaningful default, same as runHistory above.
+    snapshotMarks = {},
   },
 }
 

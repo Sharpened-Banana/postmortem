@@ -17,11 +17,16 @@
 # runs on, so a macOS .app and a Windows .exe genuinely require two
 # separate runners. No Linux build target exists for this app yet.
 #
-# Known, accepted limitation: the macOS build is unsigned and
-# un-notarized (no paid Apple Developer account available for this
-# project), so first launch will show a Gatekeeper "unidentified
-# developer" warning (right-click -> Open works around it). This is a
-# deliberate scope cut for this pass, not a bug to fix here.
+# Code signing (docs/CODE_SIGNING.md has the account setup):
+#   macOS   -- Developer ID certificate imported from secrets, PyInstaller
+#              signs every binary with the hardened runtime
+#              (build/postmortem.spec + build/entitlements.plist), then the
+#              .app is notarized with notarytool and stapled.
+#   Windows -- Azure Trusted Signing signs the app exe (before it is
+#              zipped and packed into the installer) and the installer.
+# Every signing step is skipped, with a notice, when its secrets are not
+# configured, so a fork or a scratch tag still builds -- unsigned, with
+# the Gatekeeper / SmartScreen warnings that implies.
 
 name: Release desktop app
 
@@ -128,14 +133,87 @@ jobs:
         if: runner.os == 'Windows'
         run: python build/patch_pywebview.py
 
+      # macOS: put the Developer ID certificate where codesign can find
+      # it. A throwaway keychain, unlocked for the job and deleted after,
+      # so the key never lands in the login keychain of a shared runner.
+      # The identity NAME is read back from the keychain rather than
+      # typed into a secret -- one fewer string to get subtly wrong.
+      # Everything downstream keys off POSTMORTEM_CODESIGN_IDENTITY being
+      # set: PyInstaller signs (see the spec), the notarize step runs.
+      - name: Import the Developer ID certificate
+        if: runner.os == 'macOS'
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          if [ -z "$MACOS_CERT_P12" ]; then
+            echo "::notice::MACOS_CERT_P12 not set -- building an unsigned macOS app"
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password="$(uuidgen)"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MACOS_CERT_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          # Lets codesign use the key without a UI prompt (there is none).
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          rm -f "$RUNNER_TEMP/cert.p12"
+          identity="$(security find-identity -v -p codesigning "$keychain" \
+            | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')"
+          if [ -z "$identity" ]; then
+            echo "::error::no 'Developer ID Application' identity in the imported certificate"
+            exit 1
+          fi
+          echo "signing as: $identity"
+          echo "POSTMORTEM_CODESIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+          echo "SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
       - name: Build with PyInstaller
         run: pyinstaller build/postmortem.spec
+
+      # macOS: prove the signature before spending minutes on notarization,
+      # then notarize the zipped app, staple the ticket INTO the .app (so
+      # Gatekeeper passes it offline, and so the copy the in-app updater
+      # extracts carries it too), and re-zip -- the zip must be made from
+      # the stapled bundle, not before.
+      - name: Notarize and staple
+        if: runner.os == 'macOS' && env.POSTMORTEM_CODESIGN_IDENTITY != ''
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          codesign --verify --deep --strict --verbose=2 dist/Postmortem.app
+          if [ -z "$APPLE_ID" ] || [ -z "$APPLE_APP_PASSWORD" ] || [ -z "$APPLE_TEAM_ID" ]; then
+            echo "::warning::signed but NOT notarized: APPLE_ID / APPLE_APP_PASSWORD / APPLE_TEAM_ID not all set"
+            exit 0
+          fi
+          ditto -c -k --sequesterRsrc --keepParent dist/Postmortem.app "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" \
+            --wait --timeout 30m --output-format json > "$RUNNER_TEMP/notarize.json" || true
+          cat "$RUNNER_TEMP/notarize.json"
+          status="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status",""))' "$RUNNER_TEMP/notarize.json")"
+          if [ "$status" != "Accepted" ]; then
+            sub_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("id",""))' "$RUNNER_TEMP/notarize.json")"
+            [ -n "$sub_id" ] && xcrun notarytool log "$sub_id" \
+              --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" || true
+            echo "::error::notarization status: ${status:-unknown}"
+            exit 1
+          fi
+          xcrun stapler staple dist/Postmortem.app
+          spctl --assess --type execute --verbose=2 dist/Postmortem.app
 
       # macOS: zip the .app bundle with ditto, not plain `zip -r` --
       # ditto is Apple's own recommended way to archive a .app for
       # distribution because it preserves resource forks, extended
       # attributes, and executable permission bits that a generic zip
-      # can silently mangle.
+      # can silently mangle. After notarization: the archive must hold the
+      # STAPLED bundle.
       - name: Package macOS build
         if: runner.os == 'macOS'
         run: |
@@ -188,6 +266,42 @@ jobs:
           }
           Get-ChildItem $lib -Filter Microsoft.Web.WebView2.*.dll | ForEach-Object { "{0}  {1}" -f $_.Name, $_.VersionInfo.FileVersion }
 
+      # Windows: sign the application executable BEFORE it is zipped and
+      # before Inno Setup packs it, so both the portable copy and the
+      # installed one carry the signature. Azure Trusted Signing: the
+      # certificate never leaves Azure; the runner authenticates as a
+      # service principal and sends digests. Skipped, unsigned, when the
+      # secrets are absent (see the job-level comment at the top).
+      # Pinned to a commit per this repository's action-pinning rule.
+      - name: Decide whether Windows signing is configured
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        run: |
+          if [ -n "$AZURE_CLIENT_ID" ]; then
+            echo "WINDOWS_SIGNING=1" >> "$GITHUB_ENV"
+          else
+            echo "::notice::AZURE_CLIENT_ID not set -- building unsigned Windows assets"
+          fi
+
+      - name: Sign the app executable (Azure Trusted Signing)
+        if: runner.os == 'Windows' && env.WINDOWS_SIGNING == '1'
+        uses: azure/trusted-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82  # v2.0.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CERTIFICATE_PROFILE }}
+          files-folder: ${{ github.workspace }}\dist\Postmortem
+          files-folder-filter: exe
+          files-folder-recurse: false
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
       # Windows: the spec builds a onedir (COLLECT) layout rather than
       # --onefile, so zip the whole dist/Postmortem/ folder as the
       # single downloadable artifact. Kept alongside the installer below
@@ -219,6 +333,36 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed ($LASTEXITCODE)" }
           Move-Item installer\Postmortem-Setup.exe Postmortem-Setup-windows.exe
 
+      # ...and the installer itself, which is what SmartScreen judges on
+      # download. (Inno's own uninstaller is not signed: it is generated
+      # inside the installer at build time, and signing it needs a local
+      # signtool hook that Trusted Signing's action does not provide.
+      # Windows does not warn on uninstall, so nothing user-visible.)
+      - name: Sign the installer (Azure Trusted Signing)
+        if: runner.os == 'Windows' && env.WINDOWS_SIGNING == '1'
+        uses: azure/trusted-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82  # v2.0.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CERTIFICATE_PROFILE }}
+          files: ${{ github.workspace }}\Postmortem-Setup-windows.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Show the Windows signatures
+        if: runner.os == 'Windows' && env.WINDOWS_SIGNING == '1'
+        shell: pwsh
+        run: |
+          foreach ($f in "dist\Postmortem\Postmortem.exe", "Postmortem-Setup-windows.exe") {
+            $sig = Get-AuthenticodeSignature $f
+            "{0}: {1} ({2})" -f $f, $sig.Status, $sig.SignerCertificate.Subject
+            if ($sig.Status -ne "Valid") { throw "$f is not validly signed" }
+          }
+
       # The release already exists (see the `release` job above); just
       # attach this platform's files. --clobber makes a re-run of a
       # failed job replace its own assets instead of erroring. bash on
@@ -227,9 +371,11 @@ jobs:
       # downloaded from one an attacker substituted. Without this the whole
       # trust chain was TLS plus "the host is github.com" -- and one of the
       # two allowed hosts serves every GitHub user's release assets, so any
-      # attacker-hosted zip on it passed. Nothing signs these builds, and
-      # because the app writes the files itself no operating-system
-      # quarantine check applies to an update either (2026-09-11).
+      # attacker-hosted zip on it passed. Code signatures (above) are
+      # checked by the OS on first launch, but the app writes an update's
+      # files itself, so no quarantine check applies to an update -- this
+      # digest is what the updater trusts (2026-09-11). Computed AFTER
+      # signing and stapling, so it matches the bytes that ship.
       #
       # Each platform job appends its own line; --clobber on the upload
       # below lets a re-run replace its own entry.
@@ -284,3 +430,7 @@ jobs:
           shopt -s nullglob  # macOS has no .exe; drop the empty pattern instead of failing
           gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
             Postmortem-*.zip Postmortem-Setup-*.exe "SHA256SUMS-${{ runner.os }}.txt"
+
+      - name: Remove the signing keychain
+        if: always() && runner.os == 'macOS' && env.SIGNING_KEYCHAIN != ''
+        run: security delete-keychain "$SIGNING_KEYCHAIN" || true

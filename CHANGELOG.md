@@ -32,6 +32,37 @@
   holding, how long since your last active-mitigation press, and which
   group externals were back up.
 
+## 0.3.4 (2026-09-16)
+
+- The "Mark a snapshot" keybind now actually appears under Key Bindings >
+  AddOns and fires: Bindings.xml was listed in the .toc, which the client
+  does not allow (it loads that file itself), so the binding never
+  registered in 0.3.2/0.3.3. `/pm snapshot` was unaffected.
+
+## 0.3.3 (2026-09-15)
+
+- Fixes "Interrupts.lua:89: attempted to index a table that cannot be
+  indexed with secret keys", which fired every frame of a key on builds
+  before 0.3.1 and could still be reached on 12.1: the kick counter no
+  longer keys any table by a meter-provided player name or GUID, the
+  secrecy check also honours the 12.1 `canaccessvalue()`, and a key the
+  client refuses is skipped for that tick with the last good values kept.
+  Pull-progress tracking gets the same guard.
+
+## 0.3.2 (2026-09-15)
+
+- "Mark a snapshot" keybind (Key Bindings > AddOns > Postmortem) and
+  `/pm snapshot`: press it mid-key when something just went wrong and the
+  desktop app writes a snapshot report of the minutes around it, focused
+  on your role -- a healer gets healing, mana, who took what and cooldown
+  use; a tank gets damage intake, mitigation uptime and the biggest hits.
+  The window (2:00 before / 1:00 after) is adjustable in `/pm options`.
+  Marks are kept in your saved variables too.
+- The keybind plants its marker by briefly toggling combat logging a few
+  times; the desktop app (alpha-desktop-46 and later) also offers a
+  system-wide hotkey that needs no addon and never touches logging.
+- HUD: the status row can flash a short message during a key.
+
 ## 0.3.1 (2026-09-13)
 
 - Finishing a key after a mid-key `/reload` no longer throws, and the

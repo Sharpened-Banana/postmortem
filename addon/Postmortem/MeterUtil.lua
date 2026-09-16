@@ -24,7 +24,33 @@ local ADDON_NAME, MA = ...
 -- issecretvalue only exists on clients with the Secret Values system; on
 -- anything older nothing is ever secret.
 function MA:MeterUtil_IsSecret(value)
-  return issecretvalue ~= nil and issecretvalue(value) or false
+  if issecretvalue ~= nil and issecretvalue(value) then return true end
+  -- 12.1 added canaccessvalue(): "true if the calling function has
+  -- permission to perform operations on secret values". A value that
+  -- issecretvalue() does not flag but that we still cannot operate on is
+  -- secret for every purpose this addon has (2026-09-15: a live key threw
+  -- "attempted to index a table that cannot be indexed with secret keys"
+  -- on a meter source name the issecretvalue() check had let through).
+  if canaccessvalue ~= nil and value ~= nil and not canaccessvalue(value) then
+    return true
+  end
+  return false
+end
+
+-- t[key] = value, but never erroring: a secret key throws even when the
+-- checks above said it was fine. Returns true when stored. Callers treat
+-- false as "this pass is unreliable, keep the last good values".
+function MA:MeterUtil_SafeSet(t, key, value)
+  local ok = pcall(rawset, t, key, value)
+  return ok
+end
+
+-- t[key], or nil (and false as the second value) when the key cannot be
+-- used at all.
+function MA:MeterUtil_SafeGet(t, key)
+  local ok, v = pcall(rawget, t, key)
+  if not ok then return nil, false end
+  return v, true
 end
 
 function MA:MeterUtil_ApiAvailable()

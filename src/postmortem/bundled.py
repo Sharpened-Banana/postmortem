@@ -41,6 +41,15 @@ TALENT_DATA_FILENAME = "talent_data.json"
 AVOIDABLE_DATA_FILENAME = "avoidable_spells.json"
 DISPEL_DATA_FILENAME = "dispel_data.json"
 TANK_DEFENSIVES_FILENAME = "tank_defensives.json"
+STEALABLE_DATA_FILENAME = "stealable_spells.json"
+
+
+def bundled_stealable_data_path() -> Path:
+    """Path to the packaged stealable/purgeable enemy-buff list (built
+    from public Warcraft Logs dispel events by ``postmortem
+    build-event-data`` -- see wcl_events.py and analysis/stealable.py).
+    Optional, same posture as the dispel list."""
+    return Path(__file__).resolve().parent / "data" / STEALABLE_DATA_FILENAME
 
 
 def bundled_dispel_data_path() -> Path:

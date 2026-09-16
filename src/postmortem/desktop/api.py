@@ -35,6 +35,7 @@ import os
 import queue
 import sys
 import tempfile
+import re
 import threading
 import time
 from pathlib import Path
@@ -115,6 +116,24 @@ document.addEventListener("click", function (e) {
 #: install pointed at a months-old log otherwise analyzes and uploads every
 #: key it has ever recorded (2026-09-11).
 _CATCH_UP_LIMIT = 3
+
+
+def _snapshot_seconds(value, default: int, lo: int, hi: int) -> int:
+    """A snapshot window setting as a clamped int; anything unusable is
+    the default (settings.json is user-editable)."""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(lo, min(hi, n))
+
+
+def _mmss(seconds) -> str:
+    try:
+        total = max(0, int(round(float(seconds))))
+    except (TypeError, ValueError):
+        return "?"
+    return f"{total // 60}:{total % 60:02d}"
 
 
 def _normalized_site_url(raw: Any) -> str:
@@ -218,6 +237,10 @@ class DesktopAPI:
         self._watch_worker: Optional[threading.Thread] = None
         self._watch_stop_sentinel: Optional[object] = None
         self._watch_thread: Optional[threading.Thread] = None
+        # Pending snapshot builds, one timer per keybind marker seen while
+        # watching (docs/SNAPSHOT.md §3); cancelled by stop_watch.
+        self._snapshot_timers: dict[tuple[str, float], threading.Timer] = {}
+        self._hotkey: Optional["HotkeyListener"] = None
         # Auto-update state (see check_for_update/start_update below).
         self._update_thread: Optional[threading.Thread] = None
         # Opaque ref -> where that History row's report lives, for the rows
@@ -668,6 +691,13 @@ class DesktopAPI:
     #   {"type": "uploaded", "url": str}
     #   {"type": "uploaded_by_groupmate", "url": str}  -- someone in the
     #       group uploaded this key first; url is their copy
+    #   {"type": "snapshot_marker", "role": str, "t": "mm:ss", "after_s": int}
+    #       -- the addon's snapshot keybind was pressed (docs/SNAPSHOT.md)
+    #   {"type": "snapshot_ready", "zone", "level", "role", "t", "path"}
+    #       -- its report was written; open_snapshot(path) shows it
+    #   {"type": "snapshot_failed", "error": str}
+    #   {"type": "snapshot_hotkey", "ok": bool, "message": str}
+    #       -- whether the desktop's own hotkey could be set up
     #     -- the full URL (site_url + the site's own path) of the report.
     #   {"type": "scanning", "bytes_read": int, "bytes_total": int}
     #     -- the initial scan of a pre-existing log is in progress. Only
@@ -828,12 +858,22 @@ class DesktopAPI:
                 except Exception as exc:
                     self._emit_watch_event({"type": "run_failed", "error": str(exc)})
 
+        snapshot_before_s = _snapshot_seconds(settings.get("snapshot_before_s"), 120, 30, 600)
+        snapshot_after_s = _snapshot_seconds(settings.get("snapshot_after_s"), 60, 10, 300)
+
         recorder = Recorder(
             log_path=Path(log_path),
             out_dir=Path(out_dir),
             on_run_start=lambda run: self._emit_watch_event({
                 "type": "run_started", "zone": run.zone, "level": run.keystone_level,
             }),
+            # The addon's snapshot keybind (docs/SNAPSHOT.md): build the
+            # role-focused window report once the "after" part of the
+            # window has been logged, from the run's own slice file.
+            on_snapshot_marker=lambda run, ts, role: self._on_snapshot_marker(
+                run, ts, role, snapshot_before_s, snapshot_after_s, store,
+                avoidable, interrupt_data, mdt_dir,
+            ),
             # Follow WoW to a new session log mid-watch (a real timed key
             # was lost to a rotation before this, 2026-09-02) and tell the
             # UI which file is being watched now.
@@ -897,6 +937,8 @@ class DesktopAPI:
                 self._emit_watch_event({"type": "crashed", "error": str(exc)})
 
         self._watch_recorder = recorder
+        self._start_snapshot_hotkey(settings, snapshot_before_s, snapshot_after_s,
+                                    store, avoidable, interrupt_data, mdt_dir)
         self._watch_queue = work
         self._watch_stop_sentinel = _STOP
         self._watch_worker = threading.Thread(
@@ -919,6 +961,12 @@ class DesktopAPI:
         watch thread to actually exit. Never raises."""
         if self._watch_recorder is not None:
             self._watch_recorder.request_stop()
+        for timer in list(self._snapshot_timers.values()):
+            timer.cancel()
+        self._snapshot_timers.clear()
+        if self._hotkey is not None:
+            self._hotkey.stop()
+            self._hotkey = None
         still_running = False
         if self._watch_thread is not None:
             self._watch_thread.join(timeout=5.0)
@@ -1112,6 +1160,122 @@ class DesktopAPI:
         unreadable/nonexistent folder just falls back to that plain-name
         guess, same as before this existed."""
         return str(_config.resolve_watch_log_path(folder))
+
+    # -- snapshot keybind (docs/SNAPSHOT.md) ---------------------------------
+
+    def _start_snapshot_hotkey(self, settings, before_s, after_s, store, avoidable,
+                               interrupt_data, mdt_dir) -> None:
+        """The app's own snapshot trigger (desktop/hotkey.py): a global
+        key combination that timestamps the press here, so the log is
+        never touched. Best-effort -- a hotkey that cannot be set up is
+        reported to the watch log and Watch Live carries on."""
+        from .hotkey import HotkeyListener
+
+        combo = str(settings.get("snapshot_hotkey") or "").strip()
+        if not combo:
+            return
+        focus = str(settings.get("snapshot_focus") or "healer").strip().lower()
+        if focus not in ("healer", "tank", "general"):
+            focus = "healer"
+        character = str(settings.get("snapshot_character") or "").strip()
+
+        def on_press() -> None:
+            recorder = self._watch_recorder
+            run = getattr(recorder, "_current", None) if recorder is not None else None
+            if run is None:
+                self._emit_watch_event({
+                    "type": "snapshot_failed",
+                    "error": "hotkey pressed, but no key is being recorded right now",
+                })
+                return
+            self._on_snapshot_marker(run, time.time(), focus, before_s, after_s, store,
+                                     avoidable, interrupt_data, mdt_dir,
+                                     focus_name=character or None, source="hotkey")
+
+        listener = HotkeyListener(combo, on_press)
+        ok, message = listener.start()
+        self._hotkey = listener if ok else None
+        self._emit_watch_event({"type": "snapshot_hotkey", "ok": ok, "message": message})
+
+    def _on_snapshot_marker(self, run, marker_ts: float, role: str,
+                            before_s: int, after_s: int, store, avoidable,
+                            interrupt_data, mdt_dir, focus_name=None,
+                            source: str = "marker") -> None:
+        """Called on the tailing thread the moment a marker cluster is
+        complete. The report needs the ``after_s`` seconds that follow, so
+        the build is scheduled that far ahead (plus a little slack for
+        WoW's write buffering) on a timer thread; the run's slice file is
+        still being appended to and is re-read then."""
+        rel = max(0.0, marker_ts - run.started_at) if getattr(run, "started_at", None) else 0.0
+        self._emit_watch_event({
+            "type": "snapshot_marker", "role": role, "t": _mmss(rel), "after_s": after_s,
+        })
+        key = (str(run.path), round(marker_ts, 1))
+        if key in self._snapshot_timers:
+            return
+        timer = threading.Timer(
+            after_s + 5.0,
+            self._build_snapshot_for_marker,
+            args=(run, marker_ts, role, before_s, after_s, store, avoidable,
+                  interrupt_data, mdt_dir, key),
+            kwargs={"focus_name": focus_name, "source": source},
+        )
+        timer.daemon = True
+        self._snapshot_timers[key] = timer
+        timer.start()
+
+    def _build_snapshot_for_marker(self, run, marker_ts, role, before_s, after_s,
+                                   store, avoidable, interrupt_data, mdt_dir, key,
+                                   focus_name=None, source: str = "marker") -> None:
+        self._snapshot_timers.pop(key, None)
+        try:
+            from ..analysis.snapshot import build_snapshot
+            from ..combatlog.parser import parse_file
+            from ..combatlog.segmenter import segment_runs
+            from ..report.snapshot import render_snapshot_html
+
+            segment = None
+            for seg in segment_runs(parse_file(str(run.path))):
+                if seg.start_ts <= marker_ts <= (seg.end_ts or float("inf")):
+                    segment = seg
+                    break
+                segment = seg  # the slice file holds one run; keep the last
+            if segment is None:
+                raise ValueError("no run found in the recorded slice")
+            report = build_snapshot(
+                segment, marker_ts, before_s=before_s, after_s=after_s, role=role,
+                store=store, avoidable=avoidable, interrupt_data=interrupt_data,
+                focus_name=focus_name, source=source,
+            )
+            role = report.get("snapshot", {}).get("role") or role
+            n = 1
+            while (Path(run.path).with_name(f"{Path(run.path).stem}-snapshot-{n}.html")).exists():
+                n += 1
+            out = Path(run.path).with_name(f"{Path(run.path).stem}-snapshot-{n}.html")
+            out.write_text(render_snapshot_html(report), encoding="utf-8")
+            rel = report.get("snapshot", {}).get("t_marker")
+            self._emit_watch_event({
+                "type": "snapshot_ready", "zone": run.zone, "level": run.keystone_level,
+                "role": role, "t": _mmss(rel if rel is not None else marker_ts - segment.start_ts),
+                "path": str(out),
+            })
+        except Exception as exc:
+            self._emit_watch_event({"type": "snapshot_failed", "error": str(exc)})
+
+    def open_snapshot(self, path: str) -> dict:
+        """Load a snapshot report written by Watch Live (or the CLI) for
+        the report screen: ``{"ok": True, "html", "label"}``. Only a file
+        named like our own ``*-snapshot-N.html`` is read -- the path
+        arrives from the UI, which got it from our own event, but the
+        bridge does not take that on trust."""
+        try:
+            p = Path(str(path))
+            if not re.fullmatch(r".*-snapshot-\d+\.html", p.name) or not p.is_file():
+                return {"ok": False, "error": "that is not a snapshot report"}
+            html = p.read_text(encoding="utf-8")
+            return {"ok": True, "html": html, "label": f"Snapshot — {p.stem}"}
+        except Exception as exc:  # never raise across the bridge
+            return {"ok": False, "error": f"could not open the snapshot: {exc}"}
 
     def _handle_watched_run(self, run, route, store, avoidable, site_url,
                             history_db_path, addon_dir=None, mdt_dir=None,

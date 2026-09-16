@@ -60,12 +60,18 @@ local function SnapshotBaseline()
   local session = select(1, MA:MeterUtil_GetSession(SESSION_OVERALL, meterType))
   if not session then return end
   local snapshot = {}
+  local stored = true
   local complete = MA:MeterUtil_ForEachSource(session, function(source)
     if source.sourceGUID then
-      snapshot[source.sourceGUID] = source.totalAmount or 0
+      -- A GUID the secrecy checks let through can still be refused as a
+      -- table key; a baseline missing one entry would undercount that
+      -- player all key, so the whole snapshot is dropped instead.
+      if not MA:MeterUtil_SafeSet(snapshot, source.sourceGUID, source.totalAmount or 0) then
+        stored = false
+      end
     end
   end)
-  if complete then baseline = snapshot end
+  if complete and stored then baseline = snapshot end
 end
 
 -- Called from Tracker.lua's MA:Tracker_OnTick() (once per second while a
@@ -76,23 +82,34 @@ function MA:Interrupts_OnTick()
   local session = select(1, MA:MeterUtil_GetSession(SESSION_OVERALL, meterType))
   if not session then return end
 
+  -- byPlayer is a LIST of { name, kicks }, never a table keyed by the
+  -- player's name: a meter-provided string used as a table key is what
+  -- threw ~16,000 times in one key (2026-09-15, on a build without the
+  -- name check; the list form cannot throw whatever the client marks
+  -- secret). Storing or concatenating a secret is allowed; keying is not.
   local total, byPlayer = 0, {}
+  local readable = true
   local complete = MA:MeterUtil_ForEachSource(session, function(source)
     local guid = source.sourceGUID
     local name = source.name
     if not guid or type(name) ~= "string" then return end
     local live = source.totalAmount or 0
-    local base = (baseline and baseline[guid]) or 0
+    local base, ok = 0, true
+    if baseline then
+      base, ok = MA:MeterUtil_SafeGet(baseline, guid)
+      base = base or 0
+    end
+    if not ok then readable = false return end
     local delta = live - base
     if delta > 0 then
       total = total + delta
-      byPlayer[name] = (byPlayer[name] or 0) + delta
+      byPlayer[#byPlayer + 1] = { name = name, kicks = delta }
     end
   end)
   -- A secret mid-walk means this pass's numbers are unreliable -- keep the
   -- previous tick's values on screen and just retry next tick, rather than
   -- flashing a wrong (likely lower) count.
-  if not complete then return end
+  if not complete or not readable then return end
 
   MA.state.interrupts = MA.state.interrupts or { total = 0, byPlayer = {} }
   MA.state.interrupts.total = total

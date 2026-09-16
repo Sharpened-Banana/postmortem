@@ -7,6 +7,7 @@ build/*
 !build/entry.py
 !build/postmortem.icns
 !build/postmortem.ico
+!build/entitlements.plist
 dist/
 installer/
 .pytest_cache/
@@ -14,6 +15,10 @@ mdt_data.json
 runs/
 reports/
 .DS_Store
+
+# Warcraft Logs build samples: report codes, and megabytes (see wcl.py)
+spell_damage_samples.json
+wcl_event_samples.json
 
 # The tracker site's source lives in its own private repository
 # (postmortem-site) -- never in this public one.

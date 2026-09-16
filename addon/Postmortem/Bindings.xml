@@ -1,0 +1,12 @@
+<Bindings>
+  <!-- Loaded by the client automatically: this file must NOT be listed in
+       the .toc (it was, in 0.3.2/0.3.3, and the binding never registered:
+       the normal XML loader does not understand a <Bindings> root).
+       category="ADDONS" puts it under Key Bindings > AddOns, the form most
+       installed addons use; the label comes from the
+       BINDING_NAME_POSTMORTEM_SNAPSHOT global set in Snapshot.lua, and
+       Postmortem_SnapshotMark is that file's global entry point. -->
+  <Binding name="POSTMORTEM_SNAPSHOT" category="ADDONS">
+    Postmortem_SnapshotMark()
+  </Binding>
+</Bindings>

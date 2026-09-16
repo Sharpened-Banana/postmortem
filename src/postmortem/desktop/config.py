@@ -59,6 +59,19 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # default: opting in is a deliberate choice, since it begins tailing a
     # file and uploading runs the moment the app opens.
     "watch_auto_start": False,
+    # The snapshot keybind's window (docs/SNAPSHOT.md): how much of the
+    # run before and after the press a snapshot report covers. Watch Live
+    # reads these; the addon shows its own copy in-game.
+    "snapshot_before_s": 120,
+    "snapshot_after_s": 60,
+    # The app's own trigger for a snapshot (desktop/hotkey.py): a
+    # system-wide key combination, empty to disable. Since no marker in
+    # the log carries a role for this path, the focus is a setting:
+    # "healer"/"tank"/"general", or the character name (which wins when
+    # set -- the role comes from that player's spec in the run).
+    "snapshot_hotkey": "ctrl+alt+s",
+    "snapshot_focus": "healer",
+    "snapshot_character": "",
     # Per-dungeon default MDT routes, applied automatically to any run
     # (Watch Live or one-off analysis) that doesn't get an explicit route
     # -- so route adherence shows up on every key without pasting a

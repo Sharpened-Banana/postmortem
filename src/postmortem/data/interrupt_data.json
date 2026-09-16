@@ -2,210 +2,1037 @@
  "spells": {
   "1294557": {
    "name": "Piercing Hiss",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 1673
   },
   "1289416": {
    "name": "Envenom",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 1859
   },
   "1307567": {
    "name": "Mass Envenom",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 562
   },
   "1310358": {
    "name": "Toxic Atrophy",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 392
   },
   "1239394": {
    "name": "Scavenge",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 53
   },
   "1297696": {
    "name": "Healing Breeze",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 424
   },
   "1241214": {
    "name": "Earth Bolt",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 1027
   },
   "1309919": {
    "name": "Frigid Roar",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 496
   },
   "1235829": {
    "name": "Winter's Shroud",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 353
   },
   "1297778": {
    "name": "Arc Lightning",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 237
   },
   "1246687": {
    "name": "Lightning Bolt",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 475
   },
   "1290205": {
    "name": "Lightning Bolt",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 363
   },
   "1291262": {
    "name": "Lightning Bolt",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 2849
   },
   "269972": {
    "name": "Hex Volley",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 139
   },
   "270901": {
    "name": "Unholy Mending",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 159
   },
   "270920": {
    "name": "Bind Soul",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 76
   },
   "1294972": {
    "name": "Soul Bolt",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 297
   },
   "270492": {
    "name": "Hex",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 209
   },
   "1295125": {
    "name": "Spectral Bolt",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 542
   },
   "267763": {
    "name": "Wretched Discharge",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 840
   },
   "267273": {
    "name": "Poison Nova",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 248
   },
   "269369": {
    "name": "Deathly Roar",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 140
   },
   "371984": {
    "name": "Frostbolt",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 895
   },
   "372743": {
    "name": "Ice Shield",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 302
   },
   "372808": {
    "name": "Frigid Shard",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 974
   },
   "384194": {
    "name": "Cinderbolt",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 1500
   },
   "1305955": {
    "name": "Fiery Blast",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 833
   },
   "373017": {
    "name": "Blaze Volley",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 470
   },
   "392576": {
    "name": "Thunder Blast",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 264
   },
   "1301834": {
    "name": "Light Bolt Volley",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 657
   },
   "1235616": {
    "name": "Light Bolt",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 1090
   },
   "1238063": {
    "name": "Light Bolt",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 1187
   },
   "1238294": {
    "name": "Disorienting Screech",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 572
   },
   "1238232": {
    "name": "Seed Shot",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 739
   },
   "1239821": {
    "name": "Warden's Wrath",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 266
   },
   "1247669": {
    "name": "Lightspore Shot",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 134
   },
   "1298899": {
    "name": "Demoralizing Shout",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 423
   },
   "1228176": {
    "name": "Lava Bolt",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 1248
   },
   "1299938": {
    "name": "Shadowbolt Volley",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 366
   },
   "1249621": {
    "name": "Violent Sand",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 166
   },
   "1310324": {
    "name": "Mending Void",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 393
   },
   "1216571": {
    "name": "Fel Missiles",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 1668
   },
   "1201554": {
    "name": "Seduction",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 265
   },
   "1223204": {
    "name": "Felfire Burst",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 522
   },
   "1214922": {
    "name": "Fel Rage",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 768
   },
   "1214980": {
    "name": "Health Funnel",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 317
   },
   "474375": {
    "name": "Chaos Bolt",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 699
   },
   "1310683": {
    "name": "Venom Bolt",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 1034
   },
   "1293307": {
    "name": "Addle Mind",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 302
   },
   "268013": {
    "name": "Flame Shock",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 164
   },
   "1302158": {
    "name": "Flame Shock",
-   "interruptible": true
+   "interruptible": true,
+   "wcl_interrupts": 395
+  },
+  "1233398": {
+   "name": "Mad Shriek",
+   "interruptible": true,
+   "wcl_interrupts": 525
+  },
+  "461904": {
+   "name": "Cosmic Ascension",
+   "interruptible": true,
+   "wcl_interrupts": 507
+  },
+  "1264106": {
+   "name": "Felstorm",
+   "interruptible": true,
+   "wcl_interrupts": 489
+  },
+  "1258431": {
+   "name": "Shadow Bolt",
+   "interruptible": true,
+   "wcl_interrupts": 424
+  },
+  "267027": {
+   "name": "Poison Spit",
+   "interruptible": true,
+   "wcl_interrupts": 367
+  },
+  "1257877": {
+   "name": "Scathing Review",
+   "interruptible": true,
+   "wcl_interrupts": 185
+  },
+  "1310666": {
+   "name": "Toxic Atrophy",
+   "interruptible": true,
+   "wcl_interrupts": 153
+  },
+  "1258420": {
+   "name": "Doom Bolt",
+   "interruptible": true,
+   "wcl_interrupts": 57
+  },
+  "1308100": {
+   "name": "Poisoned Cheap Shot",
+   "interruptible": true,
+   "wcl_interrupts": 40
+  },
+  "385310": {
+   "name": "Storm Bolt",
+   "interruptible": true,
+   "wcl_interrupts": 32
+  },
+  "384197": {
+   "name": "Cinderbolt",
+   "interruptible": true,
+   "wcl_interrupts": 24
+  },
+  "1290147": {
+   "name": "Poison Bolt",
+   "interruptible": true,
+   "wcl_interrupts": 11
+  },
+  "1238200": {
+   "name": "Frantic Blooming",
+   "interruptible": true,
+   "wcl_interrupts": 3
+  },
+  "384933": {
+   "name": "Ice Shield",
+   "interruptible": true,
+   "wcl_interrupts": 1
+  },
+  "1306381": {
+   "name": "Fetid Spit",
+   "interruptible": false,
+   "note": "never interrupted in 6934 begin-casts across 93 public keys (Warcraft Logs); Wowhead: 2.5 sec cast"
+  },
+  "1306657": {
+   "name": "Blood Sacrifice",
+   "interruptible": false,
+   "note": "never interrupted in 4194 begin-casts across 93 public keys (Warcraft Logs); Wowhead: 2 sec cast"
+  },
+  "1246847": {
+   "name": "Shoot",
+   "interruptible": false,
+   "note": "never interrupted in 3883 begin-casts across 54 public keys (Warcraft Logs); Wowhead: 2 sec cast"
+  },
+  "1288457": {
+   "name": "Gust",
+   "interruptible": false,
+   "note": "never interrupted in 2995 begin-casts across 91 public keys (Warcraft Logs); Wowhead: 2 sec cast"
+  },
+  "1296963": {
+   "name": "Umbral Rupture",
+   "interruptible": false,
+   "note": "never interrupted in 2167 begin-casts across 75 public keys (Warcraft Logs); Wowhead: 4 sec cast"
+  },
+  "1222100": {
+   "name": "Nether Dash",
+   "interruptible": false,
+   "note": "never interrupted in 1885 begin-casts across 75 public keys (Warcraft Logs); Wowhead: 7 sec cast"
+  },
+  "1216815": {
+   "name": "Void Pulsar",
+   "interruptible": false,
+   "note": "never interrupted in 1822 begin-casts across 112 public keys (Warcraft Logs); Wowhead: 4 sec cast"
+  },
+  "1230298": {
+   "name": "Chaos Barrage",
+   "interruptible": false,
+   "note": "never interrupted in 1792 begin-casts across 79 public keys (Warcraft Logs); Wowhead: 3 sec cast"
+  },
+  "1266241": {
+   "name": "Freight Explosion",
+   "interruptible": false,
+   "note": "never interrupted in 1678 begin-casts across 74 public keys (Warcraft Logs); Wowhead: 5 sec cast"
+  },
+  "1216589": {
+   "name": "Heartstop Poison",
+   "interruptible": false,
+   "note": "never interrupted in 1328 begin-casts across 88 public keys (Warcraft Logs); Wowhead: 1.5 sec cast"
+  },
+  "1306911": {
+   "name": "Dismember",
+   "interruptible": false,
+   "note": "never interrupted in 1169 begin-casts across 93 public keys (Warcraft Logs); Wowhead: 3 sec cast"
+  },
+  "272655": {
+   "name": "Scouring Sand",
+   "interruptible": false,
+   "note": "never interrupted in 1145 begin-casts across 87 public keys (Warcraft Logs); Wowhead: 4.5 sec cast"
+  },
+  "272388": {
+   "name": "Shadow Barrage",
+   "interruptible": false,
+   "note": "never interrupted in 1104 begin-casts across 69 public keys (Warcraft Logs); Wowhead: 1.5 sec cast"
+  },
+  "1293464": {
+   "name": "Accumulate Charge",
+   "interruptible": false,
+   "note": "never interrupted in 973 begin-casts across 75 public keys (Warcraft Logs); Wowhead: 1.5 sec cast"
+  },
+  "1306517": {
+   "name": "Blood Sacrifice",
+   "interruptible": false,
+   "note": "never interrupted in 932 begin-casts across 93 public keys (Warcraft Logs); Wowhead: Channeled (3 sec), flagged uninterruptible"
+  },
+  "1300698": {
+   "name": "Assimilation",
+   "interruptible": false,
+   "note": "never interrupted in 925 begin-casts across 70 public keys (Warcraft Logs); Wowhead: 2 sec cast"
+  },
+  "1296719": {
+   "name": "Forked Lightning",
+   "interruptible": false,
+   "note": "never interrupted in 883 begin-casts across 80 public keys (Warcraft Logs); Wowhead: 2.5 sec cast"
+  },
+  "1311754": {
+   "name": "Forked Lightning",
+   "interruptible": false,
+   "note": "never interrupted in 844 begin-casts across 68 public keys (Warcraft Logs); Wowhead: 2.5 sec cast"
+  },
+  "1292990": {
+   "name": "Swarming Krolusks",
+   "interruptible": false,
+   "note": "never interrupted in 827 begin-casts across 87 public keys (Warcraft Logs); Wowhead: 2.5 sec cast"
+  },
+  "1237855": {
+   "name": "Earthrupture Strike",
+   "interruptible": false,
+   "note": "never interrupted in 713 begin-casts across 76 public keys (Warcraft Logs); Wowhead: 2.5 sec cast"
+  },
+  "270003": {
+   "name": "Suppression Slam",
+   "interruptible": false,
+   "note": "never interrupted in 712 begin-casts across 90 public keys (Warcraft Logs); Wowhead: 3.5 sec cast"
+  },
+  "1294567": {
+   "name": "Paralyzing Shots",
+   "interruptible": false,
+   "note": "never interrupted in 712 begin-casts across 93 public keys (Warcraft Logs); Wowhead: 3 sec cast"
+  },
+  "1294883": {
+   "name": "Shoot",
+   "interruptible": false,
+   "note": "never interrupted in 676 begin-casts across 81 public keys (Warcraft Logs); Wowhead: 2.5 sec cast"
+  },
+  "1271385": {
+   "name": "Spouting Floret",
+   "interruptible": false,
+   "note": "never interrupted in 660 begin-casts across 75 public keys (Warcraft Logs); Wowhead: 2 sec cast"
+  },
+  "1306668": {
+   "name": "Toxic Breath",
+   "interruptible": false,
+   "note": "never interrupted in 658 begin-casts across 92 public keys (Warcraft Logs); Wowhead: Channeled (3 sec)"
+  },
+  "1295035": {
+   "name": "Glaive Toss",
+   "interruptible": false,
+   "note": "never interrupted in 658 begin-casts across 89 public keys (Warcraft Logs); Wowhead: 2 sec cast"
+  },
+  "1250829": {
+   "name": "Potad-Toss",
+   "interruptible": false,
+   "note": "never interrupted in 651 begin-casts across 50 public keys (Warcraft Logs); Wowhead: 2 sec cast"
+  },
+  "1305810": {
+   "name": "Arc Lightning",
+   "interruptible": false,
+   "note": "never interrupted in 651 begin-casts across 72 public keys (Warcraft Logs); Wowhead: 1 sec cast"
+  },
+  "1293650": {
+   "name": "Call Lightning",
+   "interruptible": false,
+   "note": "never interrupted in 628 begin-casts across 75 public keys (Warcraft Logs); Wowhead: 1.5 sec cast"
+  },
+  "1242135": {
+   "name": "Grievous Gash",
+   "interruptible": false,
+   "note": "never interrupted in 623 begin-casts across 60 public keys (Warcraft Logs); Wowhead: 2.5 sec cast"
+  },
+  "373692": {
+   "name": "Inferno",
+   "interruptible": false,
+   "note": "never interrupted in 602 begin-casts across 66 public keys (Warcraft Logs); Wowhead: 3.5 sec cast"
+  },
+  "1238801": {
+   "name": "Insatiable Hunger",
+   "interruptible": false,
+   "note": "never interrupted in 598 begin-casts across 72 public keys (Warcraft Logs); Wowhead: 6 sec cast"
+  },
+  "1263636": {
+   "name": "Belch Spores",
+   "interruptible": false,
+   "note": "never interrupted in 562 begin-casts across 74 public keys (Warcraft Logs); Wowhead: Channeled (1.5 sec)"
+  },
+  "1216529": {
+   "name": "Shield Bash",
+   "interruptible": false,
+   "note": "never interrupted in 559 begin-casts across 89 public keys (Warcraft Logs); Wowhead: 3 sec cast"
+  },
+  "1297691": {
+   "name": "Whirlwind",
+   "interruptible": false,
+   "note": "never interrupted in 545 begin-casts across 73 public keys (Warcraft Logs); Wowhead: 4 sec cast"
+  },
+  "1291468": {
+   "name": "Sunder Slam",
+   "interruptible": false,
+   "note": "never interrupted in 533 begin-casts across 94 public keys (Warcraft Logs); Wowhead: 3 sec cast"
+  },
+  "1240257": {
+   "name": "Pulverizing Strikes",
+   "interruptible": false,
+   "note": "never interrupted in 532 begin-casts across 57 public keys (Warcraft Logs); Wowhead: 1.9 sec cast"
+  },
+  "1293475": {
+   "name": "Release Charge",
+   "interruptible": false,
+   "note": "never interrupted in 501 begin-casts across 75 public keys (Warcraft Logs); Wowhead: 3 sec cast"
+  },
+  "1250203": {
+   "name": "Hatch",
+   "interruptible": false,
+   "note": "never interrupted in 499 begin-casts across 56 public keys (Warcraft Logs); Wowhead: 10 sec cast"
+  },
+  "1252406": {
+   "name": "Dreadbellow",
+   "interruptible": false,
+   "note": "never interrupted in 479 begin-casts across 65 public keys (Warcraft Logs); Wowhead: 4.5 sec cast"
+  },
+  "1223906": {
+   "name": "Fel Nova",
+   "interruptible": false,
+   "note": "never interrupted in 477 begin-casts across 79 public keys (Warcraft Logs); Wowhead: 3.5 sec cast"
+  },
+  "1242138": {
+   "name": "Solar Breath",
+   "interruptible": false,
+   "note": "never interrupted in 470 begin-casts across 60 public keys (Warcraft Logs); Wowhead: 3 sec cast"
+  },
+  "1291622": {
+   "name": "Storm Catalyst",
+   "interruptible": false,
+   "note": "never interrupted in 470 begin-casts across 75 public keys (Warcraft Logs); Wowhead: 2.5 sec cast"
+  },
+  "266206": {
+   "name": "Whirling Axes",
+   "interruptible": false,
+   "note": "never interrupted in 467 begin-casts across 72 public keys (Warcraft Logs); Wowhead: 2.75 sec cast"
+  },
+  "1301851": {
+   "name": "Bloodthirsty Axe",
+   "interruptible": false,
+   "note": "never interrupted in 465 begin-casts across 73 public keys (Warcraft Logs); Wowhead: 2 sec cast"
+  },
+  "1305945": {
+   "name": "Shadow Whirlwind",
+   "interruptible": false,
+   "note": "never interrupted in 460 begin-casts across 90 public keys (Warcraft Logs); Wowhead: 4 sec cast"
+  },
+  "270482": {
+   "name": "Violent Lunge",
+   "interruptible": false,
+   "note": "never interrupted in 454 begin-casts across 73 public keys (Warcraft Logs); Wowhead: 3 sec cast"
+  },
+  "1255205": {
+   "name": "Uproot",
+   "interruptible": false,
+   "note": "never interrupted in 450 begin-casts across 75 public keys (Warcraft Logs); Wowhead: 3 sec cast"
+  },
+  "1296220": {
+   "name": "Triple Shot",
+   "interruptible": false,
+   "note": "never interrupted in 448 begin-casts across 75 public keys (Warcraft Logs); Wowhead: 2 sec cast"
+  },
+  "1300243": {
+   "name": "Brutalize",
+   "interruptible": false,
+   "note": "never interrupted in 446 begin-casts across 65 public keys (Warcraft Logs); Wowhead: Channeled (2 sec)"
+  },
+  "265773": {
+   "name": "Spit Gold",
+   "interruptible": false,
+   "note": "never interrupted in 445 begin-casts across 85 public keys (Warcraft Logs); Wowhead: 2 sec cast"
+  },
+  "1238760": {
+   "name": "Starvation Effigy",
+   "interruptible": false,
+   "note": "never interrupted in 438 begin-casts across 72 public keys (Warcraft Logs); Wowhead: 1.5 sec cast"
+  },
+  "1246957": {
+   "name": "Primal Echo",
+   "interruptible": false,
+   "note": "never interrupted in 435 begin-casts across 54 public keys (Warcraft Logs); Wowhead: 3 sec cast"
+  },
+  "265910": {
+   "name": "Tail Thrash",
+   "interruptible": false,
+   "note": "never interrupted in 435 begin-casts across 85 public keys (Warcraft Logs); Wowhead: 1.5 sec cast"
+  },
+  "1217633": {
+   "name": "Corroding Spittle",
+   "interruptible": false,
+   "note": "never interrupted in 432 begin-casts across 84 public keys (Warcraft Logs); Wowhead: 2 sec cast"
+  },
+  "1222642": {
+   "name": "Hulking Claw",
+   "interruptible": false,
+   "note": "never interrupted in 428 begin-casts across 68 public keys (Warcraft Logs); Wowhead: 2 sec cast"
+  },
+  "1290531": {
+   "name": "Induction",
+   "interruptible": false,
+   "note": "never interrupted in 428 begin-casts across 72 public keys (Warcraft Logs)"
+  },
+  "1297682": {
+   "name": "Drain Life",
+   "interruptible": false,
+   "note": "never interrupted in 427 begin-casts across 73 public keys (Warcraft Logs); Wowhead: Channeled (2 sec)"
+  },
+  "1239856": {
+   "name": "Sky Strike",
+   "interruptible": false,
+   "note": "never interrupted in 426 begin-casts across 65 public keys (Warcraft Logs); Wowhead: 5 sec cast"
+  },
+  "372730": {
+   "name": "Crushing Smash",
+   "interruptible": false,
+   "note": "never interrupted in 426 begin-casts across 80 public keys (Warcraft Logs); Wowhead: 2.5 sec cast"
+  },
+  "270293": {
+   "name": "Purification Strike",
+   "interruptible": false,
+   "note": "never interrupted in 423 begin-casts across 80 public keys (Warcraft Logs); Wowhead: 2 sec cast"
+  },
+  "1289062": {
+   "name": "Gale Force",
+   "interruptible": false,
+   "note": "never interrupted in 419 begin-casts across 91 public keys (Warcraft Logs)"
+  },
+  "1311987": {
+   "name": "Serpentine Gust",
+   "interruptible": false,
+   "note": "never interrupted in 417 begin-casts across 85 public keys (Warcraft Logs)"
+  },
+  "381525": {
+   "name": "Roaring Firebreath",
+   "interruptible": false,
+   "note": "never interrupted in 409 begin-casts across 54 public keys (Warcraft Logs); Wowhead: Channeled (4 sec)"
+  },
+  "372107": {
+   "name": "Molten Boulder",
+   "interruptible": false,
+   "note": "never interrupted in 407 begin-casts across 56 public keys (Warcraft Logs); Wowhead: 2.5 sec cast"
+  },
+  "1222721": {
+   "name": "Noxious Breath",
+   "interruptible": false,
+   "note": "never interrupted in 406 begin-casts across 68 public keys (Warcraft Logs); Wowhead: Channeled (4 sec)"
+  },
+  "1303443": {
+   "name": "Venomous Slash",
+   "interruptible": false,
+   "note": "never interrupted in 405 begin-casts across 71 public keys (Warcraft Logs)"
+  },
+  "384823": {
+   "name": "Inferno",
+   "interruptible": false,
+   "note": "never interrupted in 405 begin-casts across 56 public keys (Warcraft Logs); Wowhead: 3 sec cast"
+  },
+  "1246986": {
+   "name": "Poison Spear Volley",
+   "interruptible": false,
+   "note": "never interrupted in 402 begin-casts across 54 public keys (Warcraft Logs); Wowhead: 2 sec cast"
+  },
+  "1294845": {
+   "name": "Corrosive Fangs",
+   "interruptible": false,
+   "note": "never interrupted in 400 begin-casts across 71 public keys (Warcraft Logs); Wowhead: 3 sec cast"
+  },
+  "1238687": {
+   "name": "Feast of Misery",
+   "interruptible": false,
+   "note": "never interrupted in 396 begin-casts across 72 public keys (Warcraft Logs); Wowhead: Channeled (1.5 sec)"
+  },
+  "269976": {
+   "name": "Ancestral Fury",
+   "interruptible": false,
+   "note": "never interrupted in 388 begin-casts across 91 public keys (Warcraft Logs)"
+  },
+  "271555": {
+   "name": "Entomb",
+   "interruptible": false,
+   "note": "never interrupted in 386 begin-casts across 78 public keys (Warcraft Logs)"
+  },
+  "396044": {
+   "name": "Hailburst",
+   "interruptible": false,
+   "note": "never interrupted in 377 begin-casts across 67 public keys (Warcraft Logs)"
+  },
+  "1302153": {
+   "name": "Latent Hex",
+   "interruptible": false,
+   "note": "never interrupted in 366 begin-casts across 70 public keys (Warcraft Logs)"
+  },
+  "1300138": {
+   "name": "Void Beam",
+   "interruptible": false,
+   "note": "never interrupted in 364 begin-casts across 65 public keys (Warcraft Logs); Wowhead: Channeled (2 sec)"
+  },
+  "1294849": {
+   "name": "Rattle",
+   "interruptible": false,
+   "note": "never interrupted in 362 begin-casts across 71 public keys (Warcraft Logs); Wowhead: Channeled (3 sec)"
+  },
+  "473898": {
+   "name": "Legion Strike",
+   "interruptible": false,
+   "note": "never interrupted in 362 begin-casts across 69 public keys (Warcraft Logs); Wowhead: 3 sec cast"
+  },
+  "1236746": {
+   "name": "Verdant Stomp",
+   "interruptible": false,
+   "note": "never interrupted in 358 begin-casts across 63 public keys (Warcraft Logs); Wowhead: 3 sec cast"
+  },
+  "1300249": {
+   "name": "Devour",
+   "interruptible": false,
+   "note": "never interrupted in 351 begin-casts across 65 public keys (Warcraft Logs); Wowhead: 9 sec cast"
+  },
+  "1216970": {
+   "name": "Back to Work!",
+   "interruptible": false,
+   "note": "never interrupted in 351 begin-casts across 74 public keys (Warcraft Logs); Wowhead: 3 sec cast"
+  },
+  "1307502": {
+   "name": "Summon Primal Thunderclouds",
+   "interruptible": false,
+   "note": "never interrupted in 345 begin-casts across 56 public keys (Warcraft Logs)"
+  },
+  "267618": {
+   "name": "Drain Fluids",
+   "interruptible": false,
+   "note": "never interrupted in 344 begin-casts across 75 public keys (Warcraft Logs)"
+  },
+  "1303486": {
+   "name": "Caustic Stomp",
+   "interruptible": false,
+   "note": "never interrupted in 342 begin-casts across 71 public keys (Warcraft Logs)"
+  },
+  "1305201": {
+   "name": "Excavating Blast",
+   "interruptible": false,
+   "note": "never interrupted in 342 begin-casts across 80 public keys (Warcraft Logs)"
+  },
+  "1297017": {
+   "name": "Void Blast",
+   "interruptible": false,
+   "note": "never interrupted in 337 begin-casts across 75 public keys (Warcraft Logs); Wowhead: 2 sec cast"
+  },
+  "1300803": {
+   "name": "Tainted Strike",
+   "interruptible": false,
+   "note": "never interrupted in 335 begin-casts across 70 public keys (Warcraft Logs)"
+  },
+  "266951": {
+   "name": "Barrel Through",
+   "interruptible": false,
+   "note": "never interrupted in 334 begin-casts across 72 public keys (Warcraft Logs)"
+  },
+  "1301413": {
+   "name": "Boneslicer",
+   "interruptible": false,
+   "note": "never interrupted in 332 begin-casts across 66 public keys (Warcraft Logs); Wowhead: 5 sec cast"
+  },
+  "265966": {
+   "name": "Ground Pound",
+   "interruptible": false,
+   "note": "never interrupted in 329 begin-casts across 94 public keys (Warcraft Logs)"
+  },
+  "1217973": {
+   "name": "Curse of Doom",
+   "interruptible": false,
+   "note": "never interrupted in 329 begin-casts across 73 public keys (Warcraft Logs); Wowhead: 1.5 sec cast"
+  },
+  "1301350": {
+   "name": "Chop Down",
+   "interruptible": false,
+   "note": "never interrupted in 328 begin-casts across 66 public keys (Warcraft Logs); Wowhead: Channeled (1.5 sec), flagged uninterruptible"
+  },
+  "1300259": {
+   "name": "Dark Bloom",
+   "interruptible": false,
+   "note": "never interrupted in 324 begin-casts across 75 public keys (Warcraft Logs); Wowhead: 4 sec cast"
+  },
+  "1288864": {
+   "name": "Tempest Winds",
+   "interruptible": false,
+   "note": "never interrupted in 318 begin-casts across 90 public keys (Warcraft Logs)"
+  },
+  "267639": {
+   "name": "Burn Corruption",
+   "interruptible": false,
+   "note": "never interrupted in 311 begin-casts across 74 public keys (Warcraft Logs)"
+  },
+  "1253811": {
+   "name": "Fel Spray",
+   "interruptible": false,
+   "note": "never interrupted in 310 begin-casts across 79 public keys (Warcraft Logs); Wowhead: Channeled (3.5 sec)"
+  },
+  "372047": {
+   "name": "Steel Barrage",
+   "interruptible": false,
+   "note": "never interrupted in 309 begin-casts across 74 public keys (Warcraft Logs)"
+  },
+  "381517": {
+   "name": "Winds of Change",
+   "interruptible": false,
+   "note": "never interrupted in 298 begin-casts across 54 public keys (Warcraft Logs)"
+  },
+  "372851": {
+   "name": "Chillstorm",
+   "interruptible": false,
+   "note": "never interrupted in 296 begin-casts across 67 public keys (Warcraft Logs)"
+  },
+  "381512": {
+   "name": "Stormslam",
+   "interruptible": false,
+   "note": "never interrupted in 287 begin-casts across 54 public keys (Warcraft Logs)"
+  },
+  "372087": {
+   "name": "Blazing Rush",
+   "interruptible": false,
+   "note": "never interrupted in 284 begin-casts across 72 public keys (Warcraft Logs)"
+  },
+  "1288087": {
+   "name": "Thunder and Lightning",
+   "interruptible": false,
+   "note": "never interrupted in 283 begin-casts across 91 public keys (Warcraft Logs)"
+  },
+  "1241463": {
+   "name": "Glacial Tomb",
+   "interruptible": false,
+   "note": "never interrupted in 277 begin-casts across 58 public keys (Warcraft Logs)"
+  },
+  "1294824": {
+   "name": "Defiled Slam",
+   "interruptible": false,
+   "note": "never interrupted in 277 begin-casts across 68 public keys (Warcraft Logs)"
+  },
+  "1234753": {
+   "name": "Bedrock Slam",
+   "interruptible": false,
+   "note": "never interrupted in 269 begin-casts across 66 public keys (Warcraft Logs)"
+  },
+  "1235640": {
+   "name": "Thornblade",
+   "interruptible": false,
+   "note": "never interrupted in 264 begin-casts across 66 public keys (Warcraft Logs)"
+  },
+  "381516": {
+   "name": "Interrupting Cloudburst",
+   "interruptible": false,
+   "note": "never interrupted in 262 begin-casts across 54 public keys (Warcraft Logs)"
+  },
+  "1307894": {
+   "name": "Ravenous Stomp",
+   "interruptible": false,
+   "note": "never interrupted in 261 begin-casts across 75 public keys (Warcraft Logs)"
+  },
+  "267257": {
+   "name": "Disruption",
+   "interruptible": false,
+   "note": "never interrupted in 258 begin-casts across 72 public keys (Warcraft Logs)"
+  },
+  "1261011": {
+   "name": "Fan Of Thorns",
+   "interruptible": false,
+   "note": "never interrupted in 256 begin-casts across 66 public keys (Warcraft Logs)"
+  },
+  "1222795": {
+   "name": "Envenom",
+   "interruptible": false,
+   "note": "never interrupted in 255 begin-casts across 73 public keys (Warcraft Logs)"
+  },
+  "1234850": {
+   "name": "Lightsower Dash",
+   "interruptible": false,
+   "note": "never interrupted in 249 begin-casts across 66 public keys (Warcraft Logs)"
+  },
+  "1242860": {
+   "name": "Echoing Maul",
+   "interruptible": false,
+   "note": "never interrupted in 249 begin-casts across 51 public keys (Warcraft Logs)"
+  },
+  "1302028": {
+   "name": "Soul Crush",
+   "interruptible": false,
+   "note": "never interrupted in 248 begin-casts across 73 public keys (Warcraft Logs)"
+  },
+  "1306852": {
+   "name": "Toxic Surge",
+   "interruptible": false,
+   "note": "never interrupted in 239 begin-casts across 69 public keys (Warcraft Logs)"
+  },
+  "1234890": {
+   "name": "Smashing Charge",
+   "interruptible": false,
+   "note": "never interrupted in 239 begin-casts across 76 public keys (Warcraft Logs)"
+  },
+  "1297792": {
+   "name": "Overwhelming Onslaught",
+   "interruptible": false,
+   "note": "never interrupted in 238 begin-casts across 51 public keys (Warcraft Logs)"
+  },
+  "373614": {
+   "name": "Burnout",
+   "interruptible": false,
+   "note": "never interrupted in 238 begin-casts across 63 public keys (Warcraft Logs)"
+  },
+  "372863": {
+   "name": "Ritual of Blazebinding",
+   "interruptible": false,
+   "note": "never interrupted in 237 begin-casts across 56 public keys (Warcraft Logs)"
+  },
+  "1235129": {
+   "name": "Bonespike Slam",
+   "interruptible": false,
+   "note": "never interrupted in 234 begin-casts across 62 public keys (Warcraft Logs)"
+  },
+  "1249661": {
+   "name": "Feral Rage",
+   "interruptible": false,
+   "note": "never interrupted in 232 begin-casts across 75 public keys (Warcraft Logs)"
+  },
+  "1296671": {
+   "name": "Captain's Bulwark",
+   "interruptible": false,
+   "note": "never interrupted in 231 begin-casts across 80 public keys (Warcraft Logs)"
+  },
+  "1299130": {
+   "name": "Burrowing Charge",
+   "interruptible": false,
+   "note": "never interrupted in 231 begin-casts across 70 public keys (Warcraft Logs)"
+  },
+  "1235564": {
+   "name": "Lightblossom Beam",
+   "interruptible": false,
+   "note": "never interrupted in 228 begin-casts across 66 public keys (Warcraft Logs)"
+  },
+  "1303267": {
+   "name": "Gilded Destruction",
+   "interruptible": false,
+   "note": "never interrupted in 228 begin-casts across 69 public keys (Warcraft Logs)"
+  },
+  "1288428": {
+   "name": "Overload",
+   "interruptible": false,
+   "note": "never interrupted in 227 begin-casts across 91 public keys (Warcraft Logs)"
+  },
+  "1300044": {
+   "name": "Venom Jet",
+   "interruptible": false,
+   "note": "never interrupted in 225 begin-casts across 70 public keys (Warcraft Logs)"
+  },
+  "391723": {
+   "name": "Flame Breath",
+   "interruptible": false,
+   "note": "never interrupted in 224 begin-casts across 58 public keys (Warcraft Logs)"
+  },
+  "268586": {
+   "name": "Blade Combo",
+   "interruptible": false,
+   "note": "never interrupted in 223 begin-casts across 69 public keys (Warcraft Logs)"
+  },
+  "1297797": {
+   "name": "Forceful Slam",
+   "interruptible": false,
+   "note": "never interrupted in 221 begin-casts across 51 public keys (Warcraft Logs)"
+  },
+  "1297918": {
+   "name": "Mortal Bleed",
+   "interruptible": false,
+   "note": "never interrupted in 220 begin-casts across 82 public keys (Warcraft Logs)"
+  },
+  "1239824": {
+   "name": "Lightfire",
+   "interruptible": false,
+   "note": "never interrupted in 212 begin-casts across 57 public keys (Warcraft Logs)"
+  },
+  "1296722": {
+   "name": "Earthquake",
+   "interruptible": false,
+   "note": "never interrupted in 212 begin-casts across 51 public keys (Warcraft Logs)"
+  },
+  "1306844": {
+   "name": "Totemic Ritual",
+   "interruptible": false,
+   "note": "never interrupted in 208 begin-casts across 93 public keys (Warcraft Logs)"
+  },
+  "1294770": {
+   "name": "Demonic Frenzy",
+   "interruptible": false,
+   "note": "never interrupted in 208 begin-casts across 73 public keys (Warcraft Logs)"
+  },
+  "1241058": {
+   "name": "Grievous Thrash",
+   "interruptible": false,
+   "note": "never interrupted in 207 begin-casts across 57 public keys (Warcraft Logs)"
+  },
+  "270514": {
+   "name": "Seismic Upheaval",
+   "interruptible": false,
+   "note": "never interrupted in 207 begin-casts across 73 public keys (Warcraft Logs)"
+  },
+  "1300876": {
+   "name": "Ritual of the Fang",
+   "interruptible": false,
+   "note": "never interrupted in 207 begin-casts across 66 public keys (Warcraft Logs)"
+  },
+  "1298900": {
+   "name": "Brutal Slams",
+   "interruptible": false,
+   "note": "never interrupted in 207 begin-casts across 67 public keys (Warcraft Logs)"
+  },
+  "1215961": {
+   "name": "Fel Beam",
+   "interruptible": false,
+   "note": "never interrupted in 206 begin-casts across 68 public keys (Warcraft Logs)"
+  },
+  "1296058": {
+   "name": "Regurgitate",
+   "interruptible": false,
+   "note": "never interrupted in 200 begin-casts across 74 public keys (Warcraft Logs)"
   }
  },
- "source": "method.gg",
+ "source": "method.gg + warcraftlogs.com",
  "season": "Midnight S2 (patch 12.1)",
- "source_version": "2026-09-06"
+ "source_version": "2026-09-06",
+ "wcl_version": "2026-09-15"
 }
