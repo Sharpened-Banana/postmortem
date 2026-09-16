@@ -10,6 +10,7 @@ from conftest import DPS1, HEALER, TANK, LogBuilder, build_run_log
 from postmortem.analysis.gamedata import ACTIVE_MITIGATION
 from postmortem.analysis.snapshot import (
     MARKER_CLUSTER_S,
+    MARKER_GAP_S,
     Marker,
     build_snapshot,
     find_markers,
@@ -81,13 +82,17 @@ class TestFindMarkers:
         assert find_markers([_header(10.0), _header(50.0)]) == []
 
     def test_clustering_is_measured_from_the_first_header(self):
-        # 1.0 + 1.0 apart: the third is 2 s from the first, so it is a
-        # new (single, non-marker) cluster, not a tank marker
+        # 1.0 s apart is the addon's own re-assert at key start (real key,
+        # 2026-09-16) -- three of those are three lone headers, no marker
         events = [_header(0.0), _header(1.0), _header(2.0)]
+        assert find_markers(events) == []
+        # exactly at the gap boundary still belongs to the cluster
+        events = [_header(0.0), _header(MARKER_GAP_S)]
         assert find_markers(events) == [Marker(0.0, "healer", 2)]
-        # exactly at the boundary still belongs to the cluster
-        events = [_header(0.0), _header(MARKER_CLUSTER_S)]
-        assert find_markers(events) == [Marker(0.0, "healer", 2)]
+        # the gap is between NEIGHBOURS: four headers 0.5 s apart span 1.5 s
+        # and are still one general marker
+        events = [_header(0.0), _header(0.5), _header(1.0), _header(1.5)]
+        assert find_markers(events) == [Marker(0.0, "general", 4)]
 
     def test_ts_is_the_first_headers_and_other_events_are_ignored(self):
         events = [
@@ -108,7 +113,7 @@ class TestFindMarkers:
         ]
         assert len(headers) == 4
         gaps = [b - a for a, b in zip(headers, headers[1:])]
-        assert min(gaps) > MARKER_CLUSTER_S
+        assert min(gaps) > MARKER_GAP_S
         assert min(gaps) < 2.5  # the pair really is close -- the rule is what saves it
         for run in runs:
             assert find_markers(run.events) == []

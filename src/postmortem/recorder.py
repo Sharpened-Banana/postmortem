@@ -54,10 +54,11 @@ _DEATH_RE = re.compile(r"  UNIT_DIED,")
 # docs/SNAPSHOT.md and analysis/snapshot.py (the same rule, applied to
 # parsed events). A lone header is any ordinary toggle.
 _HEADER_RE = re.compile(r"  COMBAT_LOG_VERSION,")
-#: Headers closer together than this belong to one marker; the 2 s-apart
-#: pair every log starts with (the addon re-asserting logging at login)
-#: must NOT.
-MARKER_CLUSTER_S = 1.5
+#: Consecutive headers closer together than this belong to one marker
+#: (the addon's toggles are 0.25 s apart). The 2 s-apart login pair and
+#: the addon's 1.0 s-apart re-assert at key start must NOT -- same rule
+#: and reasoning as analysis/snapshot.MARKER_GAP_S.
+MARKER_GAP_S = 0.6
 _MARKER_ROLES = {2: "healer", 3: "tank"}
 
 
@@ -245,8 +246,7 @@ class Recorder:
     # A snapshot marker planted by the addon's keybind (see _HEADER_RE):
     # ``(run, marker_ts, role)`` with the first header's timestamp. Fired
     # once the cluster is known to be complete, i.e. when a later line
-    # is more than MARKER_CLUSTER_S past its first header (or the run
-    # closes).
+    # is more than MARKER_GAP_S past its last header (or the run closes).
     on_snapshot_marker: Optional[Callable[["RecordedRun", float, str], None]] = None
     _current: Optional[RecordedRun] = None
     _out_fh: Optional[object] = field(default=None, repr=False)
@@ -712,7 +712,7 @@ class Recorder:
         event = parse_line(line)
         if event is None:
             return
-        if cluster and event.ts - cluster[0] > MARKER_CLUSTER_S:
+        if cluster and event.ts - cluster[-1] > MARKER_GAP_S:
             self._flush_marker_cluster()
             cluster = self._marker_cluster
         if is_header:

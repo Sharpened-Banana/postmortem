@@ -61,10 +61,17 @@ from .run_analyzer import (
 from .stats import compute_stats
 from .stealable import StealableData
 
-#: Header lines closer than this to the first of their cluster are one
-#: marker. The addon spaces its toggles 0.25 s apart, so even a 4-header
-#: "general" marker spans ~0.75 s; the login pair WoW writes on its own
-#: is ~2 s apart (verified in tests/fixtures/real_logs) and must not merge.
+#: Consecutive header lines closer than this are one marker. The addon
+#: spaces its toggles 0.25 s apart, so a marker's headers are ~0.25 s
+#: apart; the pairs WoW/the addon write on their own are further: the
+#: login pair ~2 s (tests/fixtures/real_logs), and the addon's own
+#: re-assert at CHALLENGE_MODE_START exactly 1.0 s (a real key,
+#: 2026-09-16: 07:26:38.333 and 07:26:39.333) -- which the earlier rule
+#: ("within 1.5 s of the cluster's FIRST header") would have read as a
+#: healer marker at every key start. Gap between neighbours, not span.
+MARKER_GAP_S = 0.6
+#: Kept for callers that match a marker back to a timestamp (see
+#: build_snapshot): the widest span a real marker can have.
 MARKER_CLUSTER_S = 1.5
 #: The role a header count encodes (docs/SNAPSHOT.md section 1); 4 or
 #: more is "general", a lone header is not a marker at all.
@@ -98,10 +105,11 @@ def role_for_count(count: int) -> Optional[str]:
 
 def find_markers(events: list[Event]) -> list[Marker]:
     """Cluster consecutive ``COMBAT_LOG_VERSION`` events whose ts is within
-    MARKER_CLUSTER_S of the cluster's first; each cluster of 2+ is one
+    MARKER_GAP_S of the previous header; each cluster of 2+ is one
     marker at the first header's timestamp."""
     markers: list[Marker] = []
     first_ts: Optional[float] = None
+    last_ts: Optional[float] = None
     count = 0
 
     def flush() -> None:
@@ -112,11 +120,12 @@ def find_markers(events: list[Event]) -> list[Marker]:
     for ev in events:
         if ev.name != "COMBAT_LOG_VERSION":
             continue
-        if first_ts is not None and ev.ts - first_ts <= MARKER_CLUSTER_S:
+        if last_ts is not None and ev.ts - last_ts <= MARKER_GAP_S:
             count += 1
+            last_ts = ev.ts
             continue
         flush()
-        first_ts = ev.ts
+        first_ts = last_ts = ev.ts
         count = 1
     flush()
     return markers
