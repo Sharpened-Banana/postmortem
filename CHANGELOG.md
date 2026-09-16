@@ -1,5 +1,15 @@
 # Postmortem addon
 
+## 0.3.3 (2026-09-15)
+
+- Fixes "Interrupts.lua:89: attempted to index a table that cannot be
+  indexed with secret keys", which fired every frame of a key on builds
+  before 0.3.1 and could still be reached on 12.1: the kick counter no
+  longer keys any table by a meter-provided player name or GUID, the
+  secrecy check also honours the 12.1 `canaccessvalue()`, and a key the
+  client refuses is skipped for that tick with the last good values kept.
+  Pull-progress tracking gets the same guard.
+
 ## 0.3.2 (2026-09-15)
 
 - "Mark a snapshot" keybind (Key Bindings > AddOns > Postmortem) and

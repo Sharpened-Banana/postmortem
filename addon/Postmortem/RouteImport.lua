@@ -168,7 +168,10 @@ local function SnapshotBaselineGUIDs()
   local session = select(1, MA:MeterUtil_GetSession(SESSION_OVERALL, meterType))
   if not session then return end
   MA:MeterUtil_ForEachSource(session, function(source)
-    if source.sourceGUID then seenGUIDs[source.sourceGUID] = true end
+    -- guarded: a GUID refused as a table key must not throw (see
+    -- MeterUtil_SafeSet); a missing seen-entry only risks counting one
+    -- pre-key enemy as new activity, which the size heuristics tolerate.
+    if source.sourceGUID then MA:MeterUtil_SafeSet(seenGUIDs, source.sourceGUID, true) end
   end)
 end
 
@@ -208,9 +211,11 @@ function MA:RouteImport_OnTick()
       local sawNewActivity = false
       local complete = MA:MeterUtil_ForEachSource(session, function(source)
         local guid = source.sourceGUID
-        if not guid or seenGUIDs[guid] then return end
-        seenGUIDs[guid] = true
-        currentPullGUIDs[guid] = true
+        if not guid then return end
+        local seen, ok = MA:MeterUtil_SafeGet(seenGUIDs, guid)
+        if not ok or seen then return end
+        if not MA:MeterUtil_SafeSet(seenGUIDs, guid, true) then return end
+        MA:MeterUtil_SafeSet(currentPullGUIDs, guid, true)
         sawNewActivity = true
       end)
       if complete then

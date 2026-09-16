@@ -41,3 +41,8 @@ Note that `luac` on a dev machine is usually Lua 5.5, not WoW's 5.1 VM, so a
 clean parse does not prove client compatibility on its own -- `luacheck
 --std lua51` is the closer check (its "accessing undefined variable" list is
 all WoW globals and expected).
+
+`interrupts_secret.lua` -- Interrupts.lua under Secret Values: names/GUIDs
+the client refuses as table keys (simulated by overriding `rawset`/`rawget`),
+`canaccessvalue()` as a secrecy signal, and the "keep last good values"
+behaviour on a bad tick.
