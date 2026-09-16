@@ -317,6 +317,102 @@ def resolve_stealable_data_path(settings: dict[str, Any]) -> Optional[Path]:
     return default if default.is_file() else None
 
 
+#: The addon's SavedVariables file, holding (among other tables) the
+#: PostmortemTankDB spellbook capture the tank death post-mortem reads.
+TANK_DB_FILENAME = "Postmortem.lua"
+
+
+def _wow_flavor_roots(settings: dict[str, Any]) -> list[Path]:
+    """Candidate ``_retail_``-style folders, derived from the WoW paths the
+    app already knows about.
+
+    The user never tells this app where WoW is installed as such -- they
+    point it at a Logs folder (Watch Live) and optionally at their MDT
+    addon folder. Both sit at a known depth inside one flavor folder:
+
+        <flavor>/Logs/WoWCombatLog.txt
+        <flavor>/Interface/AddOns/MythicDungeonTools
+
+    so either one identifies the flavor root, and from there the WTF tree
+    is a fixed relative path. Ordered most-trusted first, de-duplicated,
+    and never raising: a setting can hold anything a file picker produced,
+    including a path that no longer exists.
+    """
+    roots: list[Path] = []
+
+    def _add(path: Optional[Path]) -> None:
+        if path is not None and path not in roots:
+            roots.append(path)
+
+    log_path = settings.get("wow_log_path")
+    if log_path:
+        try:
+            _add(watch_log_folder(log_path).parent)
+        except (OSError, ValueError):
+            pass
+
+    addon_path = settings.get("wow_addon_path")
+    if addon_path:
+        try:
+            # <flavor>/Interface/AddOns/<Addon> -> up three
+            _add(Path(addon_path).resolve().parents[2])
+        except (OSError, ValueError, IndexError):
+            pass
+
+    return roots
+
+
+def resolve_tank_db_path(settings: dict[str, Any]) -> Optional[Path]:
+    """The Postmortem addon SavedVariables file to read the tank
+    spellbook capture from, or None when one can't be found.
+
+    Why this is discovered rather than configured: the capture exists to
+    tell the analyzer which defensives the player actually has talented --
+    the one thing a combat log cannot carry (see
+    ``analysis/tank_death.py``). Without it the report falls back to
+    hedging with "may not be talented", which is a materially worse report
+    for a reason the user has no way to guess at. Making them find and
+    paste a path inside ``WTF/Account/<ACCOUNT>/SavedVariables/`` to avoid
+    that would leave almost everyone on the worse report forever -- the
+    same trap ``resolve_avoidable_data_path`` documents, where a blank
+    field silently meant "feature missing".
+
+    An explicit ``tank_db_path`` setting still wins, for multi-install or
+    unusual layouts.
+
+    Account folders are globbed because an install can hold several, and
+    the newest-modified one is the account actually being played -- the
+    same "newest mtime is the live one" reasoning ``resolve_watch_log_path``
+    uses to pick among rotated combat logs.
+    """
+    configured = settings.get("tank_db_path")
+    if configured:
+        path = Path(configured)
+        return path if path.is_file() else None
+
+    candidates: list[Path] = []
+    for root in _wow_flavor_roots(settings):
+        try:
+            candidates.extend(
+                (root / "WTF" / "Account").glob(f"*/SavedVariables/{TANK_DB_FILENAME}")
+            )
+        except OSError:
+            continue
+
+    def _mtime(path: Path) -> float:
+        # Same guarded stat as resolve_watch_log_path: glob can name a file
+        # that is gone by the time it is stat'd.
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return -1.0
+
+    readable = [p for p in candidates if _mtime(p) >= 0]
+    if not readable:
+        return None
+    return max(readable, key=_mtime)
+
+
 def resolve_dungeon_data_path(settings: dict[str, Any]) -> Optional[Path]:
     """The MDT dungeon/enemy data to analyze with: an explicit
     ``dungeon_data_path`` setting when set, else a ``dungeon_data.json``

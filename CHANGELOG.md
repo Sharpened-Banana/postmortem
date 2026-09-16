@@ -11,6 +11,9 @@
 - The tank post-mortem now has an Options toggle of its own, keeps every
   death in a key rather than only the most recent, and records what it
   found into a new `PostmortemTankDB` saved-variables table.
+- The desktop app and Watch Live now find that capture themselves, from
+  the WoW folder you already pointed them at — no path to configure, and
+  nothing to know about. The CLI keeps `--tank-db` for explicit use.
 - That capture includes which defensives the client confirms you have
   talented — the one thing a combat log can never carry. Point the
   analyzer at it with `postmortem analyze --tank-db <SavedVariables>` and
