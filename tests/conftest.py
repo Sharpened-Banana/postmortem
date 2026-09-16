@@ -105,6 +105,20 @@ class LogBuilder:
         self.raw(t, f"COMBATANT_INFO,{guid},0,{stats},{spec},(1,2,3),(0,0,0,0),"
                     f"[1],[2],[3],{ilvl},0,0,0")
 
+    def log_header(self, t: float):
+        """The COMBAT_LOG_VERSION line WoW writes each time combat logging
+        is switched on -- what the addon's snapshot keybind plants in
+        clusters (see docs/SNAPSHOT.md)."""
+        self.raw(t, "COMBAT_LOG_VERSION,22,ADVANCED_LOG_ENABLED,1,"
+                    "BUILD_VERSION,12.1.0,PROJECT_ID,1")
+
+    def snapshot_marker(self, t: float, role: str = "healer"):
+        """A whole marker cluster: 2 headers for a healer, 3 for a tank,
+        4 for anything else, 0.25 s apart like the addon's own toggles."""
+        count = {"healer": 2, "tank": 3}.get(role, 4)
+        for i in range(count):
+            self.log_header(t + 0.25 * i)
+
     def encounter_start(self, t: float, enc_id=3001, name="Big Boss"):
         self.raw(t, f'ENCOUNTER_START,{enc_id},"{name}",8,5,2830')
 
@@ -119,7 +133,7 @@ class LogBuilder:
 
     @staticmethod
     def _advanced(info_guid: str, hp=500000, max_hp=1000000, x=100.0, y=-200.0,
-                  absorb=0):
+                  absorb=0, power_type=3, power=100, max_power=100):
         # 19 fields, matching the real (2026-era, BUILD_VERSION 12.1.0)
         # client's advanced-logging block -- confirmed field-by-field
         # against two independent real combat-log lines during live
@@ -137,8 +151,11 @@ class LogBuilder:
         # Fields: infoGUID, ownerGUID, currentHP, maxHP, attackPower,
         # spellPower, armor, unknown, unknown, absorb, powerType,
         # currentPower, maxPower, powerCost, x, y, uiMapID, facing, level.
+        # power_type 3 (energy) by default; a healer test passes 0 (mana)
+        # so the snapshot's mana series has something to read.
         return (f"{info_guid},0000000000000000,{hp},{max_hp},2000,1000,500,"
-                f"0,0,{absorb},3,100,100,0,{x:.2f},{y:.2f},2200,1.57,80")
+                f"0,0,{absorb},{power_type},{power},{max_power},0,"
+                f"{x:.2f},{y:.2f},2200,1.57,80")
 
     # -- combat events --
 
@@ -208,22 +225,25 @@ class LogBuilder:
                     f'{amount},{amount},0,0,nil')
 
     def heal(self, t, src_player, dst_player, spell_id, spell_name, amount,
-             overheal=0, hp=500000):
+             overheal=0, hp=500000, power_type=3, power=100, max_power=100):
         """``hp`` is the target's health AFTER the heal -- that is what a
         real heal's advanced block carries, and what close-call tracking
         reads to notice a player was pulled back out of danger."""
         sguid, sname, sflags, _ = src_player
         dguid, dname, dflags, _ = dst_player
-        adv = self._advanced(dguid, hp=hp)
+        adv = self._advanced(dguid, hp=hp, power_type=power_type, power=power,
+                             max_power=max_power)
         self.raw(t, f'SPELL_HEAL,{sguid},"{sname}",{sflags:#06x},0x0,'
                     f'{dguid},"{dname}",{dflags:#06x},0x0,'
                     f'{spell_id},"{spell_name}",0x8,{adv},'
                     f'{amount},{amount},{overheal},0,nil')
 
     def cast(self, t, player, spell_id, spell_name, target_guid="0000000000000000",
-             target_name="nil", target_flags=0x80000000, x=100.0, y=-200.0):
+             target_name="nil", target_flags=0x80000000, x=100.0, y=-200.0,
+             power_type=3, power=100, max_power=100):
         guid, name, flags, _ = player
-        adv = self._advanced(guid, x=x, y=y)
+        adv = self._advanced(guid, x=x, y=y, power_type=power_type, power=power,
+                             max_power=max_power)
         self.raw(t, f'SPELL_CAST_SUCCESS,{guid},"{name}",{flags:#06x},0x0,'
                     f'{target_guid},{target_name},{target_flags:#010x},0x0,'
                     f'{spell_id},"{spell_name}",0x1,{adv}')

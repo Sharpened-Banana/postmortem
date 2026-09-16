@@ -25,6 +25,7 @@ import re
 
 from .html import _TEMPLATE
 from .index import _INDEX_TEMPLATE
+from .snapshot import _TEMPLATE as _SNAPSHOT_TEMPLATE
 
 #: An executable inline script: a <script> with no type, or one whose type
 #: is a JavaScript MIME. A data block (type="application/json") is not
@@ -51,13 +52,16 @@ def inline_script_hashes(html: str) -> list[str]:
 
 
 def report_page_script_hashes() -> list[str]:
-    """Hashes for both report pages' inline scripts.
+    """Hashes for the report pages' inline scripts.
 
     Read off the templates rather than off a rendered page, so no sample
     report is needed and the embedded data can never influence the result.
+    The snapshot page (report/snapshot.py) is rendered server-side with no
+    script at all, so it contributes nothing today -- it is listed so that
+    a script added to it later is hashed without anyone remembering to.
     """
     seen: list[str] = []
-    for template in (_TEMPLATE, _INDEX_TEMPLATE):
+    for template in (_TEMPLATE, _INDEX_TEMPLATE, _SNAPSHOT_TEMPLATE):
         for source in inline_script_hashes(template):
             if source not in seen:
                 seen.append(source)

@@ -237,9 +237,12 @@ SlashCmdList["POSTMORTEM"] = function(msg)
     if MA.Options_Open then MA:Options_Open() end
   elseif msg == "debug" then
     MA:Debug_Toggle()
+  elseif msg == "snapshot" or msg == "snap" or msg == "mark" then
+    if MA.Snapshot_Mark then MA:Snapshot_Mark() end
   else
     print("|cffd7a94cPostmortem|r: /pm (info window), /pm results (in-game run stats), "
       .. "/pm history (last 5 runs), /pm options (settings), "
+      .. "/pm snapshot (mark a snapshot -- same as the keybind), "
       .. "/pm link (copy download link), /pm minimap (toggle minimap icon), "
       .. "/pm debug (run every module now, as if a key started)")
   end

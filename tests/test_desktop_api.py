@@ -30,6 +30,23 @@ def api() -> DesktopAPI:
 
 
 @pytest.fixture(autouse=True)
+def no_real_hotkey(monkeypatch):
+    """start_watch registers the snapshot hotkey (desktop/hotkey.py) with
+    the OS; a test suite must never grab a real system-wide key
+    combination on the developer's machine."""
+    from postmortem.desktop.hotkey import Backend
+
+    class Disabled(Backend):
+        def start(self, combo, on_press):
+            return False, "disabled in tests"
+
+        def stop(self):
+            pass
+
+    monkeypatch.setattr("postmortem.desktop.hotkey.default_backend", lambda: Disabled())
+
+
+@pytest.fixture(autouse=True)
 def isolated_config_dir(tmp_path, monkeypatch):
     """File-wide, not per-class: a growing number of DesktopAPI methods
     resolve local app-data paths through desktop.config.config_dir() --
@@ -1073,7 +1090,9 @@ class TestWatchMode:
         assert uploaded_event["url"] == "https://example.test/runs/1"
         assert uploaded == [("Murder Row", "https://example.test")]
 
-        event_types = [e["type"] for e in events]
+        # snapshot_hotkey is start_watch's report on the desktop hotkey
+        # (disabled by this file's fixture) -- not part of the run's story
+        event_types = [e["type"] for e in events if e["type"] != "snapshot_hotkey"]
         # run_started lands the moment the key's CHALLENGE_MODE_START is
         # seen -- the UI's only sign of life for the whole run until then
         assert event_types == [
