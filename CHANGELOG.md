@@ -1,5 +1,12 @@
 # Postmortem addon
 
+## 0.3.4 (2026-09-16)
+
+- The "Mark a snapshot" keybind now actually appears under Key Bindings >
+  AddOns and fires: Bindings.xml was listed in the .toc, which the client
+  does not allow (it loads that file itself), so the binding never
+  registered in 0.3.2/0.3.3. `/pm snapshot` was unaffected.
+
 ## 0.3.3 (2026-09-15)
 
 - Fixes "Interrupts.lua:89: attempted to index a table that cannot be
