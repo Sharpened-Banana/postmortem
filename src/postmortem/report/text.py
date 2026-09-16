@@ -26,6 +26,43 @@ def _pull_label(pull: object) -> str:
     return "?" if pull is None else str(pull)
 
 
+def _tank_death_lines(death: dict) -> list[str]:
+    """The tank post-mortem lines for one death (see
+    analysis/tank_death.py), or an empty list when there is nothing
+    honestly sayable.
+
+    ``never_used`` is deliberately not printed here: in a text report it
+    reads as an accusation even when it is only an observation about a
+    talent build, and the HTML report has the room to caveat it properly.
+    """
+    tank = death.get("tank_analysis") or {}
+    if not tank.get("scored"):
+        return []
+
+    lines: list[str] = []
+    unused = tank.get("available_unused") or []
+    if unused:
+        names = ", ".join(
+            # A never_cast entry (resolved by the addon's spellbook
+            # capture) was up for the whole run, so there is no
+            # "ready for N seconds" figure to quote.
+            f"{u['name']} (never pressed)" if u.get("never_cast")
+            else f"{u['name']} (ready {round(u['ready_for_s'])}s)"
+            for u in unused
+        )
+        lines.append(f"    ready and unused: {names}")
+
+    gap = tank.get("mitigation_gap_s")
+    if gap is not None:
+        lines.append(f"    last active mitigation: {gap:.1f}s before death")
+
+    externals = tank.get("externals_available") or []
+    if externals:
+        names = ", ".join(f"{e['name']} ({e['caster']})" for e in externals)
+        lines.append(f"    externals up in the group: {names}")
+    return lines
+
+
 def _fmt_num(n: float | int | None) -> str:
     if n is None:
         return "?"
@@ -197,6 +234,8 @@ def render_text(report: dict[str, Any]) -> str:
                 detail.append("no defensive used")
             if detail:
                 add(f"    {'  |  '.join(detail)}")
+            for line in _tank_death_lines(d):
+                add(line)
 
     # --- close calls ---
     dispel = report.get("dispel_efficiency") or {}

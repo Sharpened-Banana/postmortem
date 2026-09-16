@@ -18,6 +18,9 @@ from .pulls import DEFAULT_PULL_GAP_S, detect_pulls
 from .spell_damage import SpellDamageData, update_from_stats
 from .stats import PET_BUCKET, compute_stats
 from .stealable import StealableData
+from .tank_death import (
+    TankKnowledge, annotate_deaths, load_bundled_tank_defensives,
+)
 
 
 def _relativize(
@@ -410,6 +413,9 @@ def death_entries(stats) -> list[dict[str, Any]]:
             ),
             "defensives_used_before_death": d.defensives_used_before_death,
             "died_without_defensive": d.died_without_defensive,
+            # analysis/tank_death.py: what was ready and unused at a tank's
+            # death (None for non-tanks / no data) -- see PR #40
+            "tank_analysis": getattr(d, "tank_analysis", None),
             "recap": d.recap,
         }
         for d in stats.deaths
@@ -476,6 +482,7 @@ def analyze_run(
     community_spell_damage: Optional[SpellDamageData] = None,
     talent_data_path: Optional[str | Path] = None,
     dispel_data: Optional[DispelData] = None,
+    tank_knowledge: Optional[TankKnowledge] = None,
 ) -> dict[str, Any]:
     """Analyze one M+ run; returns a JSON-ready report dict.
 
@@ -514,6 +521,15 @@ def analyze_run(
         avoidable=avoidable, spell_damage_fallbacks=fallbacks or None,
         keystone_level=segment.keystone_level, dispel_data=dispel_data,
         challenge_map_id=segment.challenge_map_id,
+    )
+    # Tank death post-mortem. Bundled table, no configuration, and a
+    # no-op if it can't be loaded -- the section just doesn't appear.
+    # tank_knowledge is the addon's spellbook capture when the caller has
+    # one (see tank_death.TankKnowledge); without it the analysis still
+    # runs, it just keeps its "may not be talented" hedge.
+    annotate_deaths(
+        stats, load_bundled_tank_defensives(), full_cast_timeline,
+        knowledge=tank_knowledge, run_start_ts=segment.start_ts,
     )
     if spell_damage_history_path:
         try:

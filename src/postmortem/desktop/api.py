@@ -59,6 +59,38 @@ from . import config as _config
 from . import updater as _updater
 
 
+def _load_tank_knowledge_quietly():
+    """The addon's spellbook capture for the tank death post-mortem, or
+    None -- never raising, whatever is on disk.
+
+    Deliberately softer than ``cli._load_tank_knowledge``, and for a
+    reason that isn't style. There, the user named a file with an explicit
+    ``--tank-db``, so a file that doesn't parse is a mistake worth
+    stopping on. Here nobody asked for anything: the path was discovered
+    (see ``config.resolve_tank_db_path``), and a SavedVariables file half
+    written by a client that is running *right now* is an ordinary
+    condition, not an error. Failing the whole analysis over it would cost
+    the user their run's report to improve one section of it.
+
+    So every failure degrades to None, which costs only the spellbook
+    resolution: the tank post-mortem still runs, it just keeps its "may
+    not be talented" hedge.
+    """
+    try:
+        path = _config.resolve_tank_db_path(_config.load_settings())
+        if path is None:
+            return None
+        from ..analysis.tank_death import knowledge_from_savedvariables
+
+        table = _cli._read_savedvariables_table(path, "PostmortemTankDB")
+        return knowledge_from_savedvariables(table)
+    except (OSError, ValueError, KeyError, TypeError, SystemExit):
+        # SystemExit is in that list on purpose: the shared
+        # _read_savedvariables_table raises it for a missing assignment or
+        # unparseable Lua, which is right for a CLI and wrong here.
+        return None
+
+
 #: What a History row's link carries instead of a file name -- see
 #: list_history(). Not a real URL scheme: the frame's click handler below
 #: intercepts it before the browser tries to navigate anywhere.
@@ -396,6 +428,12 @@ class DesktopAPI:
             spell_damage_history_path=_config.resolve_learned_spell_damage_path(
                 _config.load_settings()),
             community_spell_damage=_cli._load_community_spell_damage(),
+            # The addon's spellbook capture, found rather than configured
+            # (see config.resolve_tank_db_path). Without it the tank death
+            # post-mortem still runs, it just keeps its "may not be
+            # talented" hedge -- so a failure to locate it degrades the
+            # report rather than the run.
+            tank_knowledge=_load_tank_knowledge_quietly(),
         )
 
         raiderio_region = params.get("raiderio_region")
@@ -1273,6 +1311,11 @@ class DesktopAPI:
             learned_path=_config.resolve_learned_interrupts_path(_config.load_settings()),
             spell_damage_history_path=_config.resolve_learned_spell_damage_path(
                 _config.load_settings()),
+            # Read fresh per run rather than once per watch session: the
+            # capture is written by a client that is still playing, so a
+            # key finished twenty minutes into a session has a newer
+            # spellbook than the one that existed when Watch Live started.
+            tank_knowledge=_load_tank_knowledge_quietly(),
             # embed the floor's map art from the user's MDT install into the
             # local report (best-effort; upload.py strips it before the site)
             enrich=lambda r: mapart.attach_map_backgrounds(r, mdt_dir, store),

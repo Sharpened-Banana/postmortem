@@ -5,7 +5,7 @@
 ## X-Curse-Project-ID: 1676571
 ## Notes: Live companion to the Postmortem analysis tool -- recording helper, live stats, route tracking.
 ## IconTexture: Interface\AddOns\Postmortem\media\icon-64.tga
-## SavedVariables: PostmortemDB, PostmortemSpellDB, PostmortemAvoidableDB
+## SavedVariables: PostmortemDB, PostmortemSpellDB, PostmortemAvoidableDB, PostmortemTankDB
 ## LoadSavedVariablesFirst: 1
 
 libs\embeds.xml
@@ -25,6 +25,10 @@ RouteImport.lua
 RunHistory.lua
 ChatSummary.lua
 DeathTagging.lua
+TankDefensives.lua
+TankUtil.lua
+TankDeath.lua
+Incoming.lua
 MinimapButton.lua
 Options.lua
 PostmortemResults.lua

@@ -65,6 +65,12 @@ class DeathRecord:
     # None: can't honestly say either way (unknown spec, a spec this
     # table doesn't cover, or cast data wasn't collected this run).
     died_without_defensive: Optional[bool] = None
+    # The tank death post-mortem for this death: what was sitting ready and
+    # unused, what the group could have thrown, and how long the victim had
+    # gone without an active-mitigation press. Filled by
+    # tank_death.annotate_deaths; stays None when the table isn't loaded,
+    # which is what keeps the section optional end to end.
+    tank_analysis: Optional[dict[str, Any]] = None
 
 
 @dataclass

@@ -390,6 +390,40 @@ def _read_savedvariables_table(path: Path, global_name: str) -> dict[Any, Any]:
     return global_table if isinstance(global_table, dict) else {}
 
 
+#: Shared by `analyze` and `record`, which both accept the flag -- the
+#: desktop app finds this file itself (desktop/config.resolve_tank_db_path)
+#: and needs no flag at all.
+_TANK_DB_HELP = (
+    "path to the Postmortem SavedVariables file (e.g. "
+    "WTF/Account/<ACCOUNT>/SavedVariables/Postmortem.lua). Only "
+    "PostmortemTankDB is read: the addon's record of which defensives you "
+    "actually had talented, which the combat log cannot carry. With it, the "
+    "tank death post-mortem stops hedging about untalented spells"
+)
+
+
+def _load_tank_knowledge(path: Optional[str]) -> Optional["TankKnowledge"]:
+    """The addon's spellbook capture (PostmortemTankDB) from a
+    SavedVariables file, or None when no path was given.
+
+    Deliberately NOT bundled the way avoidable_spells.json is: that list
+    is community data every user benefits from, while this is one
+    character's talent build. It is read straight from the user's own
+    SavedVariables at analyze time instead, so it can never be shipped to
+    anyone else or go stale in the package.
+
+    Errors are fatal here rather than warned past: the flag was passed
+    explicitly, so silently producing the weaker "may not be talented"
+    report would hide that the file the user named did not work.
+    """
+    if not path:
+        return None
+    from .analysis.tank_death import knowledge_from_savedvariables
+
+    table = _read_savedvariables_table(Path(path), "PostmortemTankDB")
+    return knowledge_from_savedvariables(table)
+
+
 def _challenge_map_to_dungeon_idx(dungeon_data: Optional[str]) -> dict[int, int]:
     """challenge-map id -> MDT dungeon_idx, from an explicit dungeon-data
     file or the bundled one. Empty (no per-dungeon grouping, spells still
@@ -1373,6 +1407,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         par_ms=par_ms,
         spell_damage_history_path=args.spell_damage_history,
         community_spell_damage=_load_community_spell_damage(),
+        tank_knowledge=_load_tank_knowledge(getattr(args, "tank_db", None)),
     )
 
     if args.raiderio:
@@ -1667,7 +1702,7 @@ def cmd_index(args: argparse.Namespace) -> int:
 def _write_recorded_reports(
     run, route, store, pull_gap_seconds: float = DEFAULT_PULL_GAP_S, avoidable=None,
     interrupt_data=None, stealable=None, learned_path=None, enrich=None,
-    spell_damage_history_path=None,
+    spell_damage_history_path=None, tank_knowledge=None,
 ) -> Optional[dict]:
     """Analyze one recorded run's log slice and write its JSON/HTML/text
     reports, plus the chapters sidecars (``<run>.chapters.json`` /
@@ -1724,7 +1759,8 @@ def _write_recorded_reports(
                          avoidable=avoidable, interrupt_data=interrupt_data,
                          stealable=stealable, pull_gap_seconds=pull_gap_seconds,
                          spell_damage_history_path=spell_damage_history_path,
-                         community_spell_damage=_load_community_spell_damage())
+                         community_spell_damage=_load_community_spell_damage(),
+                         tank_knowledge=tank_knowledge)
     if enrich is not None:
         # A caller-supplied pass over the finished report before anything
         # is rendered or written -- the desktop app uses it to embed the
@@ -1782,6 +1818,8 @@ def cmd_record(args: argparse.Namespace) -> int:
         try:
             report = _write_recorded_reports(
                 run, route, store, pull_gap_seconds=args.pull_gap,
+                tank_knowledge=_load_tank_knowledge(
+                    getattr(args, "tank_db", None)),
             )
         except Exception as exc:  # keep recording even if analysis hiccups
             print(f"warning: auto-analysis failed: {exc}", file=sys.stderr)
@@ -2119,6 +2157,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dispel-data",
                    help="JSON file tagging dispellable enemy debuffs by school "
                         "(see build-dispel-data); default: the bundled list")
+    p.add_argument("--tank-db", metavar="SAVEDVARIABLES", help=_TANK_DB_HELP)
     p.add_argument("--avoidable-data",
                    help="JSON file tagging avoidable-damage spell ids (community/"
                         "user-maintained; see docs/avoidable_spells.example.json) "
@@ -2237,6 +2276,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_index)
 
     p = sub.add_parser("record", help="watch the combat log live and record each run")
+    p.add_argument("--tank-db", metavar="SAVEDVARIABLES", help=_TANK_DB_HELP)
     p.add_argument("log", help="path to WoWCombatLog.txt")
     p.add_argument("--out", default="runs", help="directory for recorded runs")
     p.add_argument("--route", help="MDT export string/file for auto-analysis")

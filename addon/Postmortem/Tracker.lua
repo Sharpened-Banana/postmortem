@@ -136,6 +136,7 @@ function MA:Tracker_OnTick()
   Tick("RouteImport_OnTick", MA.RouteImport_OnTick)
   Tick("Interrupts_OnTick", MA.Interrupts_OnTick)
   Tick("ChestTimer_OnTick", MA.ChestTimer_OnTick)
+  Tick("Incoming_OnTick", MA.Incoming_OnTick)
   Tick("Overlay_Refresh", MA.Overlay_Refresh)
 end
 
