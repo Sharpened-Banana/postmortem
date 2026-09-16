@@ -1,6 +1,6 @@
 <Bindings>
   <!-- Loaded by the client automatically: this file must NOT be listed in
-       the .toc (it was, in 0.3.2/0.3.3, and the binding never registered --
+       the .toc (it was, in 0.3.2/0.3.3, and the binding never registered:
        the normal XML loader does not understand a <Bindings> root).
        category="ADDONS" puts it under Key Bindings > AddOns, the form most
        installed addons use; the label comes from the
