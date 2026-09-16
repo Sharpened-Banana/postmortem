@@ -36,6 +36,9 @@ on:
       # The desktop app's own tags only; the addon has addon-v* (see
       # release-addon.yml).
       - 'alpha-desktop-*'
+      # Beta channel (docs/RELEASE_CHANNELS.md): beta-desktop-N.M builds
+      # go out as pre-releases that only apps on the beta channel see.
+      - 'beta-desktop-*'
 
 permissions:
   contents: write
@@ -73,9 +76,20 @@ jobs:
             # forever and no installed app was offered another update.
             # release-addon.yml un-marks its own releases as latest so a
             # later addon tag can't take it back.
-            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-              --title "$GITHUB_REF_NAME" --latest \
-              --notes "Desktop app (macOS + Windows) and WoW addon build $GITHUB_REF_NAME."
+            case "$GITHUB_REF_NAME" in
+              beta-desktop-*)
+                # A PRE-release: never "Latest", so the stable channel
+                # (and apps before alpha-desktop-45, which poll
+                # /releases/latest) never see it. Only apps set to the
+                # beta channel pick these up.
+                gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+                  --title "$GITHUB_REF_NAME (beta)" --prerelease \
+                  --notes "Beta desktop build $GITHUB_REF_NAME -- for testers on the beta update channel." ;;
+              *)
+                gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+                  --title "$GITHUB_REF_NAME" --latest \
+                  --notes "Desktop app (macOS + Windows) and WoW addon build $GITHUB_REF_NAME." ;;
+            esac
           fi
 
   build:
@@ -112,6 +126,7 @@ jobs:
         run: |
           case "$GITHUB_REF_NAME" in
             alpha-desktop-[0-9]*) ;;
+            beta-desktop-[0-9]*.[0-9]*) ;;
             *) echo "refusing to build from tag '$GITHUB_REF_NAME'"; exit 1 ;;
           esac
 
