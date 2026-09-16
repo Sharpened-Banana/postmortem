@@ -113,6 +113,28 @@ the run's reports for every marker found.
   report screen. Settings gain "Snapshot window: before / after".
 - Snapshots are local only; nothing is uploaded.
 
+### The desktop's own hotkey (the primary trigger)
+
+`desktop/hotkey.py`. Since the app already tails the log while the user
+plays, it can take the keypress itself: a system-wide hotkey (setting
+`snapshot_hotkey`, default `ctrl+alt+s`, empty disables) is registered
+when Watch Live starts -- `RegisterHotKey` on Windows, an `NSEvent`
+global key-down monitor on macOS (needs the Input Monitoring
+permission; the app asks once and reports the hint in the watch log).
+A press is timestamped on this machine's clock, which is the clock WoW
+stamps the log with, and goes through the same `_on_snapshot_marker`
+path with `source="hotkey"`. **Nothing about combat logging changes**;
+this is why it is the primary trigger and the addon keybind the
+fallback.
+
+No marker in the log carries a role for this path, so the focus is a
+setting: `snapshot_focus` (`healer` / `tank` / `general`), or
+`snapshot_character` -- a character name that, when set, wins: the
+role is taken from that player's spec in the run
+(`build_snapshot(focus_name=...)`). The watch log shows
+`snapshot_hotkey {ok, message}` at start so a hotkey another program
+already owns, or a missing permission, is visible rather than silent.
+
 ## Notes from the implementation (2026-09-15)
 
 - `build_snapshot` also takes `stealable`, `pull_gap_seconds`, `marker`

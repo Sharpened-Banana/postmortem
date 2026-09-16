@@ -137,6 +137,9 @@ function defaultSettings() {
     watch_auto_start: false,
     snapshot_before_s: 120,
     snapshot_after_s: 60,
+    snapshot_hotkey: "ctrl+alt+s",
+    snapshot_focus: "healer",
+    snapshot_character: "",
   };
 }
 
@@ -750,6 +753,9 @@ window.onWatchEvent = function (event) {
     case "snapshot_failed":
       addWatchLogEntry("err", `Snapshot failed: ${esc(event.error)}`);
       break;
+    case "snapshot_hotkey":
+      addWatchLogEntry(event.ok ? "info" : "err", `Snapshot hotkey: ${esc(event.message)}`);
+      break;
     case "run_failed":
       addWatchLogEntry("err", `Run failed: ${esc(event.error)}`);
       break;
@@ -922,6 +928,9 @@ function initSettings() {
   set.historyDbPath = document.getElementById("set-history-db-path");
   set.snapshotBefore = document.getElementById("set-snapshot-before");
   set.snapshotAfter = document.getElementById("set-snapshot-after");
+  set.snapshotHotkey = document.getElementById("set-snapshot-hotkey");
+  set.snapshotFocus = document.getElementById("set-snapshot-focus");
+  set.snapshotCharacter = document.getElementById("set-snapshot-character");
   set.siteUrl = document.getElementById("set-site-url");
   set.accountLinked = document.getElementById("set-account-linked");
   set.accountName = document.getElementById("set-account-name");
@@ -987,6 +996,9 @@ async function applySettingsToForm() {
   set.watchAutoStart.checked = !!s.watch_auto_start;
   set.snapshotBefore.value = s.snapshot_before_s ?? 120;
   set.snapshotAfter.value = s.snapshot_after_s ?? 60;
+  set.snapshotHotkey.value = s.snapshot_hotkey ?? "ctrl+alt+s";
+  set.snapshotFocus.value = s.snapshot_focus || "healer";
+  set.snapshotCharacter.value = s.snapshot_character || "";
   renderDefaultRoutes(s.default_routes || []);
   updateExtractButtonState();
 
@@ -1175,6 +1187,9 @@ async function onSaveSettings() {
     watch_auto_start: set.watchAutoStart.checked,
     snapshot_before_s: clampInt(set.snapshotBefore.value, 30, 600, 120),
     snapshot_after_s: clampInt(set.snapshotAfter.value, 10, 300, 60),
+    snapshot_hotkey: set.snapshotHotkey.value.trim(),
+    snapshot_focus: set.snapshotFocus.value,
+    snapshot_character: set.snapshotCharacter.value.trim(),
     // Managed by add/remove_default_route (server-side read-modify-write),
     // but save_settings() replaces the whole file -- so carry the current
     // list through, or every Save would silently wipe it back to [].

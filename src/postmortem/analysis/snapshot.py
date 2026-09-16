@@ -491,6 +491,19 @@ def _pick_focus(stats, role: str):
     return None
 
 
+def _find_by_name(stats, name: str):
+    """The player called ``name`` ("Dasfloof" or "Dasfloof-EmeraldDream-US"),
+    case-insensitively; None when nobody matches."""
+    want = name.strip().casefold()
+    if not want:
+        return None
+    for p in stats.players.values():
+        full = (p.name or "").casefold()
+        if full == want or full.split("-", 1)[0] == want:
+            return p
+    return None
+
+
 def _carry_combatant_info(segment: RunSegment, start_ts: float) -> list[Event]:
     """COMBATANT_INFO lines are written once at the key's start, so a slice
     that starts later would have no spec for anyone -- and no focus
@@ -524,6 +537,7 @@ def build_snapshot(
     pull_gap_seconds: float = DEFAULT_PULL_GAP_S,
     marker: Optional[Marker] = None,
     source: str = "marker",
+    focus_name: Optional[str] = None,
 ) -> dict[str, Any]:
     """Build the snapshot report dict for the window around ``marker_ts``
     (see the module docstring and docs/SNAPSHOT.md section 2).
@@ -531,7 +545,11 @@ def build_snapshot(
     ``role="auto"`` takes the marker's role (``marker`` when given, else
     the marker found at ``marker_ts`` in the segment, else "general").
     ``source`` records where the request came from ("marker" for a
-    detected header cluster, "manual" for a CLI ``--at``).
+    detected header cluster, "manual" for a CLI ``--at``, "hotkey" for
+    the desktop app's global hotkey). ``focus_name`` picks the focus
+    player by character name (with or without the realm) and takes the
+    role from that player's spec -- the desktop hotkey's way of saying
+    who pressed it, since no marker in the log carries a role then.
     """
     if role not in ROLES + ("auto",):
         raise ValueError(f"role must be one of {ROLES + ('auto',)}, got {role!r}")
@@ -568,6 +586,11 @@ def build_snapshot(
     scan = _scan(events, start_ts, end_ts)
     series = _build_series(scan, start_ts, end_ts, run_start)
 
+    if focus_name:
+        named = _find_by_name(stats, focus_name)
+        if named is not None:
+            _cls, _spec, spec_role = spec_info(named.spec_id)
+            role = spec_role if spec_role in ("healer", "tank") else "general"
     focus = _pick_focus(stats, role)
     if focus is not None and role == "healer":
         focus_section = _healer_focus(focus, scan, stats, series, window_s, run_start)

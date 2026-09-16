@@ -208,6 +208,7 @@ class DesktopAPI:
         # Pending snapshot builds, one timer per keybind marker seen while
         # watching (docs/SNAPSHOT.md §3); cancelled by stop_watch.
         self._snapshot_timers: dict[tuple[str, float], threading.Timer] = {}
+        self._hotkey: Optional["HotkeyListener"] = None
         # Auto-update state (see check_for_update/start_update below).
         self._update_thread: Optional[threading.Thread] = None
         # Opaque ref -> where that History row's report lives, for the rows
@@ -657,6 +658,8 @@ class DesktopAPI:
     #   {"type": "snapshot_ready", "zone", "level", "role", "t", "path"}
     #       -- its report was written; open_snapshot(path) shows it
     #   {"type": "snapshot_failed", "error": str}
+    #   {"type": "snapshot_hotkey", "ok": bool, "message": str}
+    #       -- whether the desktop's own hotkey could be set up
     #     -- the full URL (site_url + the site's own path) of the report.
     #   {"type": "scanning", "bytes_read": int, "bytes_total": int}
     #     -- the initial scan of a pre-existing log is in progress. Only
@@ -896,6 +899,8 @@ class DesktopAPI:
                 self._emit_watch_event({"type": "crashed", "error": str(exc)})
 
         self._watch_recorder = recorder
+        self._start_snapshot_hotkey(settings, snapshot_before_s, snapshot_after_s,
+                                    store, avoidable, interrupt_data, mdt_dir)
         self._watch_queue = work
         self._watch_stop_sentinel = _STOP
         self._watch_worker = threading.Thread(
@@ -921,6 +926,9 @@ class DesktopAPI:
         for timer in list(self._snapshot_timers.values()):
             timer.cancel()
         self._snapshot_timers.clear()
+        if self._hotkey is not None:
+            self._hotkey.stop()
+            self._hotkey = None
         still_running = False
         if self._watch_thread is not None:
             self._watch_thread.join(timeout=5.0)
@@ -1117,9 +1125,44 @@ class DesktopAPI:
 
     # -- snapshot keybind (docs/SNAPSHOT.md) ---------------------------------
 
+    def _start_snapshot_hotkey(self, settings, before_s, after_s, store, avoidable,
+                               interrupt_data, mdt_dir) -> None:
+        """The app's own snapshot trigger (desktop/hotkey.py): a global
+        key combination that timestamps the press here, so the log is
+        never touched. Best-effort -- a hotkey that cannot be set up is
+        reported to the watch log and Watch Live carries on."""
+        from .hotkey import HotkeyListener
+
+        combo = str(settings.get("snapshot_hotkey") or "").strip()
+        if not combo:
+            return
+        focus = str(settings.get("snapshot_focus") or "healer").strip().lower()
+        if focus not in ("healer", "tank", "general"):
+            focus = "healer"
+        character = str(settings.get("snapshot_character") or "").strip()
+
+        def on_press() -> None:
+            recorder = self._watch_recorder
+            run = getattr(recorder, "_current", None) if recorder is not None else None
+            if run is None:
+                self._emit_watch_event({
+                    "type": "snapshot_failed",
+                    "error": "hotkey pressed, but no key is being recorded right now",
+                })
+                return
+            self._on_snapshot_marker(run, time.time(), focus, before_s, after_s, store,
+                                     avoidable, interrupt_data, mdt_dir,
+                                     focus_name=character or None, source="hotkey")
+
+        listener = HotkeyListener(combo, on_press)
+        ok, message = listener.start()
+        self._hotkey = listener if ok else None
+        self._emit_watch_event({"type": "snapshot_hotkey", "ok": ok, "message": message})
+
     def _on_snapshot_marker(self, run, marker_ts: float, role: str,
                             before_s: int, after_s: int, store, avoidable,
-                            interrupt_data, mdt_dir) -> None:
+                            interrupt_data, mdt_dir, focus_name=None,
+                            source: str = "marker") -> None:
         """Called on the tailing thread the moment a marker cluster is
         complete. The report needs the ``after_s`` seconds that follow, so
         the build is scheduled that far ahead (plus a little slack for
@@ -1137,13 +1180,15 @@ class DesktopAPI:
             self._build_snapshot_for_marker,
             args=(run, marker_ts, role, before_s, after_s, store, avoidable,
                   interrupt_data, mdt_dir, key),
+            kwargs={"focus_name": focus_name, "source": source},
         )
         timer.daemon = True
         self._snapshot_timers[key] = timer
         timer.start()
 
     def _build_snapshot_for_marker(self, run, marker_ts, role, before_s, after_s,
-                                   store, avoidable, interrupt_data, mdt_dir, key) -> None:
+                                   store, avoidable, interrupt_data, mdt_dir, key,
+                                   focus_name=None, source: str = "marker") -> None:
         self._snapshot_timers.pop(key, None)
         try:
             from ..analysis.snapshot import build_snapshot
@@ -1162,7 +1207,9 @@ class DesktopAPI:
             report = build_snapshot(
                 segment, marker_ts, before_s=before_s, after_s=after_s, role=role,
                 store=store, avoidable=avoidable, interrupt_data=interrupt_data,
+                focus_name=focus_name, source=source,
             )
+            role = report.get("snapshot", {}).get("role") or role
             n = 1
             while (Path(run.path).with_name(f"{Path(run.path).stem}-snapshot-{n}.html")).exists():
                 n += 1
