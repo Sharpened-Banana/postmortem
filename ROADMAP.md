@@ -73,3 +73,24 @@ Next steps:
 - [ ] Smarter pull matching (optimal alignment instead of greedy) and
       confidence scores on route deviations
 - [ ] Warcraft Logs export/cross-check
+- [ ] More from public Warcraft Logs (`build-event-data` ships the first
+      three: stealable buffs, kick proof, dispel evidence): a "deadliest
+      casts" table from killing blows (already in the samples), route and
+      pace benchmarks per dungeon/level from fights' `dungeonPulls`, and
+      kick values for every enemy spell rather than the interrupt list only
+
+## Mobile app
+
+A phone companion to the desktop app and the site, for looking at runs
+away from the PC — after a key on the couch, or on the bus to work.
+
+- [ ] Read-only first: sign in with the same Battle.net account, see your
+      characters' run history and open any report (the site already renders
+      every report page; the app can wrap those views and add push
+      notifications when a Watch Live upload lands)
+- [ ] Route planning on the go: browse and pin MDT routes, mark the one the
+      group will run, have the desktop app pick it up for the next key
+- [ ] Group review: share a run with the party from the phone, comments per
+      death/pull that show up on the report page
+- [ ] Platform: one cross-platform codebase (iOS + Android) talking to the
+      existing site API; no combat-log parsing on the phone

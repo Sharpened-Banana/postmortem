@@ -113,9 +113,154 @@
    "school": "magic",
    "note": "dispel every stack",
    "seen_dispelled": true
+  },
+  "1308148": {
+   "name": "Cytotoxin",
+   "school": "poison",
+   "note": "dispelled 851x in public Warcraft Logs keys",
+   "seen_dispelled": true
+  },
+  "1259365": {
+   "name": "Bloodthorn Roots",
+   "school": "magic",
+   "note": "dispelled 719x in public Warcraft Logs keys",
+   "seen_dispelled": true
+  },
+  "270499": {
+   "name": "Frost Shock",
+   "school": "magic",
+   "note": "dispelled 458x in public Warcraft Logs keys",
+   "seen_dispelled": true
+  },
+  "1234846": {
+   "name": "Toxic Spores",
+   "school": "poison",
+   "note": "dispelled 456x in public Warcraft Logs keys",
+   "seen_dispelled": true
+  },
+  "1239860": {
+   "name": "Cryo Surge",
+   "school": "magic",
+   "note": "dispelled 434x in public Warcraft Logs keys",
+   "seen_dispelled": true
+  },
+  "1216590": {
+   "name": "Heartstop Poison",
+   "school": "poison",
+   "note": "dispelled 341x in public Warcraft Logs keys",
+   "seen_dispelled": true
+  },
+  "1238801": {
+   "name": "Insatiable Hunger",
+   "school": "curse",
+   "note": "dispelled 224x in public Warcraft Logs keys",
+   "seen_dispelled": true
+  },
+  "1263971": {
+   "name": "Mind-Numbing Poison",
+   "school": "poison",
+   "note": "dispelled 199x in public Warcraft Logs keys",
+   "seen_dispelled": true
+  },
+  "474515": {
+   "name": "Heartstop Poison",
+   "school": "poison",
+   "note": "dispelled 166x in public Warcraft Logs keys",
+   "seen_dispelled": true
+  },
+  "1298104": {
+   "name": "Putrid Seekers",
+   "school": "poison",
+   "note": "dispelled 109x in public Warcraft Logs keys",
+   "seen_dispelled": true
+  },
+  "392641": {
+   "name": "Rolling Thunder",
+   "school": "magic",
+   "note": "dispelled 91x in public Warcraft Logs keys",
+   "seen_dispelled": true
+  },
+  "267027": {
+   "name": "Poison Spit",
+   "school": "poison",
+   "note": "dispelled 72x in public Warcraft Logs keys",
+   "seen_dispelled": true
+  },
+  "276031": {
+   "name": "Pit of Despair",
+   "school": "magic",
+   "note": "dispelled 63x in public Warcraft Logs keys",
+   "seen_dispelled": true
+  },
+  "1309980": {
+   "name": "Cursed",
+   "school": "curse",
+   "note": "dispelled 55x in public Warcraft Logs keys",
+   "seen_dispelled": true
+  },
+  "267763": {
+   "name": "Wretched Discharge",
+   "school": "disease",
+   "note": "dispelled 40x in public Warcraft Logs keys",
+   "seen_dispelled": true
+  },
+  "269972": {
+   "name": "Hex Volley",
+   "school": "curse",
+   "note": "dispelled 25x in public Warcraft Logs keys",
+   "seen_dispelled": true
+  },
+  "1296069": {
+   "name": "Regurgitate",
+   "school": "disease",
+   "note": "dispelled 21x in public Warcraft Logs keys",
+   "seen_dispelled": true
+  },
+  "267273": {
+   "name": "Poison Nova",
+   "school": "poison",
+   "note": "dispelled 17x in public Warcraft Logs keys",
+   "seen_dispelled": true
+  },
+  "1308100": {
+   "name": "Poisoned Cheap Shot",
+   "school": "poison",
+   "note": "dispelled 15x in public Warcraft Logs keys",
+   "seen_dispelled": true
+  },
+  "1310017": {
+   "name": "Twisted Curse",
+   "school": "curse",
+   "note": "dispelled 14x in public Warcraft Logs keys",
+   "seen_dispelled": true
+  },
+  "1226031": {
+   "name": "Poison Splash",
+   "school": "poison",
+   "note": "dispelled 11x in public Warcraft Logs keys",
+   "seen_dispelled": true
+  },
+  "1201554": {
+   "name": "Seduction",
+   "school": "magic",
+   "note": "dispelled 11x in public Warcraft Logs keys",
+   "seen_dispelled": true
+  },
+  "1249238": {
+   "name": "Fire Spit",
+   "school": "magic",
+   "note": "dispelled 10x in public Warcraft Logs keys",
+   "seen_dispelled": true
+  },
+  "270492": {
+   "name": "Hex",
+   "school": "curse",
+   "note": "dispelled 3x in public Warcraft Logs keys",
+   "seen_dispelled": true
   }
  },
- "source": "method.gg",
+ "source": "method.gg + warcraftlogs.com",
  "season": "Midnight S2 (patch 12.1)",
- "source_version": "2026-09-06"
+ "source_version": "2026-09-06",
+ "wcl_version": "2026-09-15"
 }

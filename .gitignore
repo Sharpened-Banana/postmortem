@@ -1,23 +1,25 @@
+
 __pycache__/
-*.pyc
-*.egg-info/
-build/*
-!build/postmortem.spec
-!build/postmortem.iss
 !build/entry.py
 !build/postmortem.icns
 !build/postmortem.ico
-dist/
-installer/
-.pytest_cache/
-mdt_data.json
-runs/
-reports/
+!build/postmortem.iss
+!build/postmortem.spec
+.dockerignore
 .DS_Store
-
-# The tracker site's source lives in its own private repository
+.pytest_cache/
+*.egg-info/
+*.pyc
 # (postmortem-site) -- never in this public one.
-site/
+# The tracker site's source lives in its own private repository
+build/*
+dist/
 Dockerfile
 fly.toml
-.dockerignore
+installer/
+mdt_data.json
+reports/
+runs/
+site/
+spell_damage_samples.json
+wcl_event_samples.json
