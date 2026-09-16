@@ -69,6 +69,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # the log carries a role for this path, the focus is a setting:
     # "healer"/"tank"/"general", or the character name (which wins when
     # set -- the role comes from that player's spec in the run).
+    # Which release channel the in-app updater follows (docs/RELEASE_CHANNELS.md):
+    # "stable" = alpha-desktop-N builds everyone gets; "beta" = also the
+    # beta-desktop-N.M test builds, for testers.
+    "update_channel": "stable",
     "snapshot_hotkey": "ctrl+alt+s",
     "snapshot_focus": "healer",
     "snapshot_character": "",

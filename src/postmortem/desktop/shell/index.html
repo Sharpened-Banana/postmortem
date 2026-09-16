@@ -430,6 +430,15 @@
           <div class="help">Press it mid-key and Watch Live snapshots the moment without touching the combat log at all. The role comes from the choice here, or from your character's spec in the run when a name is given. Leave the hotkey empty to disable it; the addon's own "Mark a snapshot" keybind still works as a fallback. On macOS the first use asks for the Input Monitoring permission.</div>
         </div>
 
+        <div class="field">
+          <label>Update channel</label>
+          <select id="set-update-channel">
+            <option value="stable">Stable (what everyone gets)</option>
+            <option value="beta">Beta (test builds first)</option>
+          </select>
+          <div class="help">Beta builds are the same app a few days early, for testing before a change goes to everyone. Switching back to Stable keeps the current build until the next stable release.</div>
+        </div>
+
         <button type="button" class="btn btn-primary" id="set-save-btn">Save settings</button>
         <div class="dim" id="set-version-line" style="margin-top:8px;font-size:12px;"></div>
 

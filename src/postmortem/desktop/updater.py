@@ -77,6 +77,15 @@ REPO = "Sharpened-Banana/postmortem"
 # build ourselves; 30 is far more than one release cadence's worth.
 _RELEASES_URL = f"https://api.github.com/repos/{REPO}/releases?per_page=30"
 _TAG_RE = re.compile(r"^alpha-desktop-(\d+)$")
+# Two channels (docs/RELEASE_CHANNELS.md). ``alpha-desktop-N`` is the
+# stable build everyone gets; ``beta-desktop-N.M`` is the M-th test build
+# on the way to stable N, published as a GitHub pre-release and offered
+# only to apps whose update channel is "beta". Ordering is by (N, M) with
+# the stable N counting as M = infinity, so a tester on beta 49.2 is
+# offered stable 49 when it ships and never a lower stable.
+_CHANNEL_TAG_RE = re.compile(r"^(alpha|beta)-desktop-(\d+)(?:\.(\d+))?$")
+_STABLE_MINOR = 10 ** 9
+CHANNELS = ("stable", "beta")
 _DOWNLOAD_CHUNK_BYTES = 262_144
 # A sums file holds a handful of lines; anything larger is not one.
 _MAX_SUMS_BYTES = 64 * 1024  # 256KB -- matches postmortem_site's own streaming-read chunk size
@@ -96,6 +105,27 @@ ProgressCallback = Callable[[dict], None]
 def _current_build_number() -> Optional[int]:
     m = _TAG_RE.match(VERSION)
     return int(m.group(1)) if m else None
+
+
+def build_key(tag: str) -> Optional[tuple[int, int]]:
+    """``(N, M)`` ordering key for a desktop tag on either channel, or
+    None when ``tag`` is not one: alpha-desktop-49 -> (49, inf-ish),
+    beta-desktop-49.2 -> (49, 2)."""
+    m = _CHANNEL_TAG_RE.match(str(tag or ""))
+    if not m:
+        return None
+    channel, major, minor = m.group(1), int(m.group(2)), m.group(3)
+    if channel == "alpha":
+        return (major, _STABLE_MINOR) if minor is None else None
+    return (major, int(minor)) if minor is not None else None
+
+
+def tag_channel(tag: str) -> Optional[str]:
+    """'stable' for alpha-desktop-N, 'beta' for beta-desktop-N.M, else None."""
+    m = _CHANNEL_TAG_RE.match(str(tag or ""))
+    if not m or build_key(tag) is None:
+        return None
+    return "stable" if m.group(1) == "alpha" else "beta"
 
 
 def _asset_name_for_platform() -> Optional[str]:
@@ -118,10 +148,13 @@ def _default_fetcher(url: str) -> Optional[dict]:
         return None
 
 
-def check_for_update(fetcher: Fetcher = _default_fetcher) -> Optional[dict]:
+def check_for_update(fetcher: Fetcher = _default_fetcher,
+                     channel: str = "stable") -> Optional[dict]:
     """Returns ``{"tag": str, "download_url": str, "notes": str}`` if a
-    newer ``alpha-desktop-N`` build is published on GitHub than the one
-    currently running, else ``None``.
+    newer desktop build is published on GitHub than the one currently
+    running, else ``None``. ``channel`` "stable" considers only
+    ``alpha-desktop-N`` releases; "beta" also considers
+    ``beta-desktop-N.M`` pre-releases (see build_key for the ordering).
 
     ``None`` covers every "nothing to report" case alike -- a dev/
     unstamped build, no network, a malformed or non-alpha-N latest tag,
@@ -130,7 +163,7 @@ def check_for_update(fetcher: Fetcher = _default_fetcher) -> Optional[dict]:
     other, since none of them are errors a user needs to see; there's
     just no update.
     """
-    current = _current_build_number()
+    current = build_key(VERSION)
     if current is None:
         return None
     asset_name = _asset_name_for_platform()
@@ -139,12 +172,12 @@ def check_for_update(fetcher: Fetcher = _default_fetcher) -> Optional[dict]:
     payload = fetcher(_RELEASES_URL)
     if not payload:
         return None
-    payload = _newest_desktop_release(payload)
+    payload = _newest_desktop_release(payload, channel=channel)
     if payload is None:
         return None
     tag = payload.get("tag_name", "")
-    m = _TAG_RE.match(tag)
-    if not m or int(m.group(1)) <= current:
+    key = build_key(tag)
+    if key is None or key <= current:
         return None
     asset = next(
         (a for a in payload.get("assets", []) if a.get("name") == asset_name), None,
@@ -164,20 +197,25 @@ def check_for_update(fetcher: Fetcher = _default_fetcher) -> Optional[dict]:
     }
 
 
-def _newest_desktop_release(payload) -> Optional[dict]:
-    """The published (non-draft) ``alpha-desktop-N`` release with the
-    highest N out of a GitHub release listing. A single release dict is
-    accepted too, so a caller holding one ``/releases/<x>`` payload gets
-    the same treatment. None when nothing in it is a desktop build."""
+def _newest_desktop_release(payload, channel: str = "stable") -> Optional[dict]:
+    """The published (non-draft) desktop release with the highest
+    build_key out of a GitHub release listing: ``alpha-desktop-N`` only
+    on the stable channel, ``beta-desktop-N.M`` too on the beta one. A
+    single release dict is accepted too, so a caller holding one
+    ``/releases/<x>`` payload gets the same treatment. None when
+    nothing in it qualifies."""
     releases = payload if isinstance(payload, list) else [payload]
     best: Optional[dict] = None
-    best_n = -1
+    best_key: tuple[int, int] = (-1, -1)
     for release in releases:
         if not isinstance(release, dict) or release.get("draft"):
             continue
-        m = _TAG_RE.match(str(release.get("tag_name", "")))
-        if m and int(m.group(1)) > best_n:
-            best, best_n = release, int(m.group(1))
+        tag = str(release.get("tag_name", ""))
+        if channel != "beta" and tag_channel(tag) != "stable":
+            continue
+        key = build_key(tag)
+        if key is not None and key > best_key:
+            best, best_key = release, key
     return best
 
 

@@ -1446,7 +1446,11 @@ class DesktopAPI:
         this alike, since none of them are errors. Never raises.
         """
         try:
-            return {"ok": True, "update": _updater.check_for_update()}
+            channel = str(_config.load_settings().get("update_channel") or "stable")
+            if channel not in _updater.CHANNELS:
+                channel = "stable"
+            return {"ok": True, "update": _updater.check_for_update(channel=channel),
+                    "channel": channel}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
