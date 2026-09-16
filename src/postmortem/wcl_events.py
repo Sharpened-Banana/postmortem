@@ -37,13 +37,24 @@ from .analysis.dispels import SCHOOLS
 #: Spellsteal proper. A buff removed by it is stealable by definition.
 SPELLSTEAL_IDS: frozenset[int] = frozenset({30449})
 
-#: Soothes: remove an enrage from an enemy. A buff removed by one of these
-#: is an enrage, which is a different report question (crowd control) from
-#: a buff worth stealing, so they are kept apart.
+#: Soothes: remove ONLY an enrage from an enemy. A buff removed by one of
+#: these is an enrage, which is a different report question (crowd
+#: control) from a buff worth stealing, so they are kept apart. Ids as
+#: seen in live logs (first build, 2026-09-15).
 SOOTHE_IDS: dict[int, str] = {
     2908: "Soothe",
-    19801: "Tranquilizing Shot",
     5938: "Shiv",
+    457389: "Pressure Points",
+    406971: "Oppressing Roar",
+}
+
+#: Removers that take an enrage AND a magic buff in one cast, so a removal
+#: by them says nothing about which kind the buff was. Ignored when
+#: sorting enemy buffs into stealable vs enrage (first build: 98 of 258
+#: "soothes" were Tranquilizing Shot, most of them on Stormcloud Barrier,
+#: a magic shield that Spellsteal also takes).
+AMBIGUOUS_REMOVER_IDS: dict[int, str] = {
+    19801: "Tranquilizing Shot",
 }
 
 #: Friendly dispels and the debuff schools each can remove. A debuff's
@@ -84,7 +95,9 @@ PURGE_IDS: dict[int, str] = {
     19505: "Devour Magic",
     278326: "Consume Magic",
     32375: "Mass Dispel",
+    32592: "Mass Dispel",
     25046: "Arcane Torrent",
+    28730: "Arcane Torrent",
     50613: "Arcane Torrent",
     69179: "Arcane Torrent",
     80483: "Arcane Torrent",
@@ -237,6 +250,8 @@ def aggregate_stealable(samples: dict[str, Any], min_removals: int = 2) -> dict[
         for buff, removers in (f.get("stolen") or {}).items():
             for remover, n in removers.items():
                 rid = _int(remover)
+                if rid in AMBIGUOUS_REMOVER_IDS:
+                    continue
                 if rid in SPELLSTEAL_IDS:
                     stolen[buff] = stolen.get(buff, 0) + int(n)
                 elif rid in SOOTHE_IDS:

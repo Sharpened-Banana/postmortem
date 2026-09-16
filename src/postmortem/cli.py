@@ -1126,15 +1126,36 @@ def cmd_build_event_data(args: argparse.Namespace) -> int:
             row["interruptible"] = True
             row["wcl_interrupts"] = entry["interrupts"]
             confirmed += 1
-    marked = 0
+    # A second opinion on "never interrupted": Wowhead's cast time and
+    # uninterruptible flag, looked up by hand (or an agent) and saved as
+    # a list of {id, verdict: kickable|not_kickable|unknown, cast_time,
+    # note}. A spell Wowhead shows with a plain cast bar and no flag is
+    # left kickable however many times nobody kicked it.
+    verdicts: dict[str, dict[str, Any]] = {}
+    if args.wowhead_verdicts:
+        try:
+            for row in json.loads(Path(args.wowhead_verdicts).read_text(encoding="utf-8")):
+                if isinstance(row, dict) and row.get("id") is not None:
+                    verdicts[str(row["id"])] = row
+        except (OSError, json.JSONDecodeError, TypeError) as exc:
+            raise SystemExit(f"error: could not read {args.wowhead_verdicts}: {exc}")
+    marked = kept_kickable = 0
     for sid, entry in evidence["never"].items():
         row = ispells.get(sid)
         if row is not None and row.get("interruptible"):
             continue  # the curated source says kickable; evidence is only absence
+        verdict = verdicts.get(sid) or {}
+        if verdict.get("verdict") == "kickable":
+            kept_kickable += 1
+            continue
         if args.mark_uninterruptible:
-            ispells[sid] = {"name": entry["name"], "interruptible": False,
-                            "note": f"never interrupted in {entry['casts']} begin-casts "
-                                    f"across {entry['fights']} public keys (Warcraft Logs)"}
+            note = (f"never interrupted in {entry['casts']} begin-casts "
+                    f"across {entry['fights']} public keys (Warcraft Logs)")
+            if verdict.get("cast_time"):
+                note += f"; Wowhead: {verdict['cast_time']}"
+                if verdict.get("uninterruptible_flag"):
+                    note += ", flagged uninterruptible"
+            ispells[sid] = {"name": entry["name"], "interruptible": False, "note": note}
             marked += 1
     interrupt_payload["source"] = _with_wcl_source(interrupt_payload.get("source"))
     interrupt_payload["wcl_version"] = today
@@ -1143,6 +1164,7 @@ def cmd_build_event_data(args: argparse.Namespace) -> int:
           f"spell(s) added, {len(evidence['never'])} never-interrupted candidate(s)"
           + (f", {marked} marked uninterruptible" if args.mark_uninterruptible else
              " (listed below; pass --mark-uninterruptible to record them)")
+          + (f", {kept_kickable} kept kickable on Wowhead's word" if kept_kickable else "")
           + f" -> {interrupt_path}")
     for sid, entry in list(evidence["never"].items())[:25]:
         print(f"  never interrupted: {entry['name']} ({sid}) -- "
@@ -1909,6 +1931,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--interrupt-data", metavar="JSON",
                     help="interrupt database to merge evidence into "
                          "(default: the bundled one)")
+    p.add_argument("--wowhead-verdicts", metavar="JSON",
+                    help="per-spell Wowhead check of the never-interrupted "
+                         "candidates ([{id, verdict: kickable|not_kickable|"
+                         "unknown, cast_time, ...}]); a 'kickable' verdict "
+                         "keeps that spell kickable despite the evidence")
     p.add_argument("--dispel-data", metavar="JSON",
                     help="dispel list to merge into (default: the bundled one)")
     p.add_argument("--dump-raw", action="store_true",

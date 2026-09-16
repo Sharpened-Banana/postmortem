@@ -100,6 +100,16 @@ class TestAggregateStealable:
         (frenzy,) = out["enrages"]
         assert frenzy["id"] == 900002 and "soothed 3x" in frenzy["note"]
 
+    def test_tranquilizing_shot_decides_nothing(self):
+        # Tranq Shot removes an enrage AND a magic buff: a buff it removed
+        # is neither evidence of an enrage nor of a stealable buff.
+        s = _samples(n_fights=2)
+        for f in s["fights"].values():
+            f["stolen"] = {"900001": {"19801": 3}, "900002": {"457389": 2}}
+        out = aggregate_stealable(s, min_removals=2)
+        assert out["spells"] == []
+        assert [e["id"] for e in out["enrages"]] == [900002]  # Pressure Points is a soothe
+
     def test_min_removals_drops_one_offs(self):
         out = aggregate_stealable(_samples(n_fights=1), min_removals=2)
         assert [s["id"] for s in out["spells"]] == [900001]
@@ -265,6 +275,34 @@ class TestCLIOffline:
         assert main(common + ["--output-dir", str(tmp_path / "b"), "--mark-uninterruptible"]) == 0
         marked = json.loads((tmp_path / "b" / "interrupt_data.json").read_text())
         assert marked["spells"]["900006"]["interruptible"] is False
+
+    def test_wowhead_kickable_verdict_overrides_absence(self, tmp_path, capsys):
+        samples = tmp_path / "samples.json"
+        samples.write_text(json.dumps(_samples(n_fights=12)), encoding="utf-8")
+        empty = tmp_path / "empty.json"
+        empty.write_text(json.dumps({"spells": {}}), encoding="utf-8")
+        verdicts = tmp_path / "verdicts.json"
+        verdicts.write_text(json.dumps([
+            {"id": 900006, "verdict": "kickable", "cast_time": "2 sec cast"},
+        ]), encoding="utf-8")
+        common = ["build-event-data", "--offline", "--samples", str(samples), "--no-bundle",
+                  "--interrupt-data", str(empty), "--dispel-data", str(empty),
+                  "--min-casts", "10", "--min-fights", "10", "--mark-uninterruptible"]
+        assert main(common + ["--output-dir", str(tmp_path / "a"),
+                              "--wowhead-verdicts", str(verdicts)]) == 0
+        out = json.loads((tmp_path / "a" / "interrupt_data.json").read_text())
+        assert "900006" not in out["spells"]
+        assert "1 kept kickable on Wowhead's word" in capsys.readouterr().out
+
+        verdicts.write_text(json.dumps([
+            {"id": 900006, "verdict": "not_kickable", "cast_time": "Instant",
+             "uninterruptible_flag": True},
+        ]), encoding="utf-8")
+        assert main(common + ["--output-dir", str(tmp_path / "b"),
+                              "--wowhead-verdicts", str(verdicts)]) == 0
+        out = json.loads((tmp_path / "b" / "interrupt_data.json").read_text())
+        assert out["spells"]["900006"]["interruptible"] is False
+        assert "Wowhead: Instant, flagged uninterruptible" in out["spells"]["900006"]["note"]
 
     def test_offline_needs_samples(self, tmp_path):
         with pytest.raises(SystemExit):
