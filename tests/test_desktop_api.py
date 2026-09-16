@@ -1578,22 +1578,25 @@ class TestAutoUpdate:
         raise AssertionError(f"no {event_type!r} event within {timeout}s; got {events}")
 
     def test_check_for_update_reports_an_available_update(self, api, monkeypatch):
+        # The bridge passes the settings' update channel (release channels,
+        # docs/RELEASE_CHANNELS.md) and reports which one it used.
         monkeypatch.setattr(
             updater_module, "check_for_update",
-            lambda: {"tag": "alpha-desktop-9", "download_url": "https://x", "notes": ""},
+            lambda channel="stable": {"tag": "alpha-desktop-9", "download_url": "https://x", "notes": ""},
         )
         result = api.check_for_update()
         assert result == {
             "ok": True,
             "update": {"tag": "alpha-desktop-9", "download_url": "https://x", "notes": ""},
+            "channel": "stable",
         }
 
     def test_check_for_update_reports_none_when_up_to_date(self, api, monkeypatch):
-        monkeypatch.setattr(updater_module, "check_for_update", lambda: None)
-        assert api.check_for_update() == {"ok": True, "update": None}
+        monkeypatch.setattr(updater_module, "check_for_update", lambda channel="stable": None)
+        assert api.check_for_update() == {"ok": True, "update": None, "channel": "stable"}
 
     def test_check_for_update_never_raises(self, api, monkeypatch):
-        def boom():
+        def boom(channel="stable"):
             raise RuntimeError("network exploded")
 
         monkeypatch.setattr(updater_module, "check_for_update", boom)
