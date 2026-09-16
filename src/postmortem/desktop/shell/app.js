@@ -135,6 +135,11 @@ function defaultSettings() {
     site_url: null,
     wow_log_path: null,
     watch_auto_start: false,
+    snapshot_before_s: 120,
+    snapshot_after_s: 60,
+    snapshot_hotkey: "ctrl+alt+s",
+    snapshot_focus: "healer",
+    snapshot_character: "",
   };
 }
 
@@ -607,6 +612,32 @@ function watchRunLabel(zone, level) {
   return level != null ? `${z} +${level}` : z;
 }
 
+function clampInt(value, lo, hi, fallback) {
+  const n = parseInt(value, 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(hi, Math.max(lo, n));
+}
+
+// A snapshot report written by Watch Live (docs/SNAPSHOT.md): open it in
+// the report screen like a history run. The path came from our own
+// snapshot_ready event; the bridge re-checks it before reading.
+async function openSnapshot(path) {
+  try {
+    const result = await api().open_snapshot(path);
+    if (!result || !result.ok) {
+      addWatchLogEntry("err", `Could not open the snapshot: ${esc((result && result.error) || "unknown error")}`);
+      return;
+    }
+    state.lastReport = null;
+    document.getElementById("report-context-label").textContent = result.label || "Snapshot";
+    document.getElementById("report-frame").srcdoc = result.html;
+    showScreen("report");
+  } catch (e) {
+    addWatchLogEntry("err", "Could not open the snapshot: " + describeError(e));
+  }
+}
+window.openSnapshot = openSnapshot;
+
 function addWatchLogEntry(cls, html) {
   const li = document.createElement("li");
   if (cls) li.classList.add(cls);
@@ -615,6 +646,7 @@ function addWatchLogEntry(cls, html) {
   wt.logList.appendChild(li);
   wt.logListWrap.hidden = false;
   wt.logList.scrollTop = wt.logList.scrollHeight;
+  return li;
 }
 
 function setWatchStatus(live, text) {
@@ -703,6 +735,26 @@ window.onWatchEvent = function (event) {
       break;
     case "uploaded_by_groupmate":
       addWatchLogEntry("ok", `Already uploaded by a groupmate — ${esc(event.url)}`);
+      break;
+    case "snapshot_marker":
+      addWatchLogEntry("info", `Snapshot marked (${esc(event.role)}) at ${esc(event.t)} — report in ${esc(String(event.after_s))}s`);
+      break;
+    case "snapshot_ready": {
+      // The path is attached as a handler, not inlined into markup: a
+      // folder name with a quote in it must not break (or inject) anything.
+      const li = addWatchLogEntry("ok", `Snapshot (${esc(event.role)}) at ${esc(event.t)} — `);
+      const link = document.createElement("a");
+      link.href = "#";
+      link.textContent = "Open";
+      link.addEventListener("click", (e) => { e.preventDefault(); openSnapshot(String(event.path)); });
+      li.querySelector(".msg").appendChild(link);
+      break;
+    }
+    case "snapshot_failed":
+      addWatchLogEntry("err", `Snapshot failed: ${esc(event.error)}`);
+      break;
+    case "snapshot_hotkey":
+      addWatchLogEntry(event.ok ? "info" : "err", `Snapshot hotkey: ${esc(event.message)}`);
       break;
     case "run_failed":
       addWatchLogEntry("err", `Run failed: ${esc(event.error)}`);
@@ -874,6 +926,11 @@ function initSettings() {
   set.defaultOutputDir = document.getElementById("set-default-output-dir");
   set.defaultOutputDirPickBtn = document.getElementById("set-default-output-dir-pick-btn");
   set.historyDbPath = document.getElementById("set-history-db-path");
+  set.snapshotBefore = document.getElementById("set-snapshot-before");
+  set.snapshotAfter = document.getElementById("set-snapshot-after");
+  set.snapshotHotkey = document.getElementById("set-snapshot-hotkey");
+  set.snapshotFocus = document.getElementById("set-snapshot-focus");
+  set.snapshotCharacter = document.getElementById("set-snapshot-character");
   set.siteUrl = document.getElementById("set-site-url");
   set.accountLinked = document.getElementById("set-account-linked");
   set.accountName = document.getElementById("set-account-name");
@@ -937,6 +994,11 @@ async function applySettingsToForm() {
   set.siteUrl.value = s.site_url || "";
   set.wowLogPath.value = s.wow_log_path || "";
   set.watchAutoStart.checked = !!s.watch_auto_start;
+  set.snapshotBefore.value = s.snapshot_before_s ?? 120;
+  set.snapshotAfter.value = s.snapshot_after_s ?? 60;
+  set.snapshotHotkey.value = s.snapshot_hotkey ?? "ctrl+alt+s";
+  set.snapshotFocus.value = s.snapshot_focus || "healer";
+  set.snapshotCharacter.value = s.snapshot_character || "";
   renderDefaultRoutes(s.default_routes || []);
   updateExtractButtonState();
 
@@ -1123,6 +1185,11 @@ async function onSaveSettings() {
     site_url: set.siteUrl.value.trim() || null,
     wow_log_path: set.wowLogPath.value.trim() || null,
     watch_auto_start: set.watchAutoStart.checked,
+    snapshot_before_s: clampInt(set.snapshotBefore.value, 30, 600, 120),
+    snapshot_after_s: clampInt(set.snapshotAfter.value, 10, 300, 60),
+    snapshot_hotkey: set.snapshotHotkey.value.trim(),
+    snapshot_focus: set.snapshotFocus.value,
+    snapshot_character: set.snapshotCharacter.value.trim(),
     // Managed by add/remove_default_route (server-side read-modify-write),
     // but save_settings() replaces the whole file -- so carry the current
     // list through, or every Save would silently wipe it back to [].

@@ -1,0 +1,8 @@
+<Bindings>
+  <!-- Labels come from the BINDING_HEADER_POSTMORTEM /
+       BINDING_NAME_POSTMORTEM_SNAPSHOT globals set in Snapshot.lua;
+       Postmortem_SnapshotMark is that file's global entry point. -->
+  <Binding name="POSTMORTEM_SNAPSHOT" header="POSTMORTEM" category="ADDONS">
+    Postmortem_SnapshotMark()
+  </Binding>
+</Bindings>

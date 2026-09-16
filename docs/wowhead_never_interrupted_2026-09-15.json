@@ -1,0 +1,792 @@
+[
+ {
+  "id": 1306381,
+  "name": "Fetid Spit",
+  "cast_time": "2.5 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1306381"
+ },
+ {
+  "id": 1306657,
+  "name": "Blood Sacrifice",
+  "cast_time": "2 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Ritual Chieftain",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1306657"
+ },
+ {
+  "id": 1246847,
+  "name": "Shoot",
+  "cast_time": "2 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1246847"
+ },
+ {
+  "id": 1296963,
+  "name": "Umbral Rupture",
+  "cast_time": "4 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Taz'Rah (boss) / Ethereal Shades",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead; tooltip names a dungeon BOSS as caster; boss casts are interrupt-immune in practice regardless of flags",
+  "url": "https://www.wowhead.com/spell=1296963"
+ },
+ {
+  "id": 1222100,
+  "name": "Nether Dash",
+  "cast_time": "7 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Ethereal Shade",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1222100"
+ },
+ {
+  "id": 1288457,
+  "name": "Gust",
+  "cast_time": "2 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Aspix (boss)",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead; tooltip names a dungeon BOSS as caster; boss casts are interrupt-immune in practice regardless of flags",
+  "url": "https://www.wowhead.com/spell=1288457"
+ },
+ {
+  "id": 1266241,
+  "name": "Freight Explosion",
+  "cast_time": "5 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Forbidden Freight (object)",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead; cast by Forbidden Freight object/trigger, not an interruptible creature",
+  "url": "https://www.wowhead.com/spell=1266241"
+ },
+ {
+  "id": 1230298,
+  "name": "Chaos Barrage",
+  "cast_time": "3 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Kystia (boss)",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead; tooltip names a dungeon BOSS as caster; boss casts are interrupt-immune in practice regardless of flags",
+  "url": "https://www.wowhead.com/spell=1230298"
+ },
+ {
+  "id": 1216815,
+  "name": "Void Pulsar",
+  "cast_time": "4 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Xal'atath",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead; tooltip names a dungeon BOSS as caster; boss casts are interrupt-immune in practice regardless of flags",
+  "url": "https://www.wowhead.com/spell=1216815"
+ },
+ {
+  "id": 1216589,
+  "name": "Heartstop Poison",
+  "cast_time": "1.5 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1216589"
+ },
+ {
+  "id": 1306911,
+  "name": "Dismember",
+  "cast_time": "3 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "chieftain",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1306911"
+ },
+ {
+  "id": 1300698,
+  "name": "Assimilation",
+  "cast_time": "2 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Uncoiled Writhe / The Writhing Coil",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1300698"
+ },
+ {
+  "id": 1306517,
+  "name": "Blood Sacrifice",
+  "cast_time": "Channeled (3 sec)",
+  "uninterruptible_flag": true,
+  "npc": "Ritual Chieftain",
+  "verdict": "not_kickable",
+  "note": "Wowhead Flags include 'Unbreakable Channel' (channel cannot be broken); treated as uninterruptible",
+  "url": "https://www.wowhead.com/spell=1306517"
+ },
+ {
+  "id": 1311754,
+  "name": "Forked Lightning",
+  "cast_time": "2.5 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1311754"
+ },
+ {
+  "id": 272388,
+  "name": "Shadow Barrage",
+  "cast_time": "1.5 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=272388"
+ },
+ {
+  "id": 272655,
+  "name": "Scouring Sand",
+  "cast_time": "4.5 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=272655"
+ },
+ {
+  "id": 1294567,
+  "name": "Paralyzing Shots",
+  "cast_time": "3 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Twinfang (boss)",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead; tooltip names a dungeon BOSS as caster; boss casts are interrupt-immune in practice regardless of flags",
+  "url": "https://www.wowhead.com/spell=1294567"
+ },
+ {
+  "id": 1296719,
+  "name": "Forked Lightning",
+  "cast_time": "2.5 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1296719"
+ },
+ {
+  "id": 1237855,
+  "name": "Earthrupture Strike",
+  "cast_time": "2.5 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Rutaani",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1237855"
+ },
+ {
+  "id": 1293464,
+  "name": "Accumulate Charge",
+  "cast_time": "1.5 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1293464"
+ },
+ {
+  "id": 1306668,
+  "name": "Toxic Breath",
+  "cast_time": "Channeled (3 sec)",
+  "uninterruptible_flag": false,
+  "npc": "Twinfang (boss)",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead; tooltip names a dungeon BOSS as caster; boss casts are interrupt-immune in practice regardless of flags",
+  "url": "https://www.wowhead.com/spell=1306668"
+ },
+ {
+  "id": 1271385,
+  "name": "Spouting Floret",
+  "cast_time": "2 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1271385"
+ },
+ {
+  "id": 1295035,
+  "name": "Glaive Toss",
+  "cast_time": "2 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1295035"
+ },
+ {
+  "id": 1242135,
+  "name": "Grievous Gash",
+  "cast_time": "2.5 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Thornmaw",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1242135"
+ },
+ {
+  "id": 1250829,
+  "name": "Potad-Toss",
+  "cast_time": "2 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Newborn Potadpole",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1250829"
+ },
+ {
+  "id": 1238801,
+  "name": "Insatiable Hunger",
+  "cast_time": "6 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "totem",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1238801"
+ },
+ {
+  "id": 1297691,
+  "name": "Whirlwind",
+  "cast_time": "4 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1297691"
+ },
+ {
+  "id": 1292990,
+  "name": "Swarming Krolusks",
+  "cast_time": "2.5 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Krolusk",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1292990"
+ },
+ {
+  "id": 1263636,
+  "name": "Belch Spores",
+  "cast_time": "Channeled (1.5 sec)",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1263636"
+ },
+ {
+  "id": 1240257,
+  "name": "Pulverizing Strikes",
+  "cast_time": "1.9 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Ruia (boss)",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead; tooltip names a dungeon BOSS as caster; boss casts are interrupt-immune in practice regardless of flags",
+  "url": "https://www.wowhead.com/spell=1240257"
+ },
+ {
+  "id": 1305810,
+  "name": "Arc Lightning",
+  "cast_time": "1 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Zanazal (boss)",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead; tooltip names a dungeon BOSS as caster; boss casts are interrupt-immune in practice regardless of flags",
+  "url": "https://www.wowhead.com/spell=1305810"
+ },
+ {
+  "id": 1252406,
+  "name": "Dreadbellow",
+  "cast_time": "4.5 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "sentinel",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1252406"
+ },
+ {
+  "id": 1216529,
+  "name": "Shield Bash",
+  "cast_time": "3 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "guard",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1216529"
+ },
+ {
+  "id": 1294883,
+  "name": "Shoot",
+  "cast_time": "2.5 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1294883"
+ },
+ {
+  "id": 270003,
+  "name": "Suppression Slam",
+  "cast_time": "3.5 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=270003"
+ },
+ {
+  "id": 1250203,
+  "name": "Hatch",
+  "cast_time": "10 sec cast",
+  "uninterruptible_flag": null,
+  "npc": "Potatoad Egg",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); Wowhead page showed no Flags list at all; no uninterruptible marker seen; 10 sec 'Hatch' cast by a Potatoad Egg; egg is not a normal caster",
+  "url": "https://www.wowhead.com/spell=1250203"
+ },
+ {
+  "id": 1300243,
+  "name": "Brutalize",
+  "cast_time": "Channeled (2 sec)",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1300243"
+ },
+ {
+  "id": 1222642,
+  "name": "Hulking Claw",
+  "cast_time": "2 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Atroxus (boss)",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead; tooltip names a dungeon BOSS as caster; boss casts are interrupt-immune in practice regardless of flags",
+  "url": "https://www.wowhead.com/spell=1222642"
+ },
+ {
+  "id": 1223906,
+  "name": "Fel Nova",
+  "cast_time": "3.5 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Kystia (boss)",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead; tooltip names a dungeon BOSS as caster; boss casts are interrupt-immune in practice regardless of flags",
+  "url": "https://www.wowhead.com/spell=1223906"
+ },
+ {
+  "id": 373692,
+  "name": "Inferno",
+  "cast_time": "3.5 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=373692"
+ },
+ {
+  "id": 1239856,
+  "name": "Sky Strike",
+  "cast_time": "5 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1239856"
+ },
+ {
+  "id": 1296220,
+  "name": "Triple Shot",
+  "cast_time": "2 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Rav'i (boss)",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead; tooltip names a dungeon BOSS as caster; boss casts are interrupt-immune in practice regardless of flags",
+  "url": "https://www.wowhead.com/spell=1296220"
+ },
+ {
+  "id": 1242138,
+  "name": "Solar Breath",
+  "cast_time": "3 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Thornmaw",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1242138"
+ },
+ {
+  "id": 1222721,
+  "name": "Noxious Breath",
+  "cast_time": "Channeled (4 sec)",
+  "uninterruptible_flag": false,
+  "npc": "Atroxus (boss)",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead; tooltip names a dungeon BOSS as caster; boss casts are interrupt-immune in practice regardless of flags",
+  "url": "https://www.wowhead.com/spell=1222721"
+ },
+ {
+  "id": 1297682,
+  "name": "Drain Life",
+  "cast_time": "Channeled (2 sec)",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1297682"
+ },
+ {
+  "id": 1246957,
+  "name": "Primal Echo",
+  "cast_time": "3 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1246957"
+ },
+ {
+  "id": 1293650,
+  "name": "Call Lightning",
+  "cast_time": "1.5 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1293650"
+ },
+ {
+  "id": 1238760,
+  "name": "Starvation Effigy",
+  "cast_time": "1.5 sec cast",
+  "uninterruptible_flag": null,
+  "npc": "totem",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); Wowhead page showed no Flags list at all; no uninterruptible marker seen",
+  "url": "https://www.wowhead.com/spell=1238760"
+ },
+ {
+  "id": 1294845,
+  "name": "Corrosive Fangs",
+  "cast_time": "3 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "writhe",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1294845"
+ },
+ {
+  "id": 1255205,
+  "name": "Uproot",
+  "cast_time": "3 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1255205"
+ },
+ {
+  "id": 1246986,
+  "name": "Poison Spear Volley",
+  "cast_time": "2 sec cast",
+  "uninterruptible_flag": null,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); Wowhead page showed no Flags list at all; no uninterruptible marker seen",
+  "url": "https://www.wowhead.com/spell=1246986"
+ },
+ {
+  "id": 1217633,
+  "name": "Corroding Spittle",
+  "cast_time": "2 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "wyrm",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1217633"
+ },
+ {
+  "id": 1300138,
+  "name": "Void Beam",
+  "cast_time": "Channeled (2 sec)",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1300138"
+ },
+ {
+  "id": 473898,
+  "name": "Legion Strike",
+  "cast_time": "3 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Xathuux the Annihilator (boss)",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead; tooltip names a dungeon BOSS as caster; boss casts are interrupt-immune in practice regardless of flags",
+  "url": "https://www.wowhead.com/spell=473898"
+ },
+ {
+  "id": 1300249,
+  "name": "Devour",
+  "cast_time": "9 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1300249"
+ },
+ {
+  "id": 1238687,
+  "name": "Feast of Misery",
+  "cast_time": "Channeled (1.5 sec)",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1238687"
+ },
+ {
+  "id": 1294849,
+  "name": "Rattle",
+  "cast_time": "Channeled (3 sec)",
+  "uninterruptible_flag": false,
+  "npc": "writhe",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1294849"
+ },
+ {
+  "id": 1301851,
+  "name": "Bloodthirsty Axe",
+  "cast_time": "2 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1301851"
+ },
+ {
+  "id": 266206,
+  "name": "Whirling Axes",
+  "cast_time": "2.75 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Kula (boss)",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead; tooltip names a dungeon BOSS as caster; boss casts are interrupt-immune in practice regardless of flags",
+  "url": "https://www.wowhead.com/spell=266206"
+ },
+ {
+  "id": 1236746,
+  "name": "Verdant Stomp",
+  "cast_time": "3 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Ikuzz (boss)",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead; tooltip names a dungeon BOSS as caster; boss casts are interrupt-immune in practice regardless of flags",
+  "url": "https://www.wowhead.com/spell=1236746"
+ },
+ {
+  "id": 1216970,
+  "name": "Back to Work!",
+  "cast_time": "3 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Warehouse foreman (buffs Warehouse Workers)",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1216970"
+ },
+ {
+  "id": 1297017,
+  "name": "Void Blast",
+  "cast_time": "2 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Taz'rah (boss)",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead; tooltip names a dungeon BOSS as caster; boss casts are interrupt-immune in practice regardless of flags",
+  "url": "https://www.wowhead.com/spell=1297017"
+ },
+ {
+  "id": 270482,
+  "name": "Violent Lunge",
+  "cast_time": "3 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=270482"
+ },
+ {
+  "id": 270293,
+  "name": "Purification Strike",
+  "cast_time": "2 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=270293"
+ },
+ {
+  "id": 1301413,
+  "name": "Boneslicer",
+  "cast_time": "5 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Zul'jan (boss)",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead; tooltip names a dungeon BOSS as caster; boss casts are interrupt-immune in practice regardless of flags",
+  "url": "https://www.wowhead.com/spell=1301413"
+ },
+ {
+  "id": 1300259,
+  "name": "Dark Bloom",
+  "cast_time": "4 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Taz'rah (boss)",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead; tooltip names a dungeon BOSS as caster; boss casts are interrupt-immune in practice regardless of flags",
+  "url": "https://www.wowhead.com/spell=1300259"
+ },
+ {
+  "id": 1301350,
+  "name": "Chop Down",
+  "cast_time": "Channeled (1.5 sec)",
+  "uninterruptible_flag": true,
+  "npc": "Zul'jan (boss)",
+  "verdict": "not_kickable",
+  "note": "Wowhead Flags include 'Unbreakable Channel' (channel cannot be broken); treated as uninterruptible; tooltip names a dungeon BOSS as caster; boss casts are interrupt-immune in practice regardless of flags",
+  "url": "https://www.wowhead.com/spell=1301350"
+ },
+ {
+  "id": 1291468,
+  "name": "Sunder Slam",
+  "cast_time": "3 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1291468"
+ },
+ {
+  "id": 1293475,
+  "name": "Release Charge",
+  "cast_time": "3 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1293475"
+ },
+ {
+  "id": 1217973,
+  "name": "Curse of Doom",
+  "cast_time": "1.5 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1217973"
+ },
+ {
+  "id": 381525,
+  "name": "Roaring Firebreath",
+  "cast_time": "Channeled (4 sec)",
+  "uninterruptible_flag": false,
+  "npc": "Kyrakka (boss)",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead; tooltip names a dungeon BOSS as caster; boss casts are interrupt-immune in practice regardless of flags",
+  "url": "https://www.wowhead.com/spell=381525"
+ },
+ {
+  "id": 1291622,
+  "name": "Storm Catalyst",
+  "cast_time": "2.5 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Storm Serpent",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1291622"
+ },
+ {
+  "id": 1305945,
+  "name": "Shadow Whirlwind",
+  "cast_time": "4 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=1305945"
+ },
+ {
+  "id": 372107,
+  "name": "Molten Boulder",
+  "cast_time": "2.5 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Kokia (boss)",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead; tooltip names a dungeon BOSS as caster; boss casts are interrupt-immune in practice regardless of flags",
+  "url": "https://www.wowhead.com/spell=372107"
+ },
+ {
+  "id": 265773,
+  "name": "Spit Gold",
+  "cast_time": "2 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=265773"
+ },
+ {
+  "id": 384823,
+  "name": "Inferno",
+  "cast_time": "3 sec cast",
+  "uninterruptible_flag": false,
+  "npc": "Blazebound Firestorm",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=384823"
+ },
+ {
+  "id": 1253811,
+  "name": "Fel Spray",
+  "cast_time": "Channeled (3.5 sec)",
+  "uninterruptible_flag": false,
+  "npc": "Nibbles (boss)",
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead; tooltip names a dungeon BOSS as caster; boss casts are interrupt-immune in practice regardless of flags",
+  "url": "https://www.wowhead.com/spell=1253811"
+ },
+ {
+  "id": 265910,
+  "name": "Tail Thrash",
+  "cast_time": "1.5 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=265910"
+ },
+ {
+  "id": 372730,
+  "name": "Crushing Smash",
+  "cast_time": "2.5 sec cast",
+  "uninterruptible_flag": false,
+  "npc": null,
+  "verdict": "unknown",
+  "note": "Wowhead shows a cast bar and no flag, which does not prove kickable (creature interrupt immunity is not in Wowhead's flags); has a cast bar; no Uninterruptible/Cannot-be-interrupted flag on Wowhead",
+  "url": "https://www.wowhead.com/spell=372730"
+ }
+]

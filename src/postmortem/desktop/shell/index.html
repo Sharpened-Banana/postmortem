@@ -407,6 +407,29 @@
           <div class="help">Needs a combat log file and a site URL set above. With this on, every finished key gets analyzed and uploaded with no clicks — just leave the app running while you play.</div>
         </div>
 
+        <div class="field">
+          <label>Snapshot window (seconds before / after the keybind)</label>
+          <div class="row" style="display:flex;gap:8px;">
+            <input type="number" id="set-snapshot-before" min="30" max="600" step="10" style="width:110px;">
+            <input type="number" id="set-snapshot-after" min="10" max="300" step="5" style="width:110px;">
+          </div>
+          <div class="help">The addon's "Mark a snapshot" keybind plants a marker in the combat log; Watch Live then writes a role-focused snapshot report covering this much of the run around it (default 2:00 before, 1:00 after). Snapshots stay on this machine.</div>
+        </div>
+
+        <div class="field">
+          <label>Snapshot hotkey (works while WoW has focus)</label>
+          <div class="row" style="display:flex;gap:8px;align-items:center;">
+            <input type="text" id="set-snapshot-hotkey" placeholder="ctrl+alt+s" style="width:160px;">
+            <select id="set-snapshot-focus">
+              <option value="healer">Healer snapshot</option>
+              <option value="tank">Tank snapshot</option>
+              <option value="general">General snapshot</option>
+            </select>
+            <input type="text" id="set-snapshot-character" placeholder="or your character name" style="width:200px;">
+          </div>
+          <div class="help">Press it mid-key and Watch Live snapshots the moment without touching the combat log at all. The role comes from the choice here, or from your character's spec in the run when a name is given. Leave the hotkey empty to disable it; the addon's own "Mark a snapshot" keybind still works as a fallback. On macOS the first use asks for the Input Monitoring permission.</div>
+        </div>
+
         <button type="button" class="btn btn-primary" id="set-save-btn">Save settings</button>
         <div class="dim" id="set-version-line" style="margin-top:8px;font-size:12px;"></div>
 

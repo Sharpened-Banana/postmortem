@@ -221,6 +221,97 @@ CC_SPELLS: dict[int, tuple[str, str]] = {
 }
 
 
+# Tank ACTIVE MITIGATION: the short, rotational damage-reduction buffs a
+# tank is expected to keep up (or time) rather than the once-a-fight
+# cooldowns in DEFENSIVES above. Used by analysis/snapshot.py's tank focus
+# section for "uptime and casts" in the window around a snapshot marker.
+#
+# spell_id -> (name, spec_ids). spec_ids None = any tank (not used yet, but
+# allowed: this table has no bearing on DEFENSIVES' died_without_defensive
+# reasoning, so the None caveat there doesn't apply here).
+#
+# Ids are the long-stable live-game ids; they still need verifying against
+# a real tank's log once a snapshot has been taken in-game (the aura id can
+# differ from the cast id -- Demon Spikes is the known case, listed under
+# both). A spell missing here simply reports no mitigation data; it is
+# never mis-attributed.
+ACTIVE_MITIGATION: dict[int, tuple[str, Optional[tuple[int, ...]]]] = {
+    # -- Warrior: 73 Protection --
+    2565: ("Shield Block", (73,)),
+    190456: ("Ignore Pain", (73,)),
+    # -- Druid: 104 Guardian --
+    192081: ("Ironfur", (104,)),
+    # -- Demon Hunter: 581 Vengeance -- cast id and the buff it applies
+    203720: ("Demon Spikes", (581,)),
+    203819: ("Demon Spikes", (581,)),
+    # -- Paladin: 66 Protection --
+    53600: ("Shield of the Righteous", (66,)),
+    # -- Death Knight: 250 Blood --
+    195181: ("Bone Shield", (250,)),
+    49998: ("Death Strike", (250,)),
+    # -- Monk: 268 Brewmaster --
+    215479: ("Shuffle", (268,)),
+    322507: ("Celestial Brew", (268,)),
+    # -- Evoker (any spec can take it; the tank use is what matters here) --
+    363916: ("Obsidian Scales", None),
+}
+
+
+# Healer major throughput/raid cooldowns, seen as SPELL_CAST_SUCCESS by the
+# healer -- the "did they press the big button" list for the healer focus
+# section of a snapshot (analysis/snapshot.py). Personal defensives are
+# DEFENSIVES above; single-target externals are EXTERNALS below.
+#
+# spell_id -> (name, spec_ids). Ids to be verified against a real log, same
+# discipline as ACTIVE_MITIGATION: an unlisted cooldown is just not shown.
+HEALER_COOLDOWNS: dict[int, tuple[str, Optional[tuple[int, ...]]]] = {
+    # -- Druid: 105 Restoration --
+    740: ("Tranquility", (105,)),
+    33891: ("Incarnation: Tree of Life", (105,)),
+    197721: ("Flourish", (105,)),
+    391528: ("Convoke the Spirits", (102, 103, 104, 105)),
+    # -- Monk: 270 Mistweaver --
+    115310: ("Revival", (270,)),
+    388615: ("Restoral", (270,)),
+    322118: ("Invoke Yu'lon, the Jade Serpent", (270,)),
+    325197: ("Invoke Chi-Ji, the Red Crane", (270,)),
+    # -- Paladin: 65 Holy --
+    31821: ("Aura Mastery", (65,)),
+    31884: ("Avenging Wrath", (65, 66, 70)),
+    # -- Priest: 256 Discipline, 257 Holy --
+    47536: ("Rapture", (256,)),
+    62618: ("Power Word: Barrier", (256,)),
+    246287: ("Evangelism", (256,)),
+    64843: ("Divine Hymn", (257,)),
+    200183: ("Apotheosis", (257,)),
+    265202: ("Holy Word: Salvation", (257,)),
+    # -- Shaman: 264 Restoration --
+    98008: ("Spirit Link Totem", (264,)),
+    108280: ("Healing Tide Totem", (264,)),
+    114052: ("Ascendance", (264,)),
+    108281: ("Ancestral Guidance", (264,)),
+    # -- Evoker: 1468 Preservation --
+    363534: ("Rewind", (1468,)),
+    359816: ("Dream Flight", (1468,)),
+    370960: ("Emerald Communion", (1468,)),
+}
+
+
+# Single-target external defensives a healer (or tank) gives to somebody
+# else -- "externals given" in the healer focus section. spell_id -> name.
+# Ids to be verified against a real log.
+EXTERNALS: dict[int, str] = {
+    33206: "Pain Suppression",
+    47788: "Guardian Spirit",
+    102342: "Ironbark",
+    116849: "Life Cocoon",
+    6940: "Blessing of Sacrifice",
+    1022: "Blessing of Protection",
+    633: "Lay on Hands",
+    357170: "Time Dilation",
+}
+
+
 def spec_info(spec_id: int | None) -> tuple[str | None, str | None, str | None]:
     if spec_id is None:
         return None, None, None

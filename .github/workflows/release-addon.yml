@@ -72,11 +72,27 @@ jobs:
         # what installed desktop apps (before alpha-desktop-45) and the
         # site's download link resolve. Both must keep pointing at the
         # newest alpha-desktop-N (release-desktop.yml marks those
-        # --latest), so un-mark this one. Best-effort: a failure here
-        # must not fail a published addon release.
+        # --latest). Un-marking this release alone was not enough:
+        # addon-v0.3.2's un-mark step ran and succeeded, and
+        # /releases/latest still answered addon-v0.3.2 afterwards
+        # (2026-09-15) -- so re-mark the newest desktop release
+        # explicitly, which is unambiguous whatever GitHub does with the
+        # flag. Best-effort: a failure here must not fail a published
+        # addon release.
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --latest=false \
             || echo "::warning::could not un-mark $GITHUB_REF_NAME as latest"
+          newest="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
+            --exclude-drafts --exclude-pre-releases --json tagName --jq '.[].tagName' \
+            | grep -E '^alpha-desktop-[0-9]+$' | sort -t- -k3,3n | tail -1)"
+          if [ -n "$newest" ]; then
+            gh release edit "$newest" --repo "$GITHUB_REPOSITORY" --latest \
+              && echo "latest release: $newest" \
+              || echo "::warning::could not re-mark $newest as latest"
+          else
+            echo "::warning::no alpha-desktop release found to mark latest"
+          fi
+          echo "/releases/latest now: $(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)"

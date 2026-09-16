@@ -1,0 +1,133 @@
+{
+ "_comment": "Built by `postmortem build-event-data` from public Warcraft Logs dispel events: every enemy buff removed by Spellsteal or a purge (see wcl_events.py). 'enrages' are buffs removed by a soothe.",
+ "source": "warcraftlogs.com",
+ "season": "Mythic+ Season 2",
+ "source_version": "2026-09-15",
+ "spells": [
+  {
+   "id": 391031,
+   "name": "Stormcloud Barrier",
+   "note": "spellstolen 120x, purged 590x in public Warcraft Logs keys (cast by Primal Thundercloud)",
+   "stealable": true,
+   "removals": 710
+  },
+  {
+   "id": 269935,
+   "name": "Bound by Shadow",
+   "note": "spellstolen 178x, purged 387x in public Warcraft Logs keys (cast by Minion of Zul)",
+   "stealable": true,
+   "removals": 565
+  },
+  {
+   "id": 1310739,
+   "name": "Accumulate Charge",
+   "note": "spellstolen 141x, purged 411x in public Warcraft Logs keys (cast by Agitated Nimbus)",
+   "stealable": true,
+   "removals": 552
+  },
+  {
+   "id": 461895,
+   "name": "Unstable Power",
+   "note": "spellstolen 7x, purged 419x in public Warcraft Logs keys (cast by Orb of Ascendance)",
+   "stealable": true,
+   "removals": 426
+  },
+  {
+   "id": 1229433,
+   "name": "Fel Crazed",
+   "note": "spellstolen 133x, purged 65x in public Warcraft Logs keys (cast by Felonious Mage)",
+   "stealable": true,
+   "removals": 198
+  },
+  {
+   "id": 373972,
+   "name": "Blaze of Glory",
+   "note": "spellstolen 66x, purged 111x in public Warcraft Logs keys (cast by Ashseer Flamelasher)",
+   "stealable": true,
+   "removals": 177
+  },
+  {
+   "id": 1297696,
+   "name": "Healing Breeze",
+   "note": "spellstolen 18x, purged 107x in public Warcraft Logs keys (cast by Earthwhisper Tender)",
+   "stealable": true,
+   "removals": 125
+  },
+  {
+   "id": 1296671,
+   "name": "Captain's Bulwark",
+   "note": "spellstolen 53x, purged 56x in public Warcraft Logs keys (cast by King Rahu'ai)",
+   "stealable": true,
+   "removals": 109
+  },
+  {
+   "id": 1238581,
+   "name": "Spiny Shield",
+   "note": "spellstolen 30x, purged 54x in public Warcraft Logs keys (cast by Spineshield Beetle)",
+   "stealable": true,
+   "removals": 84
+  }
+ ],
+ "enrages": [
+  {
+   "id": 1238053,
+   "name": "Mother's Wrath",
+   "note": "soothed 136x in public Warcraft Logs keys (cast by Territorial Matriarch)",
+   "removals": 136
+  },
+  {
+   "id": 1214922,
+   "name": "Fel Rage",
+   "note": "soothed 112x in public Warcraft Logs keys (cast by Wrathguard Flayer)",
+   "removals": 112
+  },
+  {
+   "id": 1306308,
+   "name": "Ravenous",
+   "note": "soothed 74x in public Warcraft Logs keys (cast by Ravenous Descendant)",
+   "removals": 74
+  },
+  {
+   "id": 269976,
+   "name": "Ancestral Fury",
+   "note": "soothed 64x in public Warcraft Logs keys (cast by Shadow-Borne Champion)",
+   "removals": 64
+  },
+  {
+   "id": 1297763,
+   "name": "Bestial Berserk",
+   "note": "soothed 63x in public Warcraft Logs keys (cast by Queen Patlaa)",
+   "removals": 63
+  },
+  {
+   "id": 1310319,
+   "name": "Bolster",
+   "note": "soothed 49x in public Warcraft Logs keys (cast by Longtooth Tuskarr)",
+   "removals": 49
+  },
+  {
+   "id": 1249661,
+   "name": "Feral Rage",
+   "note": "soothed 40x in public Warcraft Logs keys (cast by Chitigoth)",
+   "removals": 40
+  },
+  {
+   "id": 1254826,
+   "name": "Bloodsurge",
+   "note": "soothed 17x in public Warcraft Logs keys (cast by Dominated Brawler)",
+   "removals": 17
+  },
+  {
+   "id": 1246865,
+   "name": "Bestial Wrath",
+   "note": "soothed 16x in public Warcraft Logs keys (cast by Loyal Saberfang)",
+   "removals": 16
+  },
+  {
+   "id": 1216970,
+   "name": "Back to Work!",
+   "note": "soothed 8x in public Warcraft Logs keys (cast by Warehouse Worker)",
+   "removals": 8
+  }
+ ]
+}
