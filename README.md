@@ -96,6 +96,14 @@ in-game:
   addon table and isn't accessible from outside it, so this addon can't
   resolve *which* pack you pulled, only how many enemies and which pull
   number.
+- **Snapshot keybind** — bind "Mark a snapshot" (Key Bindings → AddOns →
+  Postmortem) or type `/pm snapshot` mid-key when something just went
+  wrong. The desktop app's Watch Live then writes a snapshot report of the
+  2 minutes before and 1 minute after the press (adjustable in
+  `/pm options` and in the app's Settings), focused on your role: a healer
+  gets healing, mana, who took what and cooldown use; a tank gets damage
+  intake, mitigation uptime and the biggest hits. How it works and the
+  CLI form (`postmortem snapshot`) are in `docs/SNAPSHOT.md`.
 
 Click the minimap icon (or run `/pm`) to open an in-game window laying out
 exactly what's live in the addon vs. what needs the companion app.

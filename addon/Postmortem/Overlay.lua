@@ -495,6 +495,18 @@ function MA:Overlay_Refresh()
     end
   end
 
+  -- Mid-key flash of the same status row: Snapshot.lua sets
+  -- state.statusFlash = { text, expires } on a keybind press so the HUD
+  -- confirms the mark without a chat glance. Only while the key is active
+  -- (the recap window above owns the row afterwards) and only until
+  -- `expires` -- the 1 s tracker tick calls this again and drops it.
+  local flash = active and state.statusFlash
+  if flash and flash.expires and GetTime() < flash.expires then
+    showStatus = true
+    frame.statusFS:SetTextColor(0.95, 0.8, 0.35)
+    frame.statusFS:SetText(flash.text or "Snapshot marked")
+  end
+
   -- Reflow every optional row in display order, skipping hidden ones
   -- entirely (no gap left behind), and size the frame to exactly what's
   -- shown -- extending InfoWindow.lua/Results.lua's existing "measure the

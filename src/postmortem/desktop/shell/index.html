@@ -407,6 +407,15 @@
           <div class="help">Needs a combat log file and a site URL set above. With this on, every finished key gets analyzed and uploaded with no clicks — just leave the app running while you play.</div>
         </div>
 
+        <div class="field">
+          <label>Snapshot window (seconds before / after the keybind)</label>
+          <div class="row" style="display:flex;gap:8px;">
+            <input type="number" id="set-snapshot-before" min="30" max="600" step="10" style="width:110px;">
+            <input type="number" id="set-snapshot-after" min="10" max="300" step="5" style="width:110px;">
+          </div>
+          <div class="help">The addon's "Mark a snapshot" keybind plants a marker in the combat log; Watch Live then writes a role-focused snapshot report covering this much of the run around it (default 2:00 before, 1:00 after). Snapshots stay on this machine.</div>
+        </div>
+
         <button type="button" class="btn btn-primary" id="set-save-btn">Save settings</button>
         <div class="dim" id="set-version-line" style="margin-top:8px;font-size:12px;"></div>
 

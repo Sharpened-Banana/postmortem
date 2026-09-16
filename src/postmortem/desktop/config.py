@@ -59,6 +59,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # default: opting in is a deliberate choice, since it begins tailing a
     # file and uploading runs the moment the app opens.
     "watch_auto_start": False,
+    # The snapshot keybind's window (docs/SNAPSHOT.md): how much of the
+    # run before and after the press a snapshot report covers. Watch Live
+    # reads these; the addon shows its own copy in-game.
+    "snapshot_before_s": 120,
+    "snapshot_after_s": 60,
     # Per-dungeon default MDT routes, applied automatically to any run
     # (Watch Live or one-off analysis) that doesn't get an explicit route
     # -- so route adherence shows up on every key without pasting a

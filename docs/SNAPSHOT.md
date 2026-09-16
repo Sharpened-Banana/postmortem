@@ -112,3 +112,38 @@ the run's reports for every marker found.
   "Snapshot (healer) at 12:34 -- Open"; opening loads the page in the
   report screen. Settings gain "Snapshot window: before / after".
 - Snapshots are local only; nothing is uploaded.
+
+## Notes from the implementation (2026-09-15)
+
+- `build_snapshot` also takes `stealable`, `pull_gap_seconds`, `marker`
+  (the detected `Marker`, so callers need not re-search) and
+  `source="marker"|"manual"` (what fills `snapshot.source`). The
+  `snapshot` block also carries `t_start`, `t_end`, `window_s`,
+  `active_s` and `marker_count`; each `players` entry gets `dps`/`hps`/
+  `dtps` over the window's combat-active time; `series` has `n` (bin
+  count) and hp/mana bins with no advanced-block sample are `null`, which
+  the chart draws as a gap rather than a made-up value.
+- COMBATANT_INFO is logged once at the key's start, so the latest
+  pre-window line per player is carried into the slice (re-stamped to the
+  window start); otherwise a later window would know nobody's spec.
+- The healer section's cooldown and external tables are
+  `gamedata.HEALER_COOLDOWNS` / `gamedata.EXTERNALS`; the tank section's
+  is `gamedata.ACTIVE_MITIGATION`. Spell ids there are long-stable live
+  values; Ironfur/Barkskin, Divine Hymn/Guardian Spirit and mana
+  (powerType 0) were confirmed on a real Kings' Rest log the day they
+  were written, the rest still want a real-log check.
+- CLI: with `--at`, `-o` is a file (an existing directory gets
+  `<logstem>-snapshot-1.<ext>` inside it); without `--at`, `-o` is the
+  directory and markers are numbered across the whole log. `--run`
+  defaults to 1 with `--at` and limits the sweep without it.
+- The snapshot page has no script at all; every log-derived string is
+  escaped, and its (empty) hash list is registered with report/csp.py so a
+  script added later is covered automatically.
+- Addon: presses inside the 5 s cooldown are ignored silently (debug
+  trace only); the sequence routes through `CombatLogging_SetState` so the
+  module's 2 s re-assert ticker cannot add a header and shift the role; a
+  key ending mid-sequence cancels the remaining toggles.
+- Desktop: the build timer waits `after_s + 5 s` of wall-clock time and
+  re-reads the run's slice file; `stop_watch` cancels pending timers, and
+  the run-end path writes the same files again (same content) for any
+  marker whose timer had not fired.

@@ -392,6 +392,46 @@ def _unplanned_pulls_summary(comparison: Optional[dict[str, Any]]) -> Optional[d
     }
 
 
+def death_entries(stats) -> list[dict[str, Any]]:
+    """The report's ``deaths`` list, one entry per DeathRecord. Shared with
+    the snapshot builder (analysis/snapshot.py) so a death looks the same
+    in a window report as in the run report."""
+    return [
+        {
+            "ts": d.ts,
+            "player": d.player_name,
+            "pull": d.pull_index,
+            "killing_blow": d.killing_blow,
+            "biggest_hit": max(
+                (r["amount"] for r in d.recap), default=None
+            ),
+            "damage_last_5s": sum(
+                r["amount"] for r in d.recap if r["ts"] >= d.ts - 5.0
+            ),
+            "defensives_used_before_death": d.defensives_used_before_death,
+            "died_without_defensive": d.died_without_defensive,
+            "recap": d.recap,
+        }
+        for d in stats.deaths
+    ]
+
+
+def player_entries(stats) -> list[dict[str, Any]]:
+    """The report's ``players`` list (see the PET_BUCKET note inline);
+    shared with the snapshot builder."""
+    return [
+        p.summary() for p in stats.players.values()
+        # The shared "Pets & Guardians" bucket only exists for pets
+        # whose owner never got resolved. resolve_source() creates it
+        # on the first event from any unowned pet -- including a bare
+        # cast or a killing blow that then contributes nothing -- so
+        # it showed up as a sixth "player" with all-zero numbers in a
+        # real report (2026-09-02). Only emit it when it actually
+        # holds something.
+        if p.guid != PET_BUCKET or p.damage_done or p.healing_done
+    ]
+
+
 def _timer_summary(par_ms: int, duration_ms: Optional[int]) -> dict[str, Any]:
     """+2/+3 keystone-upgrade thresholds at 80%/60% of par time -- a fixed
     WoW Mythic+ formula since the system's introduction, not season- or
@@ -491,36 +531,9 @@ def analyze_run(
             "dungeon_idx": data.dungeon_idx if data else None,
             "required_forces": (data.total_count.get("normal") if data else None),
         },
-        "players": [
-            p.summary() for p in stats.players.values()
-            # The shared "Pets & Guardians" bucket only exists for pets
-            # whose owner never got resolved. resolve_source() creates it
-            # on the first event from any unowned pet -- including a bare
-            # cast or a killing blow that then contributes nothing -- so
-            # it showed up as a sixth "player" with all-zero numbers in a
-            # real report (2026-09-02). Only emit it when it actually
-            # holds something.
-            if p.guid != PET_BUCKET or p.damage_done or p.healing_done
-        ],
+        "players": player_entries(stats),
         "pulls": stats.pull_stats,
-        "deaths": [
-            {
-                "ts": d.ts,
-                "player": d.player_name,
-                "pull": d.pull_index,
-                "killing_blow": d.killing_blow,
-                "biggest_hit": max(
-                    (r["amount"] for r in d.recap), default=None
-                ),
-                "damage_last_5s": sum(
-                    r["amount"] for r in d.recap if r["ts"] >= d.ts - 5.0
-                ),
-                "defensives_used_before_death": d.defensives_used_before_death,
-                "died_without_defensive": d.died_without_defensive,
-                "recap": d.recap,
-            }
-            for d in stats.deaths
-        ],
+        "deaths": death_entries(stats),
         "death_cost": {
             "deaths": len(stats.deaths),
             "per_death_s": death_penalty_s,

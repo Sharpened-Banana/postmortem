@@ -18,6 +18,8 @@ CombatLogging.lua
 Tracker.lua
 ChestTimer.lua
 Overlay.lua
+Snapshot.lua
+Bindings.xml
 InfoWindow.lua
 Interrupts.lua
 RouteImport.lua

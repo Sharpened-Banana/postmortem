@@ -14,6 +14,7 @@ from .analysis.dispels import SCHOOLS as DISPEL_SCHOOLS, DispelData
 from .analysis.interruptibility import InterruptibilityData
 from .analysis.pulls import DEFAULT_PULL_GAP_S
 from .analysis.run_analyzer import analyze_run
+from .analysis.snapshot import build_snapshot, find_markers
 from .analysis.stealable import StealableData
 from .chapters import write_chapter_files
 from .clips import DEFAULT_PAD_S, FfmpegNotFoundError, clip_specs_for_chapters, cut_clips, load_chapters
@@ -26,6 +27,7 @@ from .mdt.extract import LuaLiteralParser, LuaParseError, _find_assignment, writ
 from .mdt.route import Route
 from .recorder import Recorder
 from .report.html import render_html
+from .report.snapshot import render_snapshot_html, render_snapshot_text
 from .console import make_streams_safe, safe_print
 from .report.text import render_text
 
@@ -1462,6 +1464,133 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     return 0
 
 
+def _parse_at(value: str) -> float:
+    """``--at`` as seconds from the run start: "MM:SS", "H:MM:SS", or a
+    bare number of seconds."""
+    text = value.strip()
+    if ":" in text:
+        parts = text.split(":")
+        try:
+            nums = [float(x) for x in parts]
+        except ValueError:
+            raise SystemExit(f"error: --at must look like MM:SS, got {value!r}")
+        if len(nums) == 2:
+            return nums[0] * 60 + nums[1]
+        if len(nums) == 3:
+            return nums[0] * 3600 + nums[1] * 60 + nums[2]
+        raise SystemExit(f"error: --at must look like MM:SS, got {value!r}")
+    try:
+        return float(text)
+    except ValueError:
+        raise SystemExit(f"error: --at must look like MM:SS, got {value!r}")
+
+
+_SNAPSHOT_EXT = {"text": "txt", "html": "html", "json": "json"}
+
+
+def _render_snapshot(report: dict, fmt: str) -> str:
+    if fmt == "text":
+        return render_snapshot_text(report)
+    if fmt == "html":
+        return render_snapshot_html(report)
+    return json.dumps(report, indent=1)
+
+
+def _write_snapshots_for_run(
+    segment: RunSegment, out_dir: Path, stem: str, *, first_n: int = 1,
+    before_s: float = 120.0, after_s: float = 60.0, role: str = "auto",
+    fmt: str = "html", **build_kwargs,
+) -> list[Path]:
+    """Render one ``<stem>-snapshot-<n>.<ext>`` per marker found in
+    ``segment`` (numbered from ``first_n``) and return the paths written.
+    Best-effort per marker: one snapshot that fails to build is reported
+    on stderr and skipped, never taking the others (or the caller's own
+    outputs) down with it."""
+    written: list[Path] = []
+    n = first_n
+    for marker in find_markers(segment.events):
+        path = out_dir / f"{stem}-snapshot-{n}.{_SNAPSHOT_EXT[fmt]}"
+        n += 1
+        try:
+            report = build_snapshot(
+                segment, marker.ts, before_s=before_s, after_s=after_s,
+                role=role, marker=marker, source="marker", **build_kwargs,
+            )
+            path.write_text(_render_snapshot(report, fmt), encoding="utf-8")
+        except Exception as exc:
+            print(f"warning: snapshot at {marker.ts:.1f} failed: {exc}", file=sys.stderr)
+            continue
+        written.append(path)
+    return written
+
+
+def cmd_snapshot(args: argparse.Namespace) -> int:
+    """``postmortem snapshot`` -- see docs/SNAPSHOT.md section 2."""
+    if args.format not in _SNAPSHOT_EXT:
+        raise SystemExit(f"error: unknown format {args.format!r} (text, html, json)")
+    if args.at is not None and args.at_ts is not None:
+        raise SystemExit("error: give --at or --at-ts, not both")
+    store = _load_store(args.dungeon_data)
+    avoidable = _load_avoidable(args.avoidable_data) or AvoidableData.load_bundled()
+    interrupt_data = _load_interruptibility(args.interrupt_data)
+    dispel_data = _load_dispel(args.dispel_data)
+    build_kwargs = dict(
+        store=store, avoidable=avoidable, interrupt_data=interrupt_data,
+        dispel_data=dispel_data, pull_gap_seconds=args.pull_gap,
+    )
+    log = Path(args.log)
+
+    if args.at is not None or args.at_ts is not None:
+        # one explicit moment in one run (the first unless --run says)
+        segment = _pick_run(segment_runs(parse_file(args.log)), args.run or "1")
+        marker_ts = (segment.start_ts + _parse_at(args.at) if args.at is not None
+                     else float(args.at_ts))
+        run_end = segment.end_ts if segment.end_ts is not None else (
+            segment.events[-1].ts if segment.events else segment.start_ts
+        )
+        if not segment.start_ts <= marker_ts <= run_end:
+            raise SystemExit(
+                f"error: --at is outside this run (it lasts "
+                f"{run_end - segment.start_ts:.0f}s)"
+            )
+        report = build_snapshot(
+            segment, marker_ts, before_s=args.before, after_s=args.after,
+            role=args.role, source="manual", **build_kwargs,
+        )
+        rendered = _render_snapshot(report, args.format)
+        if args.out:
+            out = Path(args.out)
+            if out.is_dir():
+                out = out / f"{log.stem}-snapshot-1.{_SNAPSHOT_EXT[args.format]}"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(rendered, encoding="utf-8")
+            print(f"wrote {out}", file=sys.stderr)
+        else:
+            safe_print(rendered)
+        return 0
+
+    # every marker in every run (or in the one --run names)
+    out_dir = Path(args.out) if args.out else Path.cwd()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    segments = segment_runs(parse_file(args.log))
+    if args.run:
+        segments = iter([_pick_run(segments, args.run)])
+    for segment in segments:
+        written.extend(_write_snapshots_for_run(
+            segment, out_dir, log.stem, first_n=len(written) + 1,
+            before_s=args.before, after_s=args.after, role=args.role,
+            fmt=args.format, **build_kwargs,
+        ))
+        segment.events = []
+    if not written:
+        print("no markers found", file=sys.stderr)
+        return 0
+    for path in written:
+        print(f"wrote {path}", file=sys.stderr)
+    return 0
+
+
 def _report_basename(report: dict) -> str:
     import re as _re
     import time as _time
@@ -1617,6 +1746,21 @@ def _write_recorded_reports(
     safe_print(render_text(report))
     safe_print(f"wrote {base}.json / {base}.html / {base}.chapters.json / {base}.vtt",
                file=sys.stderr)
+    # One <run>-snapshot-<n>.html per snapshot marker the addon planted in
+    # this run (docs/SNAPSHOT.md). Best-effort by contract, like the
+    # enrich hook above: the run's own reports are already on disk, and a
+    # snapshot that can't be built must never make the run look failed.
+    try:
+        snapshots = _write_snapshots_for_run(
+            segments[-1], base.parent, base.name, store=store,
+            avoidable=avoidable, interrupt_data=interrupt_data,
+            stealable=stealable, pull_gap_seconds=pull_gap_seconds,
+        )
+    except Exception as exc:
+        print(f"warning: snapshots failed: {exc}", file=sys.stderr)
+        snapshots = []
+    for path in snapshots:
+        safe_print(f"wrote {path}", file=sys.stderr)
     return report
 
 
@@ -2043,6 +2187,41 @@ def build_parser() -> argparse.ArgumentParser:
                         "one auto-generated and stored locally on first use "
                         "(only needed to use a specific/shared token)")
     p.set_defaults(func=cmd_analyze)
+
+    p = sub.add_parser(
+        "snapshot",
+        help="role-focused postmortem of the window around a snapshot "
+             "marker (the addon's keybind) or a given moment",
+    )
+    p.add_argument("log", help="path to WoWCombatLog.txt (or a recorded run slice)")
+    p.add_argument("--at", metavar="MM:SS",
+                   help="moment relative to the run start (first run unless "
+                        "--run); without --at, every marker in every run is "
+                        "rendered as <log>-snapshot-<n>.<ext> files")
+    p.add_argument("--at-ts", type=float, metavar="EPOCH",
+                   help="the moment as an absolute POSIX timestamp (alternative to --at)")
+    p.add_argument("--run", help="which run in the log: a number from `runs`, or 'last'")
+    p.add_argument("--role", default="auto",
+                   choices=("healer", "tank", "general", "auto"),
+                   help="focus role; auto = the marker's role, else general (default)")
+    p.add_argument("--before", type=float, default=120.0,
+                   help="seconds before the moment (default 120)")
+    p.add_argument("--after", type=float, default=60.0,
+                   help="seconds after the moment (default 60)")
+    p.add_argument("--format", default="text", choices=("text", "html", "json"),
+                   help="text (default), html or json")
+    p.add_argument("-o", "--out",
+                   help="with --at: the file to write (a directory gets "
+                        "<log>-snapshot-1.<ext>); without: the directory for "
+                        "the per-marker files (default: cwd)")
+    p.add_argument("--dungeon-data", help="extracted dungeon data JSON (see extract-data)")
+    p.add_argument("--dispel-data", help="dispellable-debuff JSON (see build-dispel-data)")
+    p.add_argument("--avoidable-data", help="avoidable-damage JSON (see analyze)")
+    p.add_argument("--interrupt-data", help="spell-interruptibility JSON (see analyze)")
+    p.add_argument("--pull-gap", type=float, default=DEFAULT_PULL_GAP_S,
+                   help=f"seconds of no enemy engaged that separates two pulls "
+                        f"(default {DEFAULT_PULL_GAP_S})")
+    p.set_defaults(func=cmd_snapshot)
 
     p = sub.add_parser(
         "index",

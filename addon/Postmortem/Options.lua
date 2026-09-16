@@ -103,6 +103,19 @@ local function BuildSettingsPanel()
   Slider("runHistoryLimit", "Runs to keep",
     "How many past runs to keep before the oldest are trimmed.", 50, 10, 200, 10)
 
+  Header(layout, "Snapshot")
+  -- Defaults restated from Bootstrap.lua (snapshotBeforeS = 120,
+  -- snapshotAfterS = 60) -- see this file's header for why. The helpers
+  -- have no free-text description row, so the "what is a snapshot" line
+  -- lives in each slider's tooltip instead.
+  Slider("snapshotBeforeS", "Snapshot: seconds before",
+    "Bind \"Mark a snapshot\" (Key Bindings > AddOns > Postmortem) or type /pm snapshot during a key to get a detailed "
+      .. "report of what just happened. This is how far back from the press the report looks.",
+    120, 30, 600, 10)
+  Slider("snapshotAfterS", "Snapshot: seconds after",
+    "How far past the press the snapshot report keeps looking.",
+    60, 10, 300, 5)
+
   Header(layout, "Announcements")
   Checkbox("announceCompletion", "Announce completion to party",
     "Post a one-line summary (chest verdict, deaths) to party/instance chat when a key finishes.", true)
