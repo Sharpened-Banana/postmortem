@@ -46,81 +46,6 @@ local HELD_GRACE_S = 0.5
 -- spellID -> GetTime() of the last successful cast by the player this run.
 local lastCastAt = {}
 
--- Resolves the player's current specialization id (65, 250, 581, ...),
--- tolerating both the modern C_SpecializationInfo path and the legacy
--- globals -- same defensive shape as DeathTagging.lua's SpellName().
-local function PlayerSpecID()
-  local index
-  if C_SpecializationInfo and C_SpecializationInfo.GetSpecialization then
-    index = C_SpecializationInfo.GetSpecialization()
-  elseif GetSpecialization then
-    index = GetSpecialization()
-  end
-  if not index then return nil end
-
-  if C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo then
-    local id = C_SpecializationInfo.GetSpecializationInfo(index)
-    if type(id) == "number" then return id end
-  elseif GetSpecializationInfo then
-    local id = GetSpecializationInfo(index)
-    if type(id) == "number" then return id end
-  end
-  return nil
-end
-
--- Is the spell actually in the player's spellbook right now? This is the
--- question the combat log can never answer, and it is what keeps the live
--- report from telling a tank they sat on a button they never talented.
--- A nil/unknown answer is treated as "don't claim anything" by the caller.
-local function IsKnown(spellID)
-  if C_SpellBook and C_SpellBook.IsSpellKnownOrOverridesKnown then
-    return C_SpellBook.IsSpellKnownOrOverridesKnown(spellID) and true or false
-  end
-  if C_SpellBook and C_SpellBook.IsSpellKnown then
-    return C_SpellBook.IsSpellKnown(spellID) and true or false
-  end
-  if IsSpellKnownOrOverridesKnown then
-    return IsSpellKnownOrOverridesKnown(spellID) and true or false
-  end
-  if IsSpellKnown then
-    return IsSpellKnown(spellID) and true or false
-  end
-  return nil
-end
-
--- Seconds remaining on spellID's cooldown: 0 when ready, nil when the
--- client wouldn't say. Handles the modern table-returning
--- C_Spell.GetSpellCooldown and the legacy multiple-return GetSpellCooldown,
--- and treats a charge-based spell with a charge banked as ready regardless
--- of the recharge timer (that is what having a charge means).
-local function CooldownRemaining(spellID)
-  if C_Spell and C_Spell.GetSpellCharges then
-    local charges = C_Spell.GetSpellCharges(spellID)
-    if type(charges) == "table" and type(charges.currentCharges) == "number" then
-      if charges.currentCharges > 0 then return 0 end
-    end
-  end
-
-  local startTime, duration
-  if C_Spell and C_Spell.GetSpellCooldown then
-    local info = C_Spell.GetSpellCooldown(spellID)
-    if type(info) == "table" then
-      startTime, duration = info.startTime, info.duration
-    end
-  elseif GetSpellCooldown then
-    startTime, duration = GetSpellCooldown(spellID)
-  end
-
-  if type(startTime) ~= "number" or type(duration) ~= "number" then
-    return nil
-  end
-  if startTime == 0 or duration == 0 then
-    return 0  -- not on cooldown
-  end
-  local remaining = (startTime + duration) - GetTime()
-  return remaining > 0 and remaining or 0
-end
-
 -- Builds the post-mortem for the death that just happened.
 --
 -- Returns nil when there is nothing honestly sayable: the player isn't a
@@ -136,7 +61,7 @@ local function BuildPostMortem()
   local T = MA.TankDefensives
   if not T or not T.bySpec then return nil end
 
-  local specID = PlayerSpecID()
+  local specID = MA:TankUtil_PlayerSpecID()
   if not specID then return nil end
   local entries = T.bySpec[specID]
   if not entries then return nil end
@@ -145,7 +70,7 @@ local function BuildPostMortem()
   local readyUnused, held, known, notKnown = {}, {}, {}, {}
 
   for _, entry in ipairs(entries) do
-    local isKnown = IsKnown(entry.id)
+    local isKnown = MA:TankUtil_IsKnown(entry.id)
     -- Only reason about spells the client confirms the player has. An
     -- untalented spell is skipped entirely rather than reported as
     -- "unused", and an unreadable answer (nil) is skipped from BOTH lists
@@ -168,7 +93,7 @@ local function BuildPostMortem()
         -- cooldown == 0 means resource-gated (rage, Holy Power, runes):
         -- the cooldown API says it's "ready" even when the player had no
         -- resource to press it with, so claiming it would be a guess.
-        local remaining = CooldownRemaining(entry.id)
+        local remaining = MA:TankUtil_CooldownRemaining(entry.id)
         if remaining ~= nil and remaining <= 0 then
           local readyFor
           if castAt then readyFor = now - (castAt + entry.cooldown) end

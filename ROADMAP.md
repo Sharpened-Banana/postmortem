@@ -61,6 +61,32 @@ Next steps:
       pull/death/boss events, so deaths are one click away in the VOD
 - [ ] Optional ffmpeg post-step to cut per-pull clips from the recording
 
+## Tanking toolkit
+
+Today: the tank death post-mortem (see the Analysis depth item below) plus
+`addon/Postmortem/Incoming.lua`, a live panel showing what the encounter
+is about to cast next to which of your majors are up.
+
+Everything here is shaped by patch 12.0's Secret Values: enemy casts,
+health, absorbs and damage taken are permanently unreadable by addon code,
+so the live half can only ever display sanctioned data
+(`C_EncounterTimeline`) and the player's own spec, spellbook and
+cooldowns. It shows what is coming and what you have, and deliberately
+stops short of ranking or recommending — "suggest the next action from
+combat state" is the exact pattern those restrictions exist to prevent.
+
+Next steps:
+- [ ] Enrich the incoming panel with how hard a spell has historically hit
+      *you* (the per-spell history in `analysis/spell_damage.py` already
+      accumulates this from your own logs, so it needs no curated data)
+- [ ] Damage school per spell, so the panel can distinguish the physical
+      hits Shield Block answers from the magic ones it does not — needs
+      school captured through the damage-taken path first
+- [ ] Surface the per-key tank deaths in the `/pm results` window, not
+      just the post-key recap
+- [ ] Co-tank swap coordination: the research found no incumbent above
+      ~15k downloads, and `GetPartyAssignment("MAINTANK")` still works
+
 ## Analysis depth
 
 - [ ] Avoidable-damage tagging: per-dungeon lists of "don't stand in this"

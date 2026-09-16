@@ -272,6 +272,18 @@ local function CreateOverlayFrame()
   local deathCauseFS = f:CreateFontString(nil, "OVERLAY")
   deathCauseFS:SetFontObject(GameFontHighlightSmall)
 
+  -- Incoming.lua's live panel: what the encounter is about to cast, and
+  -- which majors are off cooldown to meet it. Two rows so the "what's
+  -- coming" and "what you have" halves can be coloured separately -- they
+  -- are different kinds of fact and shouldn't read as one sentence.
+  local incomingFS = f:CreateFontString(nil, "OVERLAY")
+  incomingFS:SetFontObject(GameFontHighlightSmall)
+  incomingFS:SetJustifyH("CENTER")
+
+  local readyFS = f:CreateFontString(nil, "OVERLAY")
+  readyFS:SetFontObject(GameFontHighlightSmall)
+  readyFS:SetJustifyH("CENTER")
+
   -- The tank post-mortem for that same death (TankDeath.lua): which of the
   -- player's own defensives were off cooldown and unpressed. Sits directly
   -- under the cause because the two are one thought -- what killed you, and
@@ -304,6 +316,8 @@ local function CreateOverlayFrame()
   f.statusFS = statusFS
   f.deathCauseFS = deathCauseFS
   f.tankDeathFS = tankDeathFS
+  f.incomingFS = incomingFS
+  f.readyFS = readyFS
   f.companionFS = companionFS
 
   -- Restore the saved position (defaulted in Bootstrap.lua's
@@ -476,6 +490,7 @@ function MA:Overlay_Refresh()
   -- that happens in a separate process this addon can't observe.
   local showStatus, showDeathCause, showCompanion = false, false, false
   local showTankDeath = false
+  local showIncoming, showReady = false, false
   if inRecap then
     showStatus = true
     if state.combatLogWasOn then
@@ -521,6 +536,33 @@ function MA:Overlay_Refresh()
     end
   end
 
+  -- Incoming panel. Live only: Incoming.lua clears its own state when a
+  -- key ends, so this simply follows whatever it last computed.
+  local incoming = state.incoming
+  if incoming and #incoming.events > 0 then
+    showIncoming = true
+    local rows = {}
+    for _, event in ipairs(incoming.events) do
+      rows[#rows + 1] = MA:Incoming_FormatEvent(event)
+    end
+    frame.incomingFS:SetTextColor(1.0, 0.82, 0.4)
+    frame.incomingFS:SetText(table.concat(rows, "\n"))
+
+    if #incoming.ready > 0 then
+      showReady = true
+      local names = {}
+      for _, entry in ipairs(incoming.ready) do names[#names + 1] = entry.name end
+      frame.readyFS:SetTextColor(0.4, 0.9, 0.5)
+      frame.readyFS:SetText("Up: " .. table.concat(names, ", "))
+    else
+      -- Explicitly saying "nothing up" is the more useful half of the
+      -- panel in the moment it matters most.
+      showReady = true
+      frame.readyFS:SetTextColor(1.0, 0.65, 0.2)
+      frame.readyFS:SetText("No major defensive up")
+    end
+  end
+
   -- Reflow every optional row in display order, skipping hidden ones
   -- entirely (no gap left behind), and size the frame to exactly what's
   -- shown -- extending InfoWindow.lua/Results.lua's existing "measure the
@@ -537,6 +579,8 @@ function MA:Overlay_Refresh()
     { widget = frame.chestTimerFS, gap = 8, visible = showChestTimer },
     { widget = frame.forcesBar, gap = 10, visible = true, fixedHeight = 20, wide = true },
     { widget = frame.statsRow, gap = 10, visible = true, fixedHeight = 14, wide = true },
+    { widget = frame.incomingFS, gap = 8, visible = showIncoming },
+    { widget = frame.readyFS, gap = 4, visible = showReady },
     { widget = frame.splitFS, gap = 6, visible = showSplit },
     { widget = frame.pullFS, gap = 10, visible = showPull },
     { widget = frame.statusFS, gap = 10, visible = showStatus },

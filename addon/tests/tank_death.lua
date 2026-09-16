@@ -74,8 +74,10 @@ local function LoadModule()
     -- capture appends to it and the Python side reads it back.
     tankDb = { deaths = {} },
   }
-  -- The generated data table first, exactly as the .toc orders them.
+  -- Load in .toc order: the generated data table, the shared client
+  -- readers, then the module under test.
   assert(loadfile("addon/Postmortem/TankDefensives.lua"))("Postmortem", MA)
+  assert(loadfile("addon/Postmortem/TankUtil.lua"))("Postmortem", MA)
   assert(loadfile("addon/Postmortem/TankDeath.lua"))("Postmortem", MA)
 
   local eventFrame

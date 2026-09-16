@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- New incoming panel: during a boss encounter, the overlay shows what is
+  about to be cast and which of your major defensives are off cooldown to
+  meet it — including, when it matters most, "No major defensive up". It
+  reads Blizzard's own encounter timeline and your own cooldowns, shows
+  majors only (a resource-gated button the cooldown API calls "ready" is
+  not actually available), and never tells you what to press.
 - The tank post-mortem now has an Options toggle of its own, keeps every
   death in a key rather than only the most recent, and records what it
   found into a new `PostmortemTankDB` saved-variables table.

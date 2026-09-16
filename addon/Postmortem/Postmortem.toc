@@ -25,7 +25,9 @@ RunHistory.lua
 ChatSummary.lua
 DeathTagging.lua
 TankDefensives.lua
+TankUtil.lua
 TankDeath.lua
+Incoming.lua
 MinimapButton.lua
 Options.lua
 PostmortemResults.lua

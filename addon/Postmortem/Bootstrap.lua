@@ -77,6 +77,10 @@ local defaults = {
     -- TankDeath.lua's "Ready and unused: ..." recap line, and the
     -- PostmortemTankDB capture that feeds it back to the analyzer.
     tankDeath = true,
+    -- Incoming.lua's live "what's coming / what's up" panel. Shows
+    -- nothing outside an encounter with a timeline, so it costs a
+    -- trash-only key nothing.
+    showIncoming = true,
 
     -- Per-dungeon-per-level personal-best objective/boss split times, in
     -- seconds: bestSplits[mapID][level][criteriaIndex] = elapsed. Built up

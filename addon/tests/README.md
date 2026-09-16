@@ -21,6 +21,17 @@ file-local carried between scenarios hides the bug.
 dispatcher: only real keys are archived, exactly once each. It reloads the
 addon per scenario for the same reason `chesttimer_reload.lua` does.
 
+`tank_death.lua` covers `TankDeath.lua`: the live tank death post-mortem
+must never tell a tank they sat on a button they could not press, so it
+covers the three ways that could go wrong (an untalented spell, one still
+on cooldown, and a resource-gated one the cooldown API calls "ready"
+regardless of resource), plus the spellbook snapshot it persists for the
+analyzer.
+
+`incoming.lua` covers `Incoming.lua`: the encounter timeline may be
+absent, quiet, or hand back fields the client will not answer for, and
+every one of those has to produce no panel rather than a broken one.
+
 `overlay_layout.lua` covers `Overlay.lua`: the overall dungeon countdown
 (including overtime and the no-time-limit fallback), and the order the rows
 actually reflow into, both during a key and in the post-key recap window.
