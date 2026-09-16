@@ -47,9 +47,11 @@ what Watch Live uses); the CLI takes flags.
 
 **Marker detection** `find_markers(events) -> list[Marker]`:
 `COMBAT_LOG_VERSION` events are ordinary events in a RunSegment. Cluster
-consecutive header events whose ts is within 1.5 s of the cluster's
-first; a cluster of 2 is a healer marker, 3 a tank marker, 4 or more a
-general one, 1 is nothing. `Marker(ts, role, count)`; `ts` is the first
+consecutive header events whose ts is within 0.6 s of the previous
+header (gap between neighbours, not span from the first: the addon's
+own re-assert at key start writes a pair exactly 1.0 s apart); a
+cluster of 2 is a healer marker, 3 a tank marker, 4 or more a general
+one, 1 is nothing. `Marker(ts, role, count)`; `ts` is the first
 header's timestamp.
 
 **Building** `build_snapshot(segment, marker_ts, *, before_s=120,
@@ -103,8 +105,8 @@ the run's reports for every marker found.
 ## 3. The desktop side (`recorder.py`, `desktop/api.py`, shell)
 
 - `Recorder` notices header clusters while tailing (`_feed`) and calls
-  `on_snapshot_marker(run, ts, role)`; the same clustering rule as the
-  analyzer, applied to the raw lines' timestamps.
+  `on_snapshot_marker(run, ts, role)`; the same 0.6 s neighbour-gap rule
+  as the analyzer, applied to the raw lines' timestamps.
 - `start_watch` schedules the build for `ts + after_s` (or the run's
   end, whichever comes first): slice the run's recorded lines, build,
   write `<out_dir>/<run>-snapshot-<n>.html`, emit

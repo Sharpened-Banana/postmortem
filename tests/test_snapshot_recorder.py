@@ -60,6 +60,7 @@ class TestRecorderMarkers:
     def test_lone_headers_and_the_login_pair_are_not_markers(self, tmp_path):
         assert self._run(tmp_path, [40.0]) == []
         assert self._run(tmp_path, [40.0, 42.0]) == []   # 2 s apart: two ordinary toggles
+        assert self._run(tmp_path, [40.0, 41.0]) == []   # 1 s apart: the addon's key-start re-assert
 
     def test_a_cluster_still_open_at_run_end_is_reported(self, tmp_path):
         seen = []
