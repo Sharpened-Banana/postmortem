@@ -1,5 +1,19 @@
 # Postmortem addon
 
+## Unreleased
+
+- Tank death post-mortem: when you die, the overlay now names the
+  defensives that were off cooldown and unpressed at that moment. It only
+  ever reports spells the client confirms you actually know, so an
+  untalented button is never held against you, and resource-gated buttons
+  (Ignore Pain, Shield of the Righteous, Ironfur) are tracked but never
+  scored -- the cooldown API calls those "ready" whether or not you had
+  the rage for them.
+- The same analysis runs over the combat log afterwards, so the report and
+  the site now show, per death, what was ready and unused, what you were
+  holding, how long since your last active-mitigation press, and which
+  group externals were back up.
+
 ## 0.3.1 (2026-09-13)
 
 - Finishing a key after a mid-key `/reload` no longer throws, and the

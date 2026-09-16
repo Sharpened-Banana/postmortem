@@ -24,6 +24,8 @@ RouteImport.lua
 RunHistory.lua
 ChatSummary.lua
 DeathTagging.lua
+TankDefensives.lua
+TankDeath.lua
 MinimapButton.lua
 Options.lua
 PostmortemResults.lua

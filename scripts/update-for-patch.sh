@@ -170,6 +170,22 @@ else
   skip "no --toc-interface NNNNNN (currently $CURRENT_TOC)"
 fi
 
+# --- 5b. tank defensive table ----------------------------------------------
+# The tank death post-mortem runs on both sides of the wall: the analyzer
+# reads the log afterwards, the addon watches cooldowns live. Both read the
+# same table, and the addon's copy is generated -- so regenerate it here,
+# unconditionally and idempotently, rather than trusting whoever edited the
+# JSON to have remembered. Cooldown values themselves are hand-maintained
+# (see the JSON's own note); this only stops the two copies diverging.
+say "Tank defensive table (addon copy)"
+if "$PY" scripts/build_tank_defensives_lua.py >/tmp/pm-tankdef.log 2>&1; then
+  ok "$(tail -1 /tmp/pm-tankdef.log)"
+else
+  printf '   \033[31m✗ failed\033[0m -- see /tmp/pm-tankdef.log\n'
+  tail -5 /tmp/pm-tankdef.log
+  exit 1
+fi
+
 # --- 6. tests ---------------------------------------------------------------
 say "Tests"
 if "$PY" -m pytest tests site/tests -q >/tmp/pm-patch-tests.log 2>&1; then

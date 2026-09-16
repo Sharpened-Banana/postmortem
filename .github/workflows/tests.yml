@@ -41,6 +41,21 @@ jobs:
         run: pip install -e . pytest certifi
       - name: Test
         run: python -m pytest tests -q
+      # The addon's Lua harnesses (addon/tests/) were run by hand before
+      # the tank death post-mortem, which spans both sides of the repo:
+      # the analyzer's suite cannot catch a regression in TankDeath.lua,
+      # and its data table is generated from the same JSON the analyzer
+      # reads, so a drift between the two is exactly what CI should fail
+      # on. Syntax-check every addon file too -- a parse error there is
+      # invisible to pytest and fatal in-game.
+      - name: Addon Lua tests
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq lua5.4
+          for f in addon/Postmortem/*.lua; do luac5.4 -p "$f"; done
+          python3 scripts/build_tank_defensives_lua.py
+          git diff --exit-code addon/Postmortem/TankDefensives.lua \
+            || { echo "::error::TankDefensives.lua is stale -- run scripts/build_tank_defensives_lua.py"; exit 1; }
+          for t in addon/tests/*.lua; do echo "== $t"; lua5.4 "$t"; done
 
   site:
     name: Site tests against this checkout

@@ -40,6 +40,7 @@ SPELL_DAMAGE_FILENAME = "spell_damage.json"
 TALENT_DATA_FILENAME = "talent_data.json"
 AVOIDABLE_DATA_FILENAME = "avoidable_spells.json"
 DISPEL_DATA_FILENAME = "dispel_data.json"
+TANK_DEFENSIVES_FILENAME = "tank_defensives.json"
 
 
 def bundled_dispel_data_path() -> Path:
@@ -88,3 +89,12 @@ def bundled_spell_damage_path() -> Path:
     every sense: may not exist, and callers treat that as "no community
     fallback", never as an error."""
     return Path(__file__).resolve().parent / "data" / SPELL_DAMAGE_FILENAME
+
+
+def bundled_tank_defensives_path() -> Path:
+    """Path to the packaged per-spec tank defensive table (see
+    ``analysis/tank_death.py``). Hand-maintained rather than harvested:
+    the spell ids are stable across patches and the cooldowns are baseline
+    estimates the analysis deliberately treats as approximate, so this is
+    refreshed by editing, not by a build step."""
+    return Path(__file__).resolve().parent / "data" / TANK_DEFENSIVES_FILENAME

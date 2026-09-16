@@ -1,0 +1,232 @@
+-- TankDeath.lua
+-- Live tank death post-mortem: the moment the local player dies, record
+-- which of their spec's defensives were sitting ready and unused, and which
+-- they were actually holding.
+--
+-- This is the in-game half of analysis/tank_death.py. The two share one
+-- data table (TankDefensives.lua, generated from the same JSON the analyzer
+-- loads) and the same honesty rule -- say nothing rather than say something
+-- wrong -- but they are NOT redundant, because each can see something the
+-- other cannot:
+--
+--   * The analyzer sees the whole run and exact damage numbers, but the
+--     combat log carries no spellbook, so it cannot tell "never talented"
+--     apart from "had it, never pressed it" (see tank_death.py's header).
+--   * This file cannot see damage at all -- patch 12.0's Secret Values put
+--     health, absorbs and incoming damage permanently out of addon reach --
+--     but it CAN ask the client whether a spell is known and whether it is
+--     off cooldown. That resolves exactly the ambiguity the analyzer is
+--     stuck with.
+--
+-- So the live capture is the more precise of the two about availability,
+-- and the log is the more precise about what killed you. The overlay shows
+-- this one immediately; the uploaded report carries the other.
+--
+-- Nothing here reads a combat value. Cooldown and spellbook state are the
+-- player's own, are not secret, and are explicitly sanctioned -- see the
+-- Blizzard API notes in InterruptDatabase.lua's header for the same
+-- distinction drawn from the other side. Every read is still wrapped and
+-- tolerant of a nil/secret return, per this addon's standing rule that a
+-- read may simply fail.
+
+local ADDON_NAME, MA = ...
+
+-- Extra seconds a spell must have been off cooldown before it is called
+-- "ready and unused". Mirrors READY_MARGIN_S in analysis/tank_death.py so
+-- the live overlay and the uploaded report don't disagree on a borderline
+-- case; here it also absorbs the gap between the killing blow landing and
+-- PLAYER_DEAD firing.
+local READY_MARGIN_S = 3.0
+
+-- How far back a "was I holding it" check looks when the client can't tell
+-- us directly: a cast inside its own duration counts as held. Same idea as
+-- the analyzer's active_at_death.
+local HELD_GRACE_S = 0.5
+
+-- spellID -> GetTime() of the last successful cast by the player this run.
+local lastCastAt = {}
+
+-- Resolves the player's current specialization id (65, 250, 581, ...),
+-- tolerating both the modern C_SpecializationInfo path and the legacy
+-- globals -- same defensive shape as DeathTagging.lua's SpellName().
+local function PlayerSpecID()
+  local index
+  if C_SpecializationInfo and C_SpecializationInfo.GetSpecialization then
+    index = C_SpecializationInfo.GetSpecialization()
+  elseif GetSpecialization then
+    index = GetSpecialization()
+  end
+  if not index then return nil end
+
+  if C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo then
+    local id = C_SpecializationInfo.GetSpecializationInfo(index)
+    if type(id) == "number" then return id end
+  elseif GetSpecializationInfo then
+    local id = GetSpecializationInfo(index)
+    if type(id) == "number" then return id end
+  end
+  return nil
+end
+
+-- Is the spell actually in the player's spellbook right now? This is the
+-- question the combat log can never answer, and it is what keeps the live
+-- report from telling a tank they sat on a button they never talented.
+-- A nil/unknown answer is treated as "don't claim anything" by the caller.
+local function IsKnown(spellID)
+  if C_SpellBook and C_SpellBook.IsSpellKnownOrOverridesKnown then
+    return C_SpellBook.IsSpellKnownOrOverridesKnown(spellID) and true or false
+  end
+  if C_SpellBook and C_SpellBook.IsSpellKnown then
+    return C_SpellBook.IsSpellKnown(spellID) and true or false
+  end
+  if IsSpellKnownOrOverridesKnown then
+    return IsSpellKnownOrOverridesKnown(spellID) and true or false
+  end
+  if IsSpellKnown then
+    return IsSpellKnown(spellID) and true or false
+  end
+  return nil
+end
+
+-- Seconds remaining on spellID's cooldown: 0 when ready, nil when the
+-- client wouldn't say. Handles the modern table-returning
+-- C_Spell.GetSpellCooldown and the legacy multiple-return GetSpellCooldown,
+-- and treats a charge-based spell with a charge banked as ready regardless
+-- of the recharge timer (that is what having a charge means).
+local function CooldownRemaining(spellID)
+  if C_Spell and C_Spell.GetSpellCharges then
+    local charges = C_Spell.GetSpellCharges(spellID)
+    if type(charges) == "table" and type(charges.currentCharges) == "number" then
+      if charges.currentCharges > 0 then return 0 end
+    end
+  end
+
+  local startTime, duration
+  if C_Spell and C_Spell.GetSpellCooldown then
+    local info = C_Spell.GetSpellCooldown(spellID)
+    if type(info) == "table" then
+      startTime, duration = info.startTime, info.duration
+    end
+  elseif GetSpellCooldown then
+    startTime, duration = GetSpellCooldown(spellID)
+  end
+
+  if type(startTime) ~= "number" or type(duration) ~= "number" then
+    return nil
+  end
+  if startTime == 0 or duration == 0 then
+    return 0  -- not on cooldown
+  end
+  local remaining = (startTime + duration) - GetTime()
+  return remaining > 0 and remaining or 0
+end
+
+-- Builds the post-mortem for the death that just happened.
+--
+-- Returns nil when there is nothing honestly sayable: the player isn't a
+-- tank spec we cover, or the table isn't loaded. A partially-readable
+-- client degrades field by field rather than losing the whole record --
+-- a defensive whose cooldown wouldn't read is simply left out.
+local function BuildPostMortem()
+  local T = MA.TankDefensives
+  if not T or not T.bySpec then return nil end
+
+  local specID = PlayerSpecID()
+  if not specID then return nil end
+  local entries = T.bySpec[specID]
+  if not entries then return nil end
+
+  local now = GetTime()
+  local readyUnused, held = {}, {}
+
+  for _, entry in ipairs(entries) do
+    local known = IsKnown(entry.id)
+    -- Only reason about spells the client confirms the player has. An
+    -- untalented spell is skipped entirely rather than reported as
+    -- "unused", and an unreadable answer is skipped too.
+    if known then
+      local castAt = lastCastAt[entry.id]
+      local wasHeld = castAt ~= nil
+          and entry.duration > 0
+          and (castAt + entry.duration + HELD_GRACE_S) >= now
+
+      if wasHeld then
+        held[#held + 1] = { id = entry.id, name = entry.name }
+      elseif entry.cooldown > 0 then
+        -- cooldown == 0 means resource-gated (rage, Holy Power, runes):
+        -- the cooldown API says it's "ready" even when the player had no
+        -- resource to press it with, so claiming it would be a guess.
+        local remaining = CooldownRemaining(entry.id)
+        if remaining ~= nil and remaining <= 0 then
+          local readyFor
+          if castAt then readyFor = now - (castAt + entry.cooldown) end
+          if readyFor == nil or readyFor >= READY_MARGIN_S then
+            readyUnused[#readyUnused + 1] = {
+              id = entry.id, name = entry.name,
+              category = entry.category, readyFor = readyFor,
+            }
+          end
+        end
+      end
+    end
+  end
+
+  if #readyUnused == 0 and #held == 0 then return nil end
+  return {
+    specID = specID,
+    specName = T.specNames and T.specNames[specID] or nil,
+    readyUnused = readyUnused,
+    held = held,
+  }
+end
+
+-- MA-facing entry point, so Overlay.lua and the tests can drive this
+-- without the event frame.
+function MA:TankDeath_Capture()
+  local ok, result = pcall(BuildPostMortem)
+  if not ok then
+    MA:Debug("TankDeath: errored building post-mortem -- %s", tostring(result))
+    return nil
+  end
+  MA.state.lastTankDeath = result
+  if result then
+    MA:Debug("TankDeath: %d ready and unused, %d held",
+      #result.readyUnused, #result.held)
+    if MA.Overlay_Refresh then MA.Overlay_Refresh(MA) end
+  end
+  return result
+end
+
+-- Clears per-run state. Called on key start so one key's casts can't leak
+-- into the next key's post-mortem.
+function MA:TankDeath_Reset()
+  lastCastAt = {}
+  MA.state.lastTankDeath = nil
+end
+
+local eventFrame = CreateFrame("Frame")
+MA:RegisterKeyEventFrame(eventFrame)
+-- RegisterUnitEvent rather than a filtered RegisterEvent: this only ever
+-- cares about the player's own casts, and the unit-filtered form means the
+-- client never wakes us for the other four group members' casts.
+eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
+eventFrame:RegisterEvent("PLAYER_DEAD")
+eventFrame:RegisterEvent("CHALLENGE_MODE_START")
+eventFrame:RegisterEvent("CHALLENGE_MODE_RESET")
+
+eventFrame:SetScript("OnEvent", function(self, event, ...)
+  if event == "UNIT_SPELLCAST_SUCCEEDED" then
+    local _, _, spellID = ...
+    if type(spellID) == "number" then
+      lastCastAt[spellID] = GetTime()
+    end
+  elseif event == "PLAYER_DEAD" then
+    -- PLAYER_DEAD fires for the local player at the moment of death, so
+    -- cooldown state read here is the state at death. DeathTagging.lua's
+    -- polling delay exists because the *Deaths meter* needs time to
+    -- settle; nothing here depends on that meter, so nothing here waits.
+    MA:TankDeath_Capture()
+  elseif event == "CHALLENGE_MODE_START" or event == "CHALLENGE_MODE_RESET" then
+    MA:TankDeath_Reset()
+  end
+end)

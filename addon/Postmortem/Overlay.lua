@@ -272,6 +272,14 @@ local function CreateOverlayFrame()
   local deathCauseFS = f:CreateFontString(nil, "OVERLAY")
   deathCauseFS:SetFontObject(GameFontHighlightSmall)
 
+  -- The tank post-mortem for that same death (TankDeath.lua): which of the
+  -- player's own defensives were off cooldown and unpressed. Sits directly
+  -- under the cause because the two are one thought -- what killed you, and
+  -- what you still had when it did.
+  local tankDeathFS = f:CreateFontString(nil, "OVERLAY")
+  tankDeathFS:SetFontObject(GameFontHighlightSmall)
+  tankDeathFS:SetJustifyH("CENTER")
+
   -- Permanent companion-app reminder row: shown alongside statusFS during
   -- the same post-key recap window, a distinct blue tint so it doesn't
   -- compete with statusFS's green/orange recorded/not-recorded coloring.
@@ -295,6 +303,7 @@ local function CreateOverlayFrame()
   f.pullFS = pullFS
   f.statusFS = statusFS
   f.deathCauseFS = deathCauseFS
+  f.tankDeathFS = tankDeathFS
   f.companionFS = companionFS
 
   -- Restore the saved position (defaulted in Bootstrap.lua's
@@ -466,6 +475,7 @@ function MA:Overlay_Refresh()
   -- postmortem's own record/analyze step actually ran on this log --
   -- that happens in a separate process this addon can't observe.
   local showStatus, showDeathCause, showCompanion = false, false, false
+  local showTankDeath = false
   if inRecap then
     showStatus = true
     if state.combatLogWasOn then
@@ -487,6 +497,22 @@ function MA:Overlay_Refresh()
       else
         frame.deathCauseFS:SetTextColor(0.85, 0.85, 0.85)
       end
+    end
+
+    -- Only ever the local player's own defensives, so this never
+    -- second-guesses a groupmate -- and only when TankDeath.lua actually
+    -- found something it could stand behind (it returns nil rather than an
+    -- empty finding; see its header's honesty rule).
+    local tankDeath = state.lastTankDeath
+    if tankDeath and #tankDeath.readyUnused > 0 then
+      showTankDeath = true
+      local names = {}
+      for _, entry in ipairs(tankDeath.readyUnused) do
+        names[#names + 1] = entry.name
+      end
+      frame.tankDeathFS:SetTextColor(1.0, 0.65, 0.2)
+      frame.tankDeathFS:SetText(
+        "Ready and unused: " .. table.concat(names, ", "))
     end
 
     if MA.INFO and MA.INFO.recapLine then
@@ -515,6 +541,7 @@ function MA:Overlay_Refresh()
     { widget = frame.pullFS, gap = 10, visible = showPull },
     { widget = frame.statusFS, gap = 10, visible = showStatus },
     { widget = frame.deathCauseFS, gap = 6, visible = showDeathCause },
+    { widget = frame.tankDeathFS, gap = 4, visible = showTankDeath },
     { widget = frame.companionFS, gap = 10, visible = showCompanion },
   }, frame.topAnchor)
 

@@ -18,6 +18,7 @@ from .pulls import DEFAULT_PULL_GAP_S, detect_pulls
 from .spell_damage import SpellDamageData, update_from_stats
 from .stats import PET_BUCKET, compute_stats
 from .stealable import StealableData
+from .tank_death import annotate_deaths, load_bundled_tank_defensives
 
 
 def _relativize(
@@ -475,6 +476,9 @@ def analyze_run(
         keystone_level=segment.keystone_level, dispel_data=dispel_data,
         challenge_map_id=segment.challenge_map_id,
     )
+    # Tank death post-mortem. Bundled table, no configuration, and a
+    # no-op if it can't be loaded -- the section just doesn't appear.
+    annotate_deaths(stats, load_bundled_tank_defensives(), full_cast_timeline)
     if spell_damage_history_path:
         try:
             update_from_stats(stats, segment.keystone_level,
@@ -517,6 +521,7 @@ def analyze_run(
                 ),
                 "defensives_used_before_death": d.defensives_used_before_death,
                 "died_without_defensive": d.died_without_defensive,
+                "tank_analysis": d.tank_analysis,
                 "recap": d.recap,
             }
             for d in stats.deaths

@@ -603,12 +603,60 @@ function deaths() {
       <td class="num">${num(d.biggest_hit)}</td>
       <td class="num">${num(d.damage_last_5s)}</td>
       <td>${defensive}</td>
+      <td>${postMortem(d)}</td>
       <td><details><summary class="dim">recap</summary>${recap}</details></td></tr>`;
   }).join("");
   return `<h2>Deaths</h2><div class="wrap"><table>
     <tr><th>Time</th><th>Player</th><th class="num">Pull</th><th>Killing blow</th>
-      <th class="num">Biggest hit</th><th class="num">Last 5s</th><th>Defensive</th><th>Last hits</th></tr>
+      <th class="num">Biggest hit</th><th class="num">Last 5s</th><th>Defensive</th>
+      <th>Post-mortem</th><th>Last hits</th></tr>
     ${rows}</table></div>`;
+}
+
+// The tank death post-mortem cell (see analysis/tank_death.py): what was
+// sitting ready, how long since an active-mitigation press, and what the
+// group still had. Collapsed behind a <details> so the deaths table stays
+// readable; the summary carries the headline so it is useful closed.
+function postMortem(d) {
+  const t = d.tank_analysis;
+  if (!t || !t.scored) return '<span class="dim">—</span>';
+
+  const unused = t.available_unused || [];
+  const externals = t.externals_available || [];
+  const never = t.never_used || [];
+  const gap = t.mitigation_gap_s;
+
+  const parts = [];
+  const active = t.active_at_death || [];
+  if (active.length) {
+    parts.push(`<div><span class="ok">Was holding:</span> `
+      + active.map(a => esc(a.name)).join(", ") + `</div>`);
+  }
+  if (unused.length) {
+    parts.push(`<div><span class="bad">Ready and unused:</span> ` + unused.map(u =>
+      `${esc(u.name)} <span class="dim">(off cooldown ${Math.round(u.ready_for_s)}s)</span>`
+    ).join(", ") + `</div>`);
+  }
+  if (gap != null) {
+    parts.push(`<div>Last active mitigation <b>${gap.toFixed(1)}s</b> before death</div>`);
+  }
+  if (externals.length) {
+    parts.push(`<div><span class="bad">Group had up:</span> ` + externals.map(e =>
+      `${esc(e.name)} <span class="dim">(${esc(e.caster)})</span>`).join(", ") + `</div>`);
+  }
+  if (never.length) {
+    // Never pressed all run, which the log cannot tell apart from "not
+    // talented" -- shown, but explicitly as an observation rather than a
+    // mistake. See tank_death.py's honesty rule.
+    parts.push(`<div class="dim">Never used this run (may not be talented): `
+      + never.map(n => esc(n.name)).join(", ") + `</div>`);
+  }
+  if (!parts.length) return '<span class="ok">nothing left unused</span>';
+
+  const headline = unused.length
+    ? `<span class="bad">${unused.length} ready</span>`
+    : (externals.length ? `<span class="bad">external up</span>` : "detail");
+  return `<details><summary>${headline}</summary>${parts.join("")}</details>`;
 }
 
 function closeCalls() {
