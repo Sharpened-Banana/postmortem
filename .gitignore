@@ -1,25 +1,28 @@
-
 __pycache__/
+*.pyc
+*.egg-info/
+build/*
+!build/postmortem.spec
+!build/postmortem.iss
 !build/entry.py
 !build/postmortem.icns
 !build/postmortem.ico
-!build/postmortem.iss
-!build/postmortem.spec
-.dockerignore
-.DS_Store
-.pytest_cache/
-*.egg-info/
-*.pyc
-# (postmortem-site) -- never in this public one.
-# The tracker site's source lives in its own private repository
-build/*
+!build/entitlements.plist
 dist/
-Dockerfile
-fly.toml
 installer/
+.pytest_cache/
 mdt_data.json
-reports/
 runs/
-site/
+reports/
+.DS_Store
+
+# Warcraft Logs build samples: report codes, and megabytes (see wcl.py)
 spell_damage_samples.json
 wcl_event_samples.json
+
+# The tracker site's source lives in its own private repository
+# (postmortem-site) -- never in this public one.
+site/
+Dockerfile
+fly.toml
+.dockerignore
