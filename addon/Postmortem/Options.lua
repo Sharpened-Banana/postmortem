@@ -96,6 +96,8 @@ local function BuildSettingsPanel()
     "Show the live group interrupt count on the overlay.", true)
   Checkbox("tagDeaths", "Tag death cause in recap",
     "After a death, show which spell killed you (and whether it was avoidable) in the post-key recap.", true)
+  Checkbox("tankDeath", "Tank death post-mortem",
+    "After a death, show which of your own defensives were off cooldown and unpressed. Only ever your own, and only spells you actually know.", true)
 
   Header(layout, "Run History")
   Checkbox("saveRunHistory", "Save run history",

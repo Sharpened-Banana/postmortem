@@ -38,6 +38,26 @@ Same discipline as ``DeathRecord.died_without_defensive``: where we cannot
 honestly say, we say so, rather than guessing in the direction that makes
 the report look clever.
 
+...and how the addon settles it
+-------------------------------
+That second case is a hedge forced on us by the log format, not a fact
+about the world -- and it is exactly the gap the addon can close, because
+the client will simply tell it whether a spell is in the spellbook. When a
+``PostmortemTankDB`` capture is available (see :class:`TankKnowledge`, fed
+by ``postmortem analyze --tank-db``), each never-cast spell resolves three
+ways instead of one:
+
+- **known not to be talented** -> dropped entirely; nothing is said.
+- **known to be talented**, and the run has already been going longer than
+  the spell's own cooldown (so it cannot still be recovering from a cast
+  made before the log began) -> promoted to a real ``available_unused``
+  finding, flagged ``never_cast``.
+- **still unknown** -> stays the caveated observation it was.
+
+This is the one place the two halves of the feature are worth more together
+than apart, and it is why the addon persists a spellbook snapshot it never
+displays.
+
 Cooldown values are estimates
 -----------------------------
 ``data/tank_defensives.json`` carries baseline cooldowns, which talents,
@@ -107,6 +127,82 @@ class External:
     caster_specs: tuple[int, ...]
     cooldown_s: float
     duration_s: float
+
+
+@dataclass
+class TankKnowledge:
+    """What the addon saw in the player's spellbook, read back from the
+    ``PostmortemTankDB`` SavedVariable (see addon/Postmortem/TankDeath.lua).
+
+    This exists to close the one gap the combat log cannot: it carries no
+    spellbook, so *never talented* and *had it, never pressed it* are
+    indistinguishable from the log alone. The addon can simply ask the
+    client, and this is that answer carried across.
+
+    Keyed by spec id, most recent capture winning -- a player who
+    respecced between runs gets judged on the build they were actually
+    wearing, not on an older snapshot.
+    """
+
+    known: dict[int, set[int]] = field(default_factory=dict)
+    not_known: dict[int, set[int]] = field(default_factory=dict)
+
+    def verdict(self, spec_id: Optional[int], spell_id: int) -> Optional[bool]:
+        """True if the player is known to have the spell, False if they are
+        known not to, None if this capture says nothing about it (no record
+        for the spec, or the client wouldn't answer at the time)."""
+        if spec_id is None:
+            return None
+        if spell_id in self.known.get(spec_id, ()):
+            return True
+        if spell_id in self.not_known.get(spec_id, ()):
+            return False
+        return None
+
+
+def knowledge_from_savedvariables(global_table: Any) -> TankKnowledge:
+    """Build a :class:`TankKnowledge` from the parsed ``.global`` table of
+    ``PostmortemTankDB``.
+
+    Tolerant by construction: this is a file a game client wrote and a user
+    may have edited, so anything unexpected is skipped rather than raised
+    on. Records are applied oldest-first so the newest capture for a spec
+    ends up as the one that counts.
+
+    The Lua parser returns array-like tables as 1-indexed dicts, so both a
+    list and a dict-of-index are accepted here.
+    """
+    knowledge = TankKnowledge()
+    if not isinstance(global_table, dict):
+        return knowledge
+
+    def _rows(value: Any) -> list[Any]:
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict):
+            return [value[k] for k in sorted(value, key=lambda k: (str(type(k)), k))]
+        return []
+
+    def _ids(value: Any) -> set[int]:
+        return {v for v in _rows(value) if isinstance(v, int)}
+
+    records = [r for r in _rows(global_table.get("deaths")) if isinstance(r, dict)]
+    records.sort(key=lambda r: r.get("ts") if isinstance(r.get("ts"), (int, float)) else 0)
+
+    for record in records:
+        spec_id = record.get("specID")
+        if not isinstance(spec_id, int):
+            continue
+        known = _ids(record.get("known"))
+        not_known = _ids(record.get("notKnown"))
+        if not known and not not_known:
+            continue
+        # Whole-snapshot replace, not union: a respec removes spells, and
+        # unioning across captures would keep claiming the player still has
+        # something they dropped a patch ago.
+        knowledge.known[spec_id] = known
+        knowledge.not_known[spec_id] = not_known
+    return knowledge
 
 
 @dataclass
@@ -238,6 +334,8 @@ def analyze_tank_death(
     players: dict[str, Any],
     data: TankDefensiveData,
     full_cast_timeline: bool,
+    knowledge: Optional[TankKnowledge] = None,
+    run_start_ts: Optional[float] = None,
 ) -> dict[str, Any]:
     """Build the tank-death annotation for one :class:`stats.DeathRecord`.
 
@@ -257,6 +355,7 @@ def analyze_tank_death(
             "never_used": [],
             "externals_available": [],
             "mitigation_gap_s": None,
+            "spellbook_known": False,
         }
 
     victim_casts = casts_by_guid.get(death.player_guid, [])
@@ -296,11 +395,40 @@ def analyze_tank_death(
             continue
 
         if not cast_at_all:
-            # Never pressed in this run: indistinguishable from untalented.
+            # Never pressed in this run. From the log alone this is
+            # indistinguishable from untalented, so it stays an
+            # observation -- unless the addon's spellbook capture settles
+            # it (see TankKnowledge).
+            verdict = knowledge.verdict(spec_id, defensive.spell_id) if knowledge else None
+            if verdict is False:
+                continue  # provably not talented: say nothing at all
+            if (
+                verdict is True
+                and defensive.scorable
+                and run_start_ts is not None
+                and death.ts - run_start_ts >= defensive.cooldown_s
+            ):
+                # Provably known, never pressed, and the run has been going
+                # longer than the spell's own cooldown -- so it cannot still
+                # be recovering from a cast made before the log started.
+                # That makes this a real finding rather than a hedge.
+                available_unused.append({
+                    "spell_id": defensive.spell_id,
+                    "name": defensive.name,
+                    "category": defensive.category,
+                    "last_used_ts": None,
+                    "ready_for_s": None,
+                    "never_cast": True,
+                })
+                continue
             never_used.append({
                 "spell_id": defensive.spell_id,
                 "name": defensive.name,
                 "category": defensive.category,
+                # True when we know they have it but can't prove it was off
+                # cooldown (too early in the run); the renderers can then
+                # drop the "may not be talented" caveat honestly.
+                "known": verdict is True,
             })
             continue
 
@@ -332,6 +460,10 @@ def analyze_tank_death(
         "never_used": never_used,
         "externals_available": externals_available,
         "mitigation_gap_s": _mitigation_gap(death, victim_casts, own),
+        # True when the addon's spellbook capture covered this spec, so the
+        # renderers know the never_used caveat has actually been resolved
+        # rather than merely absent.
+        "spellbook_known": bool(knowledge and spec_id in knowledge.known),
     }
 
 
@@ -396,7 +528,11 @@ def _mitigation_gap(
 
 
 def annotate_deaths(
-    stats: Any, data: Optional[TankDefensiveData], full_cast_timeline: bool
+    stats: Any,
+    data: Optional[TankDefensiveData],
+    full_cast_timeline: bool,
+    knowledge: Optional[TankKnowledge] = None,
+    run_start_ts: Optional[float] = None,
 ) -> None:
     """Attach a ``tank_analysis`` dict to every death in ``stats``.
 
@@ -416,4 +552,5 @@ def annotate_deaths(
         spec_id = getattr(player, "spec_id", None) if player is not None else None
         death.tank_analysis = analyze_tank_death(
             death, spec_id, casts_by_guid, stats.players, data, full_cast_timeline,
+            knowledge=knowledge, run_start_ts=run_start_ts,
         )

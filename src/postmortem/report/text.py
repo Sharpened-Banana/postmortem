@@ -43,7 +43,12 @@ def _tank_death_lines(death: dict) -> list[str]:
     unused = tank.get("available_unused") or []
     if unused:
         names = ", ".join(
-            f"{u['name']} (ready {round(u['ready_for_s'])}s)" for u in unused
+            # A never_cast entry (resolved by the addon's spellbook
+            # capture) was up for the whole run, so there is no
+            # "ready for N seconds" figure to quote.
+            f"{u['name']} (never pressed)" if u.get("never_cast")
+            else f"{u['name']} (ready {round(u['ready_for_s'])}s)"
+            for u in unused
         )
         lines.append(f"    ready and unused: {names}")
 

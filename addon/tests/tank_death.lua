@@ -26,8 +26,16 @@ end
 function CreateFrame() return NewFrame() end
 
 -- Controllable client state, reset per scenario.
+--
+-- GetTime() is the client's session-relative monotonic clock (what
+-- cooldown maths uses); time() is wall clock (what the persisted record
+-- carries, since the analyzer has to line it up against combat-log
+-- timestamps). Both exist in the WoW client and neither exists in plain
+-- Lua, so both are stubbed -- time() the same way chesttimer_reload.lua
+-- does it.
 local NOW = 1000.0
 function GetTime() return NOW end
+time = os.time
 
 local PROT_PALADIN = 66
 local knownSpells, cooldowns, specID
@@ -62,6 +70,9 @@ local function LoadModule()
     Debug = function() end,
     RegisterKeyEventFrame = function() end,
     state = {},
+    -- Bootstrap.lua hands this over as PostmortemTankDB.global; the
+    -- capture appends to it and the Python side reads it back.
+    tankDb = { deaths = {} },
   }
   -- The generated data table first, exactly as the .toc orders them.
   assert(loadfile("addon/Postmortem/TankDefensives.lua"))("Postmortem", MA)
@@ -209,6 +220,81 @@ do
   frame.handler(frame, "PLAYER_DEAD")
   check("cast history cleared, now reads as unused",
     names(MA.state.lastTankDeath.readyUnused)["Ardent Defender"])
+end
+
+-- Scenario 8: the spellbook snapshot. This is the whole reason the
+-- capture is persisted -- the combat log has no spellbook, so these two
+-- lists are the only way the analyzer can tell "never talented" apart
+-- from "had it, never pressed it".
+do
+  print("the spellbook snapshot is recorded and persisted")
+  specID = PROT_PALADIN
+  knownSpells = { [ARDENT_DEFENDER] = true, [SOTR] = true }  -- rest unknown
+  cooldowns = { [ARDENT_DEFENDER] = 0, [SOTR] = 0 }
+  local MA, frame = LoadModule()
+
+  frame.handler(frame, "PLAYER_DEAD")
+  local result = MA.state.lastTankDeath
+
+  local function has(list, id)
+    for _, v in ipairs(list) do if v == id then return true end end
+    return false
+  end
+
+  check("known lists Ardent Defender", has(result.known, ARDENT_DEFENDER))
+  check("notKnown lists Divine Shield", has(result.notKnown, DIVINE_SHIELD))
+  check("a spell is never in both", not has(result.known, DIVINE_SHIELD))
+
+  local persisted = MA.tankDb.deaths[1]
+  check("one record persisted", persisted ~= nil and #MA.tankDb.deaths == 1)
+  check("record carries the spec", persisted.specID == PROT_PALADIN)
+  check("record carries known", has(persisted.known, ARDENT_DEFENDER))
+  check("record carries a wall-clock ts", type(persisted.ts) == "number" and persisted.ts > 1e9)
+end
+
+-- Scenario 9: a key with several deaths keeps all of them, not just the
+-- last -- the overlay shows the most recent, the results window shows the
+-- key.
+do
+  print("every death in the key is kept")
+  specID = PROT_PALADIN
+  knownSpells = { [ARDENT_DEFENDER] = true }
+  cooldowns = { [ARDENT_DEFENDER] = 0 }
+  local MA, frame = LoadModule()
+
+  frame.handler(frame, "CHALLENGE_MODE_START")
+  frame.handler(frame, "PLAYER_DEAD")
+  frame.handler(frame, "PLAYER_DEAD")
+  frame.handler(frame, "PLAYER_DEAD")
+
+  check("three kept in key history", #MA:TankDeath_All() == 3)
+  check("three persisted", #MA.tankDb.deaths == 3)
+  check("overlay still sees the latest", MA.state.lastTankDeath ~= nil)
+
+  -- A new key resets the in-key history but must NOT wipe the capture:
+  -- that is cross-key data the analyzer reads.
+  frame.handler(frame, "CHALLENGE_MODE_START")
+  check("key history cleared", #MA:TankDeath_All() == 0)
+  check("persisted capture survives a new key", #MA.tankDb.deaths == 3)
+end
+
+-- Scenario 10: a record with no findings is still persisted when it
+-- learned something about the spellbook. "Knew all of them, pressed none"
+-- is precisely what the analyzer wants, and dropping it loses that.
+do
+  print("a findings-free record is still worth keeping")
+  specID = PROT_PALADIN
+  knownSpells = { [ARDENT_DEFENDER] = true }
+  cooldowns = { [ARDENT_DEFENDER] = 999 }  -- known, but on cooldown: no finding
+  local MA, frame = LoadModule()
+
+  frame.handler(frame, "PLAYER_DEAD")
+  local result = MA.state.lastTankDeath
+
+  check("still recorded", result ~= nil)
+  check("no findings", #result.readyUnused == 0 and #result.held == 0)
+  check("but the spellbook went with it", #result.known > 0)
+  check("and it was persisted", #MA.tankDb.deaths == 1)
 end
 
 if failures > 0 then

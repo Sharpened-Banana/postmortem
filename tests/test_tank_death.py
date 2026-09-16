@@ -16,6 +16,7 @@ from postmortem.analysis.stats import compute_stats
 from postmortem.analysis.tank_death import (
     READY_MARGIN_S,
     annotate_deaths,
+    knowledge_from_savedvariables,
     load_bundled_tank_defensives,
 )
 from postmortem.combatlog.parser import iter_events
@@ -31,7 +32,7 @@ BIG_HIT_SPELL = 999001
 DEATH_T = 400.0
 
 
-def _run(build) -> object:
+def _run(build, knowledge=None) -> object:
     """Drive a LogBuilder through the real pipeline and return the single
     annotated death."""
     b = LogBuilder()
@@ -47,7 +48,10 @@ def _run(build) -> object:
 
     (run,) = list(segment_runs(iter_events(b.lines)))
     stats = compute_stats(run.events, detect_pulls(run.events))
-    annotate_deaths(stats, load_bundled_tank_defensives(), True)
+    annotate_deaths(
+        stats, load_bundled_tank_defensives(), True,
+        knowledge=knowledge, run_start_ts=run.start_ts,
+    )
     (death,) = stats.deaths
     return death
 
@@ -212,6 +216,106 @@ class TestHonestFallbacks:
 
         (death,) = stats.deaths
         assert death.tank_analysis is None
+
+
+class TestSpellbookKnowledge:
+    """The addon's PostmortemTankDB capture resolving what the log can't.
+
+    These cover the three-way split in tank_death.py's header: known-not-
+    talented disappears, known-and-talented is promoted to a real finding,
+    and anything the capture doesn't cover keeps its hedge.
+    """
+
+    @staticmethod
+    def _knowledge(known=(), not_known=(), spec=66, ts=1.0):
+        # Shaped exactly as the Lua parser hands it over: array-like tables
+        # come back as 1-indexed dicts, which is what the loader must cope
+        # with (see knowledge_from_savedvariables).
+        return knowledge_from_savedvariables({
+            "deaths": {
+                1: {
+                    "ts": ts,
+                    "specID": spec,
+                    "known": {i + 1: v for i, v in enumerate(known)},
+                    "notKnown": {i + 1: v for i, v in enumerate(not_known)},
+                },
+            },
+        })
+
+    def test_known_untalented_spell_disappears_entirely(self):
+        knowledge = self._knowledge(not_known=[31850])
+        death = _run(lambda b, npc: None, knowledge=knowledge)
+
+        tank = death.tank_analysis
+        assert "Ardent Defender" not in _names(tank["never_used"])
+        assert "Ardent Defender" not in _names(tank["available_unused"])
+
+    def test_known_talented_and_never_pressed_becomes_a_real_finding(self):
+        # Nothing cast all run, but the client confirmed they had it, and
+        # the run is longer than its 120s cooldown -- so it cannot have
+        # been recovering from a pre-log cast. That is a genuine miss.
+        knowledge = self._knowledge(known=[31850])
+        death = _run(lambda b, npc: None, knowledge=knowledge)
+
+        (entry,) = [
+            e for e in death.tank_analysis["available_unused"]
+            if e["spell_id"] == 31850
+        ]
+        assert entry["never_cast"] is True
+        assert entry["last_used_ts"] is None
+
+    def test_not_promoted_when_the_run_is_shorter_than_the_cooldown(self):
+        # Lay on Hands is a 600s cooldown and this run is ~400s, so it
+        # could still be recovering from a cast made before the log began.
+        # Known or not, that is not a finding -- it stays an observation.
+        knowledge = self._knowledge(known=[633])
+        death = _run(lambda b, npc: None, knowledge=knowledge)
+
+        tank = death.tank_analysis
+        assert "Lay on Hands" not in _names(tank["available_unused"])
+        (entry,) = [e for e in tank["never_used"] if e["spell_id"] == 633]
+        # ...but the caveat is dropped: we do know they have it.
+        assert entry["known"] is True
+
+    def test_spells_the_capture_says_nothing_about_keep_the_hedge(self):
+        knowledge = self._knowledge(known=[31850])
+        death = _run(lambda b, npc: None, knowledge=knowledge)
+
+        (entry,) = [
+            e for e in death.tank_analysis["never_used"] if e["spell_id"] == 642
+        ]
+        assert entry["known"] is False
+
+    def test_a_newer_capture_replaces_an_older_one(self):
+        # A respec removes spells, so captures must replace rather than
+        # union -- otherwise the report keeps crediting a build the player
+        # dropped.
+        knowledge = knowledge_from_savedvariables({
+            "deaths": {
+                1: {"ts": 100, "specID": 66, "known": {1: 31850}, "notKnown": {}},
+                2: {"ts": 200, "specID": 66, "known": {1: 642}, "notKnown": {1: 31850}},
+            },
+        })
+        assert knowledge.verdict(66, 642) is True
+        assert knowledge.verdict(66, 31850) is False
+
+    def test_loader_tolerates_junk(self):
+        # A file the game wrote and a user may have edited.
+        assert knowledge_from_savedvariables(None).known == {}
+        assert knowledge_from_savedvariables({}).known == {}
+        assert knowledge_from_savedvariables({"deaths": "nope"}).known == {}
+        assert knowledge_from_savedvariables(
+            {"deaths": {1: {"specID": "sixty-six", "known": {1: 1}}}}
+        ).known == {}
+
+    def test_analysis_is_unchanged_without_a_capture(self):
+        # The hedge is the correct behaviour when nothing resolves it.
+        death = _run(lambda b, npc: None)
+        entries = death.tank_analysis["never_used"]
+
+        assert "Ardent Defender" in _names(entries)
+        assert all(e["known"] is False for e in entries)
+        assert death.tank_analysis["spellbook_known"] is False
 
 
 class TestTable:

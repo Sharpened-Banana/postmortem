@@ -127,6 +127,11 @@ end
 -- tank spec we cover, or the table isn't loaded. A partially-readable
 -- client degrades field by field rather than losing the whole record --
 -- a defensive whose cooldown wouldn't read is simply left out.
+--
+-- `known` and `notKnown` are recorded even though nothing in-game displays
+-- them: they are the spellbook snapshot the analyzer cannot obtain from a
+-- combat log, and the whole point of persisting this capture. See
+-- TankDeath_Persist below.
 local function BuildPostMortem()
   local T = MA.TankDefensives
   if not T or not T.bySpec then return nil end
@@ -137,14 +142,21 @@ local function BuildPostMortem()
   if not entries then return nil end
 
   local now = GetTime()
-  local readyUnused, held = {}, {}
+  local readyUnused, held, known, notKnown = {}, {}, {}, {}
 
   for _, entry in ipairs(entries) do
-    local known = IsKnown(entry.id)
+    local isKnown = IsKnown(entry.id)
     -- Only reason about spells the client confirms the player has. An
     -- untalented spell is skipped entirely rather than reported as
-    -- "unused", and an unreadable answer is skipped too.
-    if known then
+    -- "unused", and an unreadable answer (nil) is skipped from BOTH lists
+    -- rather than guessed into either.
+    if isKnown == true then
+      known[#known + 1] = entry.id
+    elseif isKnown == false then
+      notKnown[#notKnown + 1] = entry.id
+    end
+
+    if isKnown then
       local castAt = lastCastAt[entry.id]
       local wasHeld = castAt ~= nil
           and entry.duration > 0
@@ -171,13 +183,55 @@ local function BuildPostMortem()
     end
   end
 
-  if #readyUnused == 0 and #held == 0 then return nil end
+  -- A record with no findings is still worth keeping when we learned
+  -- something about the spellbook: "you knew all six and used none" is
+  -- exactly what the analyzer wants, and discarding it would throw that
+  -- away. Only a record that says nothing at all is dropped.
+  if #readyUnused == 0 and #held == 0 and #known == 0 then return nil end
   return {
     specID = specID,
     specName = T.specNames and T.specNames[specID] or nil,
     readyUnused = readyUnused,
     held = held,
+    known = known,
+    notKnown = notKnown,
   }
+end
+
+-- How many death records to keep in the SavedVariable. This grows across
+-- every key forever otherwise, and the analyzer only ever needs recent
+-- builds -- a spellbook snapshot from six months ago describes a
+-- character that no longer exists.
+local MAX_PERSISTED_DEATHS = 200
+
+-- Appends one record to PostmortemTankDB for the Python side to read back.
+-- Wall-clock (time()) rather than GetTime(), because the analyzer has to
+-- line these up against combat-log timestamps, and GetTime() is a
+-- session-relative monotonic clock that means nothing outside the client.
+local function Persist(result)
+  local db = MA.tankDb
+  if type(db) ~= "table" then return end
+  if type(db.deaths) ~= "table" then db.deaths = {} end
+
+  db.deaths[#db.deaths + 1] = {
+    ts = time(),
+    specID = result.specID,
+    known = result.known,
+    notKnown = result.notKnown,
+    readyUnused = result.readyUnused,
+    held = result.held,
+  }
+
+  -- Trim oldest-first, in place.
+  local overflow = #db.deaths - MAX_PERSISTED_DEATHS
+  if overflow > 0 then
+    for i = 1, #db.deaths - overflow do
+      db.deaths[i] = db.deaths[i + overflow]
+    end
+    for i = #db.deaths, #db.deaths - overflow + 1, -1 do
+      db.deaths[i] = nil
+    end
+  end
 end
 
 -- MA-facing entry point, so Overlay.lua and the tests can drive this
@@ -188,20 +242,42 @@ function MA:TankDeath_Capture()
     MA:Debug("TankDeath: errored building post-mortem -- %s", tostring(result))
     return nil
   end
+  if not result then return nil end
+
+  -- lastTankDeath drives the overlay's recap line; tankDeaths keeps every
+  -- death this key, so the results window can show a key with four deaths
+  -- as four deaths rather than only the last one.
   MA.state.lastTankDeath = result
-  if result then
-    MA:Debug("TankDeath: %d ready and unused, %d held",
-      #result.readyUnused, #result.held)
-    if MA.Overlay_Refresh then MA.Overlay_Refresh(MA) end
+  if type(MA.state.tankDeaths) ~= "table" then MA.state.tankDeaths = {} end
+  MA.state.tankDeaths[#MA.state.tankDeaths + 1] = result
+
+  -- Persisting is independent of the display toggle on purpose: the
+  -- capture is what the analyzer reads back, and a player who turned off
+  -- the on-screen line has not asked for a worse report. The toggle is
+  -- checked where the line is drawn (Overlay.lua), not here.
+  local persisted, err = pcall(Persist, result)
+  if not persisted then
+    MA:Debug("TankDeath: could not persist -- %s", tostring(err))
   end
+
+  MA:Debug("TankDeath: %d ready and unused, %d held, %d known",
+    #result.readyUnused, #result.held, #result.known)
+  if MA.Overlay_Refresh then MA.Overlay_Refresh(MA) end
   return result
 end
 
+-- Every tank post-mortem recorded so far this key, oldest first.
+function MA:TankDeath_All()
+  return MA.state.tankDeaths or {}
+end
+
 -- Clears per-run state. Called on key start so one key's casts can't leak
--- into the next key's post-mortem.
+-- into the next key's post-mortem. Deliberately does NOT clear
+-- PostmortemTankDB -- that is the cross-key capture the analyzer reads.
 function MA:TankDeath_Reset()
   lastCastAt = {}
   MA.state.lastTankDeath = nil
+  MA.state.tankDeaths = {}
 end
 
 local eventFrame = CreateFrame("Frame")

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- The tank post-mortem now has an Options toggle of its own, keeps every
+  death in a key rather than only the most recent, and records what it
+  found into a new `PostmortemTankDB` saved-variables table.
+- That capture includes which defensives the client confirms you have
+  talented — the one thing a combat log can never carry. Point the
+  analyzer at it with `postmortem analyze --tank-db <SavedVariables>` and
+  the report stops hedging: spells you never talented disappear from it
+  entirely, and ones you had but never pressed all run become real
+  findings instead of a "may not be talented" note.
 - Tank death post-mortem: when you die, the overlay now names the
   defensives that were off cooldown and unpressed at that moment. It only
   ever reports spells the client confirms you actually know, so an

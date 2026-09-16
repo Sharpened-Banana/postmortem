@@ -503,7 +503,7 @@ function MA:Overlay_Refresh()
     -- second-guesses a groupmate -- and only when TankDeath.lua actually
     -- found something it could stand behind (it returns nil rather than an
     -- empty finding; see its header's honesty rule).
-    local tankDeath = state.lastTankDeath
+    local tankDeath = db.tankDeath and state.lastTankDeath
     if tankDeath and #tankDeath.readyUnused > 0 then
       showTankDeath = true
       local names = {}

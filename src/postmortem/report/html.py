@@ -634,7 +634,12 @@ function postMortem(d) {
   }
   if (unused.length) {
     parts.push(`<div><span class="bad">Ready and unused:</span> ` + unused.map(u =>
-      `${esc(u.name)} <span class="dim">(off cooldown ${Math.round(u.ready_for_s)}s)</span>`
+      // never_cast entries come from the addon's spellbook capture: we know
+      // they had it and never pressed it all run, so there is no
+      // "off cooldown for N seconds" to quote -- it was up the whole time.
+      u.never_cast
+        ? `${esc(u.name)} <span class="dim">(never pressed this run)</span>`
+        : `${esc(u.name)} <span class="dim">(off cooldown ${Math.round(u.ready_for_s)}s)</span>`
     ).join(", ") + `</div>`);
   }
   if (gap != null) {
@@ -645,11 +650,20 @@ function postMortem(d) {
       `${esc(e.name)} <span class="dim">(${esc(e.caster)})</span>`).join(", ") + `</div>`);
   }
   if (never.length) {
-    // Never pressed all run, which the log cannot tell apart from "not
-    // talented" -- shown, but explicitly as an observation rather than a
-    // mistake. See tank_death.py's honesty rule.
-    parts.push(`<div class="dim">Never used this run (may not be talented): `
-      + never.map(n => esc(n.name)).join(", ") + `</div>`);
+    // Never pressed all run. From the log alone that cannot be told apart
+    // from "not talented", so it is an observation, not a mistake. The
+    // addon's spellbook capture settles it per spell (n.known), and where
+    // it has, the caveat is dropped rather than hedged out of habit.
+    const proven = never.filter(n => n.known);
+    const unsure = never.filter(n => !n.known);
+    if (proven.length) {
+      parts.push(`<div class="dim">Had, never used this run: `
+        + proven.map(n => esc(n.name)).join(", ") + `</div>`);
+    }
+    if (unsure.length) {
+      parts.push(`<div class="dim">Never used this run (may not be talented): `
+        + unsure.map(n => esc(n.name)).join(", ") + `</div>`);
+    }
   }
   if (!parts.length) return '<span class="ok">nothing left unused</span>';
 

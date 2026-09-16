@@ -389,6 +389,28 @@ def _read_savedvariables_table(path: Path, global_name: str) -> dict[Any, Any]:
     return global_table if isinstance(global_table, dict) else {}
 
 
+def _load_tank_knowledge(path: Optional[str]) -> Optional["TankKnowledge"]:
+    """The addon's spellbook capture (PostmortemTankDB) from a
+    SavedVariables file, or None when no path was given.
+
+    Deliberately NOT bundled the way avoidable_spells.json is: that list
+    is community data every user benefits from, while this is one
+    character's talent build. It is read straight from the user's own
+    SavedVariables at analyze time instead, so it can never be shipped to
+    anyone else or go stale in the package.
+
+    Errors are fatal here rather than warned past: the flag was passed
+    explicitly, so silently producing the weaker "may not be talented"
+    report would hide that the file the user named did not work.
+    """
+    if not path:
+        return None
+    from .analysis.tank_death import knowledge_from_savedvariables
+
+    table = _read_savedvariables_table(Path(path), "PostmortemTankDB")
+    return knowledge_from_savedvariables(table)
+
+
 def _challenge_map_to_dungeon_idx(dungeon_data: Optional[str]) -> dict[int, int]:
     """challenge-map id -> MDT dungeon_idx, from an explicit dungeon-data
     file or the bundled one. Empty (no per-dungeon grouping, spells still
@@ -1113,6 +1135,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         par_ms=par_ms,
         spell_damage_history_path=args.spell_damage_history,
         community_spell_damage=_load_community_spell_damage(),
+        tank_knowledge=_load_tank_knowledge(getattr(args, "tank_db", None)),
     )
 
     if args.raiderio:
@@ -1657,6 +1680,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dispel-data",
                    help="JSON file tagging dispellable enemy debuffs by school "
                         "(see build-dispel-data); default: the bundled list")
+    p.add_argument("--tank-db", metavar="SAVEDVARIABLES",
+                   help="path to the Postmortem SavedVariables file (e.g. "
+                        "WTF/Account/<ACCOUNT>/SavedVariables/Postmortem.lua). "
+                        "Only PostmortemTankDB is read: the addon's record of "
+                        "which defensives you actually had talented, which the "
+                        "combat log cannot carry. With it, the tank death "
+                        "post-mortem stops hedging about untalented spells")
     p.add_argument("--avoidable-data",
                    help="JSON file tagging avoidable-damage spell ids (community/"
                         "user-maintained; see docs/avoidable_spells.example.json) "

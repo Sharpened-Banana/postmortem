@@ -74,6 +74,9 @@ local defaults = {
     announceCompletion = true,  -- ChatSummary.lua
     warnLoggingConflicts = true, -- CombatLogging.lua's other-addon-detected notice
     tagDeaths = true,           -- DeathTagging.lua's recap "Died to <Spell>" line
+    -- TankDeath.lua's "Ready and unused: ..." recap line, and the
+    -- PostmortemTankDB capture that feeds it back to the analyzer.
+    tankDeath = true,
 
     -- Per-dungeon-per-level personal-best objective/boss split times, in
     -- seconds: bestSplits[mapID][level][criteriaIndex] = elapsed. Built up
@@ -120,6 +123,17 @@ local function InitializeSavedVariables()
   if type(PostmortemAvoidableDB) ~= "table" then PostmortemAvoidableDB = {} end
   if type(PostmortemAvoidableDB.global) ~= "table" then PostmortemAvoidableDB.global = {} end
   MA.avoidableDb = PostmortemAvoidableDB.global
+
+  -- Fourth table, same reasoning again: captured observations, not
+  -- settings. TankDeath.lua records one entry per death with the spells
+  -- the client confirmed the player knew at that moment -- the one thing
+  -- the combat log can never carry, since it has no spellbook. The Python
+  -- side reads it back (`postmortem analyze --tank-db <this file>`) to
+  -- turn the report's "may not be talented" hedge into a fact.
+  if type(PostmortemTankDB) ~= "table" then PostmortemTankDB = {} end
+  if type(PostmortemTankDB.global) ~= "table" then PostmortemTankDB.global = {} end
+  if type(PostmortemTankDB.global.deaths) ~= "table" then PostmortemTankDB.global.deaths = {} end
+  MA.tankDb = PostmortemTankDB.global
 end
 
 -- Accessor other files should use instead of touching PostmortemDB
