@@ -1681,6 +1681,46 @@ class TestAutoUpdate:
         assert any(e["type"] == "downloading" and e["written"] == 50 for e in events)
         assert any(e["type"] == "applying" for e in events)
 
+    def test_start_update_re_resolves_on_the_configured_channel(
+        self, api, events, monkeypatch, tmp_path,
+    ):
+        # Regression (2026-09-17): on the beta channel the UI offered
+        # beta-desktop-49.2, but start_update() re-resolved the release
+        # with the *stable* default, got alpha-desktop-48 back, and every
+        # beta update failed with "no longer matches the published
+        # release". Both halves must ask for the same channel.
+        monkeypatch.setattr(api_module.sys, "frozen", True, raising=False)
+        monkeypatch.setattr(
+            api_module._config, "load_settings", lambda: {"update_channel": "beta"},
+        )
+        beta_url = "https://github.com/Sharpened-Banana/postmortem/releases/download/beta-desktop-49.2/Postmortem-macos.zip"
+        stable_url = "https://github.com/Sharpened-Banana/postmortem/releases/download/alpha-desktop-48/Postmortem-macos.zip"
+        channels_asked = []
+
+        def fake_check(channel="stable", **kw):
+            channels_asked.append(channel)
+            if channel == "beta":
+                return {"tag": "beta-desktop-49.2", "download_url": beta_url,
+                        "notes": "", "sha256": None}
+            return {"tag": "alpha-desktop-48", "download_url": stable_url,
+                    "notes": "", "sha256": None}
+
+        monkeypatch.setattr(updater_module, "check_for_update", fake_check)
+        monkeypatch.setattr(
+            updater_module, "perform_update",
+            lambda url, work_dir, on_progress=None, expected_sha256=None: tmp_path / "new",
+        )
+        monkeypatch.setattr(
+            updater_module, "apply_update_and_relaunch", lambda path, **kw: None,
+        )
+
+        assert api.check_for_update()["update"]["download_url"] == beta_url
+        assert api.start_update(beta_url) == {"ok": True}
+
+        self._wait_for(events, "relaunching")
+        assert not any(e["type"] == "failed" for e in events), events
+        assert channels_asked == ["beta", "beta"]
+
     def test_failure_during_download_reports_a_failed_event_not_a_crash(
         self, api, events, monkeypatch,
     ):
