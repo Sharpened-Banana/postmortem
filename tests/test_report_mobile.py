@@ -70,3 +70,12 @@ def test_snapshot_tables_label_cells_and_go_cards_at_five_columns():
     assert '<table><tr>' in narrow and 'data-l="B"' in narrow
     wide = _table([(h, False) for h in "ABCDE"], [list("vwxyz")])
     assert '<table class="cards">' in wide
+
+
+def test_phone_polish_body_size_safe_area_and_viewport_fit():
+    page = render_html({"run": {}, "dungeon": {"name": "x"}})
+    assert "viewport-fit=cover" in page
+    css = page[page.index("<style>"):page.index("</style>")]
+    at = css.index("@media (max-width: 720px)")
+    assert css.index("body { padding: 16px; font-size: 15px; }") > at
+    assert "top: env(safe-area-inset-top, 0px);" in css
