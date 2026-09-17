@@ -14,7 +14,7 @@ _TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>__TITLE__</title>
 <style>
 /* Postmortem brand system (2026-09-11). Two typefaces doing two jobs:
@@ -114,13 +114,13 @@ details.sec > summary h2 { display: block; }
    phone in place of the single hover-only strip (no hover on a phone). */
 .tl-stack { display: none; }
 @media (max-width: 720px) {
-  body { padding: 16px; }
+  body { padding: 16px; font-size: 15px; }
   h1 { font-size: 28px; }
   .wrap { padding: 4px 2px; }
   th, td { padding: 5px 8px; }
   /* section index: a sticky strip of chips */
   .sec-index { display: flex; flex-wrap: wrap; gap: 6px; position: sticky;
-    top: 0; z-index: 5; background: var(--bg); padding: 10px 0 8px;
+    top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); padding: 10px 0 8px;
     margin-top: 10px; border-bottom: 1px solid var(--line); }
   .sec-index a { font-size: 11px; letter-spacing: .04em; color: var(--muted);
     border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px;

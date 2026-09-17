@@ -29,3 +29,10 @@ def test_phone_rules_live_under_one_media_query():
 def test_desktop_board_keeps_its_minimum_width_rule():
     css = _css(render_index([]))
     assert ".board { min-width:860px; }" in css
+
+
+def test_phone_body_size_and_viewport_fit():
+    page = render_index([])
+    assert "viewport-fit=cover" in page
+    css = _css(page)
+    assert css.index("body { padding:16px; font-size:15px; }") > css.index("@media (max-width:720px)")

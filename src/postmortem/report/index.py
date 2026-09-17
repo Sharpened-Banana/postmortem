@@ -134,7 +134,7 @@ _INDEX_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Mythic+ run history</title>
 <style>
 /* Postmortem brand system -- see report/html.py's own note on why the two
@@ -249,7 +249,7 @@ select { background:var(--panel); color:var(--text); border:1px solid var(--line
    their column names from CSS since the header no longer sits above
    them. Nothing above 720px changes. */
 @media (max-width:720px) {
-  body { padding:16px; }
+  body { padding:16px; font-size:15px; }
   h1 { font-size:28px; }
   .board { min-width:0; }
   .wrap { padding:0; }
