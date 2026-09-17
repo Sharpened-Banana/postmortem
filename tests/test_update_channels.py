@@ -76,17 +76,42 @@ class TestChannelSelection:
         assert check_for_update(lambda url: LISTING, channel="nightly") is None
 
     def test_the_shipped_stable_updater_ignores_beta_tags(self):
-        """Apps already installed (45-48) run the old regex; a beta
-        pre-release in the listing must be invisible to them."""
+        """Apps already installed (45-48) pick the highest N among tags
+        matching ^alpha-desktop-(\d+)$ over the release listing -- the
+        selection as shipped in alpha-desktop-48's updater, reproduced
+        here verbatim rather than read back with `git show` (CI's
+        shallow checkout has no tags). A beta pre-release in the
+        listing must be invisible to it."""
+        import re
+        tag_re = re.compile(r"^alpha-desktop-(\d+)$")
+
+        def shipped_newest(releases):
+            best, best_n = None, -1
+            for release in releases:
+                if release.get("draft"):
+                    continue
+                m = tag_re.match(str(release.get("tag_name", "")))
+                if m and int(m.group(1)) > best_n:
+                    best, best_n = release, int(m.group(1))
+            return best
+
+        assert shipped_newest(LISTING)["tag_name"] == "alpha-desktop-48"
+        with_49 = [_release("alpha-desktop-49")] + LISTING
+        assert shipped_newest(with_49)["tag_name"] == "alpha-desktop-49"
+        # and the real 48 file, when the tag is reachable (local checkouts)
         import subprocess, types
-        src = subprocess.check_output(
-            ["git", "show", "alpha-desktop-48:src/postmortem/desktop/updater.py"], text=True)
+        try:
+            src = subprocess.check_output(
+                ["git", "show", "alpha-desktop-48:src/postmortem/desktop/updater.py"],
+                text=True, stderr=subprocess.DEVNULL)
+        except (subprocess.CalledProcessError, OSError):
+            return
         old = types.ModuleType("updater48"); old.__package__ = "postmortem.desktop"
         exec(compile(src, "updater48.py", "exec"), old.__dict__)
         old.VERSION = "alpha-desktop-48"
         old._asset_name_for_platform = lambda: "Postmortem-macos.zip"
         assert old.check_for_update(lambda url: LISTING) is None
-        assert old.check_for_update(lambda url: [_release("alpha-desktop-49")] + LISTING)["tag"] == "alpha-desktop-49"
+        assert old.check_for_update(lambda url: with_49)["tag"] == "alpha-desktop-49"
 
 
 class TestApiChannel:
