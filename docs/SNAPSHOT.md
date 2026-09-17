@@ -137,6 +137,45 @@ role is taken from that player's spec in the run
 `snapshot_hotkey {ok, message}` at start so a hotkey another program
 already owns, or a missing permission, is visible rather than silent.
 
+## 4. Where snapshots show up
+
+A snapshot is not a loose file any more: every marker's full
+`build_snapshot` dict rides inside the run report as
+`report["snapshots"]` -- a list in marker order, each entry also given
+`"n": 1..` -- and every consumer reads it from there. It is attached
+before the report's JSON/HTML are written (`cli.attach_snapshots`, called
+by `_write_recorded_reports`, `cmd_analyze` and the desktop `analyze()`),
+so the `.json` on disk, the history DB row, the site upload and the
+addon's results file all carry it without a second build. Best-effort
+throughout: a snapshot that fails to build is skipped and the survivors
+are renumbered, so `snapshots[n-1]` and `<run>-snapshot-<n>.html` always
+mean the same window; a run with no markers has `"snapshots": []`.
+
+`analysis.snapshot.snapshot_headline(dict) -> {n, role, t, focus, line}`
+is the one-sentence summary every list of snapshots shares, per role
+(healer: effective healing, overheal %, lowest mana, deaths/close calls
+in the window; tank: peak/mean DTPS, best mitigation uptime, biggest
+hit; general: deaths, close calls, biggest hit), degrading to whatever
+fields the dict has.
+
+- **App, report screen**: a "Snapshots:" strip above the report frame
+  (`[healer 1:06] [tank 1:50]`, headline in the tooltip) when the loaded
+  report has any; a button swaps the frame to that snapshot page
+  (`open_report_snapshot(n)`, rendered from the report the bridge holds
+  -- the last `analyze()` or `open_history_run()`), "Back to run report"
+  restores the run. `open_history_snapshot(ref, n)` does the same for a
+  listed History run. Hidden entirely for a run without markers.
+- **App, History**: a small "2 snapshots" tag on the run's row (row key
+  `snapshots`, the count, from both the directory scan and the DB).
+- **App, Watch Live**: unchanged -- "Snapshot (healer) at 12:34 -- Open"
+  the moment the window closes, opening the loose file; the same
+  snapshot is in the run report once the key ends.
+- **In game, `/pm results`**: a "Snapshots" block, `12:34  healer --
+  <line>`, from `snapshots` in PostmortemResults.lua (headlines only,
+  capped at six); no block at all when the run had none.
+- **Site, run page**: reads `report["snapshots"]` from the uploaded
+  report (built separately in the site repo).
+
 ## Notes from the implementation (2026-09-15)
 
 - `build_snapshot` also takes `stealable`, `pull_gap_seconds`, `marker`

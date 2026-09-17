@@ -1818,3 +1818,62 @@ class TestAccountLinking:
         # http:// to the same host is a different origin too.
         assert api.open_url("http://example.test")["ok"] is False
         assert seen == []
+
+
+class TestReportSnapshots:
+    """The report screen's Snapshots strip (docs/SNAPSHOT.md, "Where
+    snapshots show up"): a run's snapshots are rendered from the report the
+    bridge holds, by number, for both New Analysis and History."""
+
+    @pytest.fixture()
+    def marked_log(self, tmp_path):
+        from test_snapshot import _log_with_markers
+        path = tmp_path / "WoWCombatLog.txt"
+        path.write_text(_log_with_markers().text(), encoding="utf-8")
+        return path
+
+    def test_analyze_carries_snapshots_and_their_headlines(self, api, marked_log):
+        result = api.analyze({"log_path": str(marked_log)})
+        assert result["ok"] is True
+        assert [s["n"] for s in result["report"]["snapshots"]] == [1, 2]
+        heads = result["snapshot_headlines"]
+        assert [(h["n"], h["role"], h["t"]) for h in heads] == [
+            (1, "healer", "1:06"), (2, "tank", "1:50"),
+        ]
+        assert all(h["line"] for h in heads)
+
+    def test_open_report_snapshot_renders_the_last_analyzed_report(self, api, marked_log):
+        assert api.open_report_snapshot(1)["ok"] is False  # nothing open yet
+        api.analyze({"log_path": str(marked_log)})
+        opened = api.open_report_snapshot(2)
+        assert opened["ok"] is True, opened
+        assert "Snapshot (tank)" in opened["html"]
+        assert "Snapshot 2" in opened["label"] and "tank" in opened["label"]
+        # numbers arrive from JS: out of range or nonsense is refused, not raised
+        for bad in (0, 3, -1, "x", None):
+            assert api.open_report_snapshot(bad)["ok"] is False
+
+    def test_open_history_snapshot_uses_the_stored_report(self, api, marked_log, tmp_path):
+        report = api.analyze({"log_path": str(marked_log)})["report"]
+        db_path = tmp_path / "runs.db"
+        history_ingest(report, db_path)
+        listed = api.list_history(db_path=str(db_path))
+        assert listed["rows"][0]["snapshots"] == 2  # the History tag's count
+        ref = listed["rows"][0]["html"][len("pm-run:"):]
+
+        opened = api.open_history_snapshot(ref, 1)
+        assert opened["ok"] is True, opened
+        assert "Snapshot (healer)" in opened["html"]
+        # opening a history run also makes it the report the strip serves
+        assert api.open_history_run(ref)["snapshot_headlines"][0]["role"] == "healer"
+        assert api.open_report_snapshot(1)["ok"] is True
+        assert api.open_history_snapshot("nope", 1)["ok"] is False
+
+    def test_a_run_without_snapshots_has_an_empty_strip(self, api, log_file, tmp_path):
+        result = api.analyze({"log_path": str(log_file)})
+        assert result["report"]["snapshots"] == []
+        assert result["snapshot_headlines"] == []
+        assert api.open_report_snapshot(1)["ok"] is False
+        db_path = tmp_path / "runs.db"
+        history_ingest(result["report"], db_path)
+        assert api.list_history(db_path=str(db_path))["rows"][0]["snapshots"] == 0

@@ -24,6 +24,8 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
+from .analysis.snapshot import snapshot_headline
+
 RESULTS_FILENAME = "PostmortemResults.lua"
 _GLOBAL = "PostmortemResults"
 
@@ -249,6 +251,28 @@ def build_results_payload(report: dict[str, Any]) -> dict[str, Any]:
         })
     if deaths_detail:
         payload["deaths_detail"] = deaths_detail
+
+    # The snapshots marked during this run (docs/SNAPSHOT.md), one headline
+    # each -- the in-game window lists "12:34  healer -- <line>"; the full
+    # pages stay in the app. Absent when the run had none, like the other
+    # optional sections.
+    snapshots = []
+    for snap in report.get("snapshots") or []:
+        if not isinstance(snap, dict):
+            continue
+        try:
+            head = snapshot_headline(snap)
+        except Exception:
+            continue  # one odd snapshot must not cost the file its stats
+        snapshots.append({
+            "n": head.get("n"),
+            "role": head.get("role") or "general",
+            "t": head.get("t") or "?",
+            "focus": head.get("focus"),
+            "line": head.get("line") or "",
+        })
+    if snapshots:
+        payload["snapshots"] = snapshots
 
     return payload
 

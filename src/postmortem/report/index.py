@@ -124,6 +124,7 @@ def collect_report_files(directory: str | Path) -> list[tuple[Path, dict[str, An
             "threshold": timer.get("threshold"),
             "margin_ms": timer.get("margin_ms"),
             "deaths_detail": deaths_summary(report),
+            "snapshots": len(report.get("snapshots") or []),
         }))
     rows.sort(key=lambda pr: pr[1].get("start_ts") or 0, reverse=True)
     return rows
@@ -212,6 +213,10 @@ select { background:var(--panel); color:var(--text); border:1px solid var(--line
 .run-row .rank.none { color:var(--dim); font-weight:400; }
 .run-row .dungeon { font-weight:500; letter-spacing:.01em; color:var(--text); }
 .run-row .level { font-variant-numeric:tabular-nums; }
+.run-row .snap-tag { display:inline-block; margin-left:6px; padding:1px 5px;
+  border:1px solid var(--line); border-radius:3px; font-size:10px;
+  font-weight:400; color:var(--dim); letter-spacing:.02em; white-space:nowrap;
+  vertical-align:1px; }
 .run-row .level .stars { color:var(--accent); font-size:11px; margin-left:3px;
   letter-spacing:-1px; }
 .run-row .level.over { color:var(--warn); }
@@ -433,6 +438,14 @@ function detailBlock(r) {
   </div>`;
 }
 
+// "2 snapshots": the run carries role-focused snapshot reports the
+// player marked in-game (docs/SNAPSHOT.md). Nothing for the common case.
+function snapTag(r) {
+  const n = Number(r.snapshots) || 0;
+  if (!n) return "";
+  return `<span class="snap-tag" title="${n} snapshot report${n === 1 ? "" : "s"} marked during this run">${n} snapshot${n === 1 ? "" : "s"}</span>`;
+}
+
 function runRow(r) {
   const key = runKey(r);
   const isOpen = openKey === key;
@@ -461,7 +474,7 @@ function runRow(r) {
   return `<div class="run-row${isOpen ? " open" : ""}" data-key="${esc(key)}">
     <div class="caret">${isOpen ? "▾" : "▸"}</div>
     <div class="rank${r._rank ? "" : " none"}">${num(r._rank, "—")}</div>
-    <div class="dungeon" title="${esc(r.zone)}">${esc(abbrev(r.zone))}</div>
+    <div class="dungeon" title="${esc(r.zone)}">${esc(abbrev(r.zone))}${snapTag(r)}</div>
     <div class="${levelCls}">+${num(r.level, "?")}<span class="stars">${starStr}</span></div>
     <div class="${timeCls}">${timeStr}</div>
     <div class="affixes">${affixCell(r.affixes)}</div>

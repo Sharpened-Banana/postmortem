@@ -122,6 +122,9 @@ function wireNav() {
 const state = {
   settings: null,
   lastReport: null, // the report dict behind the currently-shown report screen, if any -- stashed so "Upload to site" has something to send
+  reportHtml: null, // the run report page itself, kept so "Back to run report" can restore it after a snapshot swapped the frame
+  snapshotHeadlines: [], // snapshot_headline() per report["snapshots"] entry (from the bridge) -- what the Snapshots strip renders
+  activeSnapshot: null, // the snapshot number the frame is showing, or null when it shows the run report
   watching: false, // mirrors the backend's watch-thread state, for UI purposes only
 };
 
@@ -342,9 +345,7 @@ async function onAnalyze() {
       const label = [run.zone, run.keystone_level != null ? `+${run.keystone_level}` : null]
         .filter(Boolean).join(" ");
       document.getElementById("report-context-label").textContent = label;
-      const frame = document.getElementById("report-frame");
-      frame.srcdoc = result.html;
-      state.lastReport = result.report;
+      showRunReport(result);
       resetUploadStatus();
       showSavedStatus(result.saved);
       setReportBack("new");
@@ -399,6 +400,97 @@ function initReportScreen() {
   document.getElementById("report-back-btn").addEventListener(
     "click", () => showScreen(state.reportBack || "new"));
   document.getElementById("report-upload-btn").addEventListener("click", onUploadToSite);
+  document.getElementById("report-snapshot-back").addEventListener("click", showRunReportAgain);
+}
+
+// Put a run report (an analyze() or open_history_run() result) in the
+// frame and rebuild the Snapshots strip from it. Both entry points used to
+// poke the frame directly; the strip needs the same three things stashed
+// each time, so it lives in one place.
+function showRunReport(result) {
+  const frame = document.getElementById("report-frame");
+  state.lastReport = result.report || null;
+  state.reportHtml = result.html || "";
+  state.snapshotHeadlines = Array.isArray(result.snapshot_headlines) ? result.snapshot_headlines : [];
+  state.activeSnapshot = null;
+  frame.srcdoc = state.reportHtml;
+  renderSnapshotStrip();
+}
+
+// A page that is not a run report (Watch Live's loose snapshot file): no
+// strip, nothing to go back to.
+function showStandalonePage(html) {
+  state.lastReport = null;
+  state.reportHtml = null;
+  state.snapshotHeadlines = [];
+  state.activeSnapshot = null;
+  document.getElementById("report-frame").srcdoc = html;
+  renderSnapshotStrip();
+}
+
+// The strip above the frame: "Snapshots: [Healer 12:34] [Tank 15:02] ...".
+// Hidden entirely when the loaded report has none (the common case), so
+// the report screen looks exactly as before for a run without markers.
+function renderSnapshotStrip() {
+  const strip = document.getElementById("report-snapshots");
+  const holder = document.getElementById("report-snapshot-buttons");
+  const back = document.getElementById("report-snapshot-back");
+  holder.textContent = "";
+  const heads = state.snapshotHeadlines || [];
+  if (!heads.length) {
+    strip.hidden = true;
+    back.hidden = true;
+    return;
+  }
+  heads.forEach((h, i) => {
+    const n = Number(h.n) || (i + 1);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btn-secondary btn-sm snap-btn" + (state.activeSnapshot === n ? " active" : "");
+    // Built from DOM nodes, not markup: the headline line quotes names
+    // straight out of the combat log.
+    const role = document.createElement("span");
+    role.className = "snap-role";
+    role.textContent = String(h.role || "general");
+    const t = document.createElement("span");
+    t.className = "snap-t";
+    t.textContent = String(h.t || "?");
+    btn.appendChild(role);
+    btn.appendChild(t);
+    btn.title = [h.focus ? String(h.focus) : null, h.line ? String(h.line) : null]
+      .filter(Boolean).join(" — ");
+    btn.addEventListener("click", () => openReportSnapshot(n));
+    holder.appendChild(btn);
+  });
+  back.hidden = state.activeSnapshot === null;
+  strip.hidden = false;
+}
+
+async function openReportSnapshot(n) {
+  const label = document.getElementById("report-context-label");
+  try {
+    const result = await api().open_report_snapshot(n);
+    if (!result || !result.ok) {
+      label.textContent = (result && result.error) || "Could not open that snapshot.";
+      return;
+    }
+    state.activeSnapshot = n;
+    label.textContent = result.label || `Snapshot ${n}`;
+    document.getElementById("report-frame").srcdoc = result.html;
+    renderSnapshotStrip();
+  } catch (e) {
+    label.textContent = "Could not open that snapshot: " + describeError(e);
+  }
+}
+
+function showRunReportAgain() {
+  if (state.reportHtml == null) return;
+  state.activeSnapshot = null;
+  const run = (state.lastReport && state.lastReport.run) || {};
+  document.getElementById("report-context-label").textContent =
+    [run.zone, run.keystone_level != null ? `+${run.keystone_level}` : null].filter(Boolean).join(" ");
+  document.getElementById("report-frame").srcdoc = state.reportHtml;
+  renderSnapshotStrip();
 }
 
 function resetUploadStatus() {
@@ -629,9 +721,8 @@ async function openSnapshot(path) {
       addWatchLogEntry("err", `Could not open the snapshot: ${esc((result && result.error) || "unknown error")}`);
       return;
     }
-    state.lastReport = null;
     document.getElementById("report-context-label").textContent = result.label || "Snapshot";
-    document.getElementById("report-frame").srcdoc = result.html;
+    showStandalonePage(result.html);
     showScreen("report");
   } catch (e) {
     addWatchLogEntry("err", "Could not open the snapshot: " + describeError(e));
@@ -840,8 +931,7 @@ async function openHistoryRun(ref) {
       return;
     }
     document.getElementById("report-context-label").textContent = result.label || "";
-    document.getElementById("report-frame").srcdoc = result.html;
-    state.lastReport = result.report;
+    showRunReport(result);
     resetUploadStatus();
     showSavedStatus(null);
     setReportBack("history");

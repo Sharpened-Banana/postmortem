@@ -566,7 +566,23 @@ def _to_index_row(r: sqlite3.Row) -> dict[str, Any]:
         "threshold": _col(r, "threshold"),
         "margin_ms": _col(r, "margin_ms"),
         "deaths_detail": json.loads(deaths_json) if deaths_json else [],
+        "snapshots": _snapshot_count(_col(r, "report_json")),
     }
+
+
+def _snapshot_count(report_json: Any) -> int:
+    """How many snapshot reports the stored run carries (report["snapshots"],
+    docs/SNAPSHOT.md). No column of its own: the substring test keeps the
+    common no-snapshot row at zero cost, and only a row that has the key
+    pays for a parse. A query that never selected report_json (the site's
+    bespoke SELECTs, see _col) reads as zero rather than raising."""
+    if not isinstance(report_json, str) or '"snapshots"' not in report_json:
+        return 0
+    try:
+        snaps = json.loads(report_json).get("snapshots")
+    except (ValueError, AttributeError):
+        return 0
+    return len(snaps) if isinstance(snaps, list) else 0
 
 
 def ingest(
