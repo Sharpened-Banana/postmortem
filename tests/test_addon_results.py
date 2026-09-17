@@ -298,3 +298,47 @@ class TestWriteAddonResults:
         write_addon_results({"run": {"zone": "Second"}, "players": []}, tmp_path)
         text = (tmp_path / RESULTS_FILENAME).read_text(encoding="utf-8")
         assert "Second" in text and "First" not in text
+
+
+class TestSnapshotsInPayload:
+    """The in-game results window lists the run's snapshots as headlines
+    (docs/SNAPSHOT.md); the file carries only the one line each, never the
+    full snapshot dicts."""
+
+    def _report_with_snapshots(self):
+        return {
+            "run": {"zone": "Murder Row", "keystone_level": 10, "completed": True},
+            "snapshots": [
+                {"n": 1,
+                 "snapshot": {"role": "healer", "t_marker": 66.0, "focus_player": "Heals-Realm"},
+                 "focus": {"role": "healer", "healing_done": 1200000, "absorbs_granted": 0,
+                           "overheal_pct": 20.4, "mana": {"min": 31.0}},
+                 "deaths": [{"player": "Dps"}], "close_calls": [],
+                 "around_marker": {"largest_hits": []}},
+                {"n": 2,
+                 "snapshot": {"role": "general", "t_marker": 754.0, "focus_player": None},
+                 "focus": {"role": "general"},
+                 "deaths": [], "close_calls": [], "around_marker": {"largest_hits": []}},
+            ],
+        }
+
+    def test_headlines_only(self):
+        payload = build_results_payload(self._report_with_snapshots())
+        assert payload["snapshots"] == [
+            {"n": 1, "role": "healer", "t": "1:06", "focus": "Heals-Realm",
+             "line": "1.2M effective healing, 20% overheal, mana low 31%, 1 death in the window"},
+            {"n": 2, "role": "general", "t": "12:34", "focus": None,
+             "line": "a quiet window: no deaths, close calls or notable hits"},
+        ]
+        assert "series" not in str(payload)
+
+    def test_absent_when_the_run_had_none(self):
+        assert "snapshots" not in build_results_payload({"run": {"zone": "x"}})
+        assert "snapshots" not in build_results_payload({"run": {"zone": "x"}, "snapshots": []})
+
+    def test_one_broken_snapshot_never_costs_the_file(self):
+        report = self._report_with_snapshots()
+        report["snapshots"].insert(1, "not a dict")
+        payload = build_results_payload(report)
+        assert [s["n"] for s in payload["snapshots"]] == [1, 2]
+        assert "PostmortemResults = {" in render_results_lua(report)

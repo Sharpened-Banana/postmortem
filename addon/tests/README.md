@@ -44,6 +44,10 @@ print when no key is active or logging is off. `LoggingCombat` is stubbed
 as a call recorder and `C_Timer.After` as a hand-advanced scheduler; the
 real `CombatLogging.lua` is loaded underneath so its state rules apply.
 
+`results_window.lua` covers the "Snapshots" block of `Results.lua`
+(docs/SNAPSHOT.md section 4): one `t  role -- line` per headline the
+desktop app wrote, capped, and no block at all when the run had none.
+
 Syntax-check every file alongside this:
 
     for f in addon/Postmortem/*.lua; do luac -p "$f"; done

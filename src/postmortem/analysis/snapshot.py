@@ -681,3 +681,113 @@ def build_snapshot(
     if focus_section.get("role") == "tank":
         _relativize(focus_section.get("biggest_hits", []), run_start)
     return report
+
+
+# --- headline --------------------------------------------------------------
+
+def _mmss(seconds: Any) -> str:
+    try:
+        total = max(0, int(round(float(seconds))))
+    except (TypeError, ValueError):
+        return "?"
+    return f"{total // 60}:{total % 60:02d}"
+
+
+def _short_num(value: Any) -> str:
+    """1234567 -> "1.2M", 153914 -> "153.9k" -- the addon's FormatShort,
+    so an in-game line and an app line read the same."""
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return "?"
+    if n >= 1e6:
+        return f"{n / 1e6:.1f}M"
+    if n >= 1e3:
+        return f"{n / 1e3:.1f}k"
+    return f"{int(n)}"
+
+
+def _count_phrase(n: int, noun: str) -> str:
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
+def _biggest_hit_phrase(hit: Optional[dict[str, Any]]) -> Optional[str]:
+    if not hit or not hit.get("amount"):
+        return None
+    spell = hit.get("spell") or "a hit"
+    who = hit.get("player")
+    who = who.split("-", 1)[0] if isinstance(who, str) and who else None
+    return f"biggest hit {_short_num(hit['amount'])} {spell}" + (f" on {who}" if who else "")
+
+
+def snapshot_headline(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """One line a person can read about a snapshot without opening it:
+    ``{n, role, t, focus, line}``.
+
+    Every place a run's snapshots are listed (the app's report strip, the
+    History rows, the in-game results window, the site) wants the same
+    short sentence, so it is built once here from the snapshot dict.
+    The sentence is per role -- what a healer wants to know first is not
+    what a tank does -- and degrades to whatever fields the dict has: a
+    healer marker with no healer in the window falls back to the general
+    line, and a window in which nothing happened says so rather than
+    listing zeros.
+    """
+    snap = snapshot.get("snapshot") or {}
+    focus = snapshot.get("focus") or {}
+    role = focus.get("role") or snap.get("role") or "general"
+    around = snapshot.get("around_marker") or {}
+    deaths = snapshot.get("deaths") or []
+    close_calls = snapshot.get("close_calls") or []
+    largest = (around.get("largest_hits") or [None])[0]
+
+    parts: list[str] = []
+    if role == "healer" and focus.get("healing_done") is not None:
+        healed = (focus.get("healing_done") or 0) + (focus.get("absorbs_granted") or 0)
+        parts.append(f"{_short_num(healed)} effective healing")
+        if focus.get("overheal_pct") is not None:
+            parts.append(f"{focus['overheal_pct']:.0f}% overheal")
+        mana_min = (focus.get("mana") or {}).get("min")
+        if mana_min is not None:
+            parts.append(f"mana low {mana_min:.0f}%")
+        if deaths or close_calls:
+            parts.append(", ".join(
+                p for p in (
+                    _count_phrase(len(deaths), "death") if deaths else None,
+                    _count_phrase(len(close_calls), "close call") if close_calls else None,
+                ) if p
+            ) + " in the window")
+        else:
+            parts.append("nobody dropped low")
+    elif role == "tank" and focus.get("damage_taken") is not None:
+        dtps = focus.get("dtps") or {}
+        if dtps.get("peak"):
+            parts.append(f"peak {_short_num(dtps['peak'])} DTPS")
+        if dtps.get("mean"):
+            parts.append(f"mean {_short_num(dtps['mean'])}")
+        mitigation = focus.get("active_mitigation") or []
+        best = max(mitigation, key=lambda m: m.get("uptime_pct") or 0, default=None)
+        if best and best.get("uptime_pct") is not None:
+            parts.append(f"{best.get('name') or 'mitigation'} up {best['uptime_pct']:.0f}%")
+        big = _biggest_hit_phrase((focus.get("biggest_hits") or [None])[0])
+        if big:
+            parts.append(big)
+    else:
+        # general, or a role whose focus player was not in the window
+        if deaths:
+            parts.append(_count_phrase(len(deaths), "death"))
+        if close_calls:
+            parts.append(_count_phrase(len(close_calls), "close call"))
+        big = _biggest_hit_phrase(largest)
+        if big:
+            parts.append(big)
+        if not parts:
+            parts.append("a quiet window: no deaths, close calls or notable hits")
+
+    return {
+        "n": snapshot.get("n"),
+        "role": role,
+        "t": _mmss(snap.get("t_marker")),
+        "focus": snap.get("focus_player"),
+        "line": ", ".join(parts),
+    }

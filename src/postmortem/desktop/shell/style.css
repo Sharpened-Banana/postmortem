@@ -673,6 +673,39 @@ td.num, th.num {
 /* a local save that failed is a warning, not a hidden element */
 .saved-status.err { color: var(--bad); }
 
+/* the Snapshots strip between the chrome and the frame (docs/SNAPSHOT.md) */
+.snapshot-strip {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 10px;
+  font-size: 12.5px;
+}
+
+.snapshot-strip[hidden] {
+  display: none;
+}
+
+.snapshot-strip-label {
+  color: var(--dim);
+}
+
+.snapshot-strip .snap-btn.active {
+  background: rgba(201, 162, 39, 0.16);
+}
+
+.snapshot-strip .snap-btn .snap-role {
+  text-transform: capitalize;
+}
+
+.snapshot-strip .snap-btn .snap-t {
+  color: var(--dim);
+  margin-left: 5px;
+  font-variant-numeric: tabular-nums;
+}
+
 .report-frame {
   flex: 1;
   min-height: 0;

@@ -484,6 +484,15 @@
         <button type="button" class="btn btn-sm report-chrome-upload" id="report-upload-btn">Upload to site</button>
         <span class="upload-status" id="report-upload-status" hidden></span>
       </div>
+      <!-- The run's snapshots (docs/SNAPSHOT.md): one button per marked
+           moment, shown only when the loaded report carries any. Clicking
+           swaps the frame to that snapshot page; "Back to run report"
+           restores the run. -->
+      <div class="snapshot-strip" id="report-snapshots" hidden>
+        <span class="snapshot-strip-label">Snapshots:</span>
+        <span id="report-snapshot-buttons"></span>
+        <button type="button" class="btn btn-secondary btn-sm" id="report-snapshot-back" hidden>← Back to run report</button>
+      </div>
       <iframe id="report-frame" class="report-frame" title="Post-mortem report" sandbox="allow-scripts"></iframe>
     </section>
 

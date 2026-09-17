@@ -1410,6 +1410,12 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         tank_knowledge=_load_tank_knowledge(getattr(args, "tank_db", None)),
     )
 
+    # Same contract as _write_recorded_reports: the run's snapshots travel
+    # inside the report, so `analyze --format json` / --history-db /
+    # --upload all carry them without a separate step.
+    attach_snapshots(report, segment, store=store, avoidable=avoidable,
+                     interrupt_data=interrupt_data, stealable=stealable,
+                     dispel_data=dispel_data, pull_gap_seconds=args.pull_gap)
     if args.raiderio:
         from .raiderio import _default_fetcher, enrich_report
 
@@ -1531,32 +1537,65 @@ def _render_snapshot(report: dict, fmt: str) -> str:
     return json.dumps(report, indent=1)
 
 
-def _write_snapshots_for_run(
-    segment: RunSegment, out_dir: Path, stem: str, *, first_n: int = 1,
-    before_s: float = 120.0, after_s: float = 60.0, role: str = "auto",
-    fmt: str = "html", **build_kwargs,
-) -> list[Path]:
-    """Render one ``<stem>-snapshot-<n>.<ext>`` per marker found in
-    ``segment`` (numbered from ``first_n``) and return the paths written.
-    Best-effort per marker: one snapshot that fails to build is reported
-    on stderr and skipped, never taking the others (or the caller's own
-    outputs) down with it."""
-    written: list[Path] = []
-    n = first_n
+def _build_snapshots_for_run(
+    segment: RunSegment, *, before_s: float = 120.0, after_s: float = 60.0,
+    role: str = "auto", **build_kwargs,
+) -> list[dict]:
+    """One snapshot dict per marker found in ``segment``, in marker order,
+    each numbered ``"n": 1..`` -- the list that becomes
+    ``report["snapshots"]`` (docs/SNAPSHOT.md, "Where snapshots show up")
+    and that :func:`_write_snapshot_files` renders. Best-effort per marker:
+    one snapshot that fails to build is reported on stderr and skipped,
+    never taking the others down with it. The survivors are numbered
+    consecutively so ``snapshots[n-1]`` and ``<stem>-snapshot-<n>.html``
+    always mean the same window."""
+    built: list[dict] = []
     for marker in find_markers(segment.events):
-        path = out_dir / f"{stem}-snapshot-{n}.{_SNAPSHOT_EXT[fmt]}"
-        n += 1
         try:
             report = build_snapshot(
                 segment, marker.ts, before_s=before_s, after_s=after_s,
                 role=role, marker=marker, source="marker", **build_kwargs,
             )
-            path.write_text(_render_snapshot(report, fmt), encoding="utf-8")
         except Exception as exc:
             print(f"warning: snapshot at {marker.ts:.1f} failed: {exc}", file=sys.stderr)
             continue
+        report["n"] = len(built) + 1
+        built.append(report)
+    return built
+
+
+def _write_snapshot_files(
+    snapshots: list[dict], out_dir: Path, stem: str, *, first_n: int = 1,
+    fmt: str = "html",
+) -> list[Path]:
+    """Render ``<stem>-snapshot-<n>.<ext>`` for each built snapshot
+    (numbered from ``first_n``) and return the paths written. A file that
+    cannot be written is reported and skipped, like a failed build."""
+    written: list[Path] = []
+    for i, report in enumerate(snapshots):
+        path = out_dir / f"{stem}-snapshot-{first_n + i}.{_SNAPSHOT_EXT[fmt]}"
+        try:
+            path.write_text(_render_snapshot(report, fmt), encoding="utf-8")
+        except Exception as exc:
+            print(f"warning: could not write {path}: {exc}", file=sys.stderr)
+            continue
         written.append(path)
     return written
+
+
+def _write_snapshots_for_run(
+    segment: RunSegment, out_dir: Path, stem: str, *, first_n: int = 1,
+    before_s: float = 120.0, after_s: float = 60.0, role: str = "auto",
+    fmt: str = "html", **build_kwargs,
+) -> list[Path]:
+    """Build and write every marker's snapshot in one go (the ``snapshot``
+    subcommand's sweep); callers that also need the dicts -- the run
+    report attaches them -- use the two halves directly so nothing is
+    built twice."""
+    snapshots = _build_snapshots_for_run(
+        segment, before_s=before_s, after_s=after_s, role=role, **build_kwargs,
+    )
+    return _write_snapshot_files(snapshots, out_dir, stem, first_n=first_n, fmt=fmt)
 
 
 def cmd_snapshot(args: argparse.Namespace) -> int:
@@ -1773,6 +1812,16 @@ def _write_recorded_reports(
         except Exception as exc:
             print(f"warning: report enrichment failed: {exc}", file=sys.stderr)
     base = run.path.with_suffix("")
+    # The snapshots the addon's keybind (or the app's hotkey) marked in
+    # this run ride inside the report as report["snapshots"] -- built
+    # BEFORE the JSON is written so the file on disk, the history DB, the
+    # site upload and the in-game results all carry them (docs/SNAPSHOT.md,
+    # "Where snapshots show up"). Best-effort by contract, like the enrich
+    # hook above: a snapshot that can't be built must never make the run
+    # look failed, so the report simply carries the ones that could be.
+    attach_snapshots(report, segments[-1], store=store, avoidable=avoidable,
+                     interrupt_data=interrupt_data, stealable=stealable,
+                     pull_gap_seconds=pull_gap_seconds)
     Path(f"{base}.json").write_text(json.dumps(report, indent=1),
                                     encoding="utf-8")
     Path(f"{base}.html").write_text(render_html(report), encoding="utf-8")
@@ -1782,22 +1831,35 @@ def _write_recorded_reports(
     safe_print(render_text(report))
     safe_print(f"wrote {base}.json / {base}.html / {base}.chapters.json / {base}.vtt",
                file=sys.stderr)
-    # One <run>-snapshot-<n>.html per snapshot marker the addon planted in
-    # this run (docs/SNAPSHOT.md). Best-effort by contract, like the
-    # enrich hook above: the run's own reports are already on disk, and a
-    # snapshot that can't be built must never make the run look failed.
+    # ...and one <run>-snapshot-<n>.html per snapshot next to them, the
+    # loose file Watch Live's "Open" link and the CLI sweep already know.
     try:
-        snapshots = _write_snapshots_for_run(
-            segments[-1], base.parent, base.name, store=store,
-            avoidable=avoidable, interrupt_data=interrupt_data,
-            stealable=stealable, pull_gap_seconds=pull_gap_seconds,
+        snapshot_paths = _write_snapshot_files(
+            report.get("snapshots") or [], base.parent, base.name,
         )
     except Exception as exc:
         print(f"warning: snapshots failed: {exc}", file=sys.stderr)
-        snapshots = []
-    for path in snapshots:
+        snapshot_paths = []
+    for path in snapshot_paths:
         safe_print(f"wrote {path}", file=sys.stderr)
     return report
+
+
+def attach_snapshots(report: dict, segment: RunSegment, **build_kwargs) -> list[dict]:
+    """Set ``report["snapshots"]`` to the run's built snapshot dicts (see
+    :func:`_build_snapshots_for_run`) and return them. Always leaves the
+    key present -- an empty list means "no markers in this run", which is
+    what every consumer (History's tag, the addon's results block, the
+    site) treats as "nothing to show". Never raises: this is the seam
+    between the run's own analysis and a bonus feature, and a bonus that
+    blows up must not cost the run its report."""
+    try:
+        snapshots = _build_snapshots_for_run(segment, **build_kwargs)
+    except Exception as exc:
+        print(f"warning: snapshots failed: {exc}", file=sys.stderr)
+        snapshots = []
+    report["snapshots"] = snapshots
+    return snapshots
 
 
 def cmd_record(args: argparse.Namespace) -> int:

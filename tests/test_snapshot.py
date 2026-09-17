@@ -9,6 +9,7 @@ from conftest import DPS1, HEALER, TANK, LogBuilder, build_run_log
 
 from postmortem.analysis.gamedata import ACTIVE_MITIGATION
 from postmortem.analysis.snapshot import (
+    snapshot_headline,
     MARKER_CLUSTER_S,
     MARKER_GAP_S,
     Marker,
@@ -440,6 +441,44 @@ class TestRecordedReports:
         err = capsys.readouterr().err
         assert all(f"wrote {p}" in err for p in snaps)
 
+    def test_snapshots_ride_inside_the_run_report(self, tmp_path):
+        # The contract every other consumer relies on (docs/SNAPSHOT.md,
+        # "Where snapshots show up"): the full build_snapshot dicts, in
+        # marker order, numbered from 1, in the returned report AND in the
+        # JSON on disk (so the history DB, the upload and the addon file all
+        # inherit them without a second build).
+        from postmortem.cli import _write_recorded_reports
+        from postmortem.recorder import Recorder
+
+        log = tmp_path / "WoWCombatLog.txt"
+        log.write_text(_log_with_markers().text(), encoding="utf-8")
+        rec = Recorder(log_path=log, out_dir=tmp_path / "runs", from_start=True,
+                       echo=lambda s: None)
+        (run,) = rec.watch(stop_after_runs=1)
+        report = _write_recorded_reports(run, route=None, store=None)
+        snaps = report["snapshots"]
+        assert [s["n"] for s in snaps] == [1, 2]
+        assert [s["snapshot"]["role"] for s in snaps] == ["healer", "tank"]
+        assert [s["snapshot"]["t_marker"] for s in snaps] == [66.0, 110.5]
+        assert {"snapshot", "run", "players", "series", "focus", "around_marker"} <= set(snaps[0])
+        on_disk = json.loads(run.path.with_suffix(".json").read_text(encoding="utf-8"))
+        assert [s["n"] for s in on_disk["snapshots"]] == [1, 2]
+        # file n and snapshots[n-1] are the same window
+        page = run.path.with_name(f"{run.path.stem}-snapshot-2.html").read_text(encoding="utf-8")
+        assert "Snapshot (tank)" in page
+
+    def test_a_run_without_markers_carries_an_empty_list(self, tmp_path):
+        from postmortem.cli import _write_recorded_reports
+        from postmortem.recorder import Recorder
+
+        log = tmp_path / "WoWCombatLog.txt"
+        log.write_text(build_run_log().text(), encoding="utf-8")
+        rec = Recorder(log_path=log, out_dir=tmp_path / "runs", from_start=True,
+                       echo=lambda s: None)
+        (run,) = rec.watch(stop_after_runs=1)
+        report = _write_recorded_reports(run, route=None, store=None)
+        assert report["snapshots"] == []
+
     def test_snapshot_failure_never_costs_the_run_its_reports(self, tmp_path, monkeypatch):
         from postmortem import cli as cli_module
         from postmortem.recorder import Recorder
@@ -459,3 +498,66 @@ class TestRecordedReports:
         base = run.path.with_suffix("")
         assert Path(f"{base}.html").exists()
         assert not list(base.parent.glob(f"{base.name}-snapshot-*"))
+        # the key is still there, just empty: consumers never need to
+        # distinguish "failed" from "none"
+        assert report["snapshots"] == []
+
+    def test_cli_analyze_json_carries_snapshots_too(self, marked_log_file, tmp_path, capsys):
+        out_dir = tmp_path / "reports"
+        main(["analyze", str(marked_log_file), "--format", "json", "--out", str(out_dir)])
+        capsys.readouterr()
+        (out,) = out_dir.glob("*.json")
+        report = json.loads(out.read_text(encoding="utf-8"))
+        assert [s["snapshot"]["role"] for s in report["snapshots"]] == ["healer", "tank"]
+
+
+class TestHeadline:
+    """snapshot_headline: the one sentence per snapshot every list of them
+    (app strip, History tag tooltip, in-game window, site) shares."""
+
+    def _snap(self, marked_run, t, **kw):
+        return build_snapshot(marked_run, marked_run.start_ts + t, **kw)
+
+    def test_healer_line(self, marked_run):
+        snap = self._snap(marked_run, 66.0)
+        snap["n"] = 1
+        head = snapshot_headline(snap)
+        assert head["n"] == 1
+        assert head["role"] == "healer"
+        assert head["t"] == "1:06"
+        assert head["focus"] == snap["snapshot"]["focus_player"]
+        line = head["line"]
+        assert "effective healing" in line
+        assert "overheal" in line
+        assert "death" in line  # the healer dies at t=66 in the fixture
+        assert "\n" not in line
+
+    def test_tank_line(self, marked_run):
+        snap = self._snap(marked_run, 110.5)
+        head = snapshot_headline(snap)
+        assert head["role"] == "tank"
+        assert head["t"] == "1:50"
+        assert "DTPS" in head["line"]
+        assert "Shield of the Righteous up" in head["line"]
+
+    def test_general_line(self, marked_run):
+        snap = self._snap(marked_run, 66.0, role="general")
+        head = snapshot_headline(snap)
+        assert head["role"] == "general"
+        assert head["focus"] is None
+        assert "death" in head["line"] or "biggest hit" in head["line"]
+
+    def test_degrades_to_whatever_fields_exist(self):
+        # a healer marker with no healer in the window has a note instead
+        # of numbers: it falls through to the general sentence
+        head = snapshot_headline({
+            "n": 3,
+            "snapshot": {"role": "healer", "t_marker": 754.2, "focus_player": None},
+            "focus": {"role": "healer", "note": "no healer found in this window"},
+            "deaths": [], "close_calls": [], "around_marker": {"largest_hits": []},
+        })
+        assert head == {"n": 3, "role": "healer", "t": "12:34", "focus": None,
+                        "line": "a quiet window: no deaths, close calls or notable hits"}
+        # and nothing at all still returns the shape
+        assert set(snapshot_headline({})) == {"n", "role", "t", "focus", "line"}
+        assert snapshot_headline({})["t"] == "?"

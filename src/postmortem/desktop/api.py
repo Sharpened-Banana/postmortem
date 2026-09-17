@@ -118,6 +118,57 @@ document.addEventListener("click", function (e) {
 _CATCH_UP_LIMIT = 3
 
 
+def _snapshot_headlines(report: dict) -> list[dict]:
+    """``snapshot_headline`` for each of the report's snapshots -- what the
+    report screen's Snapshots strip labels its buttons with. Best-effort:
+    a snapshot the headline can't summarise still gets a button (role and
+    time only), and a report without the key gets an empty list."""
+    from ..analysis.snapshot import snapshot_headline
+
+    out = []
+    for i, snap in enumerate(report.get("snapshots") or [], start=1):
+        if not isinstance(snap, dict):
+            continue
+        try:
+            head = snapshot_headline(snap)
+        except Exception:
+            meta = snap.get("snapshot") or {}
+            head = {"n": snap.get("n"), "role": meta.get("role") or "general",
+                    "t": _mmss(meta.get("t_marker")), "focus": None, "line": ""}
+        if head.get("n") is None:
+            head["n"] = i
+        out.append(head)
+    return out
+
+
+def _render_report_snapshot(report: dict, n, label: Optional[str]) -> dict:
+    """``{"ok": True, "html", "label"}`` for ``report["snapshots"][n-1]``,
+    or ``{"ok": False, "error"}``; ``n`` arrives from JS so it is checked
+    rather than trusted. Never raises."""
+    try:
+        snapshots = report.get("snapshots") or []
+        try:
+            index = int(n)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "that is not a snapshot number"}
+        if not (1 <= index <= len(snapshots)):
+            return {"ok": False,
+                    "error": f"this run has {len(snapshots)} snapshot(s); "
+                             f"there is no snapshot {index}"}
+        snap = snapshots[index - 1]
+        from ..report.snapshot import render_snapshot_html
+        meta = snap.get("snapshot") or {}
+        role = meta.get("role") or "general"
+        return {
+            "ok": True,
+            "html": render_snapshot_html(snap),
+            "label": f"{label or 'Run'} — Snapshot {index} ({role} at "
+                     f"{_mmss(meta.get('t_marker'))})",
+        }
+    except Exception as exc:  # never raise across the bridge
+        return {"ok": False, "error": f"could not render that snapshot: {exc}"}
+
+
 def _snapshot_seconds(value, default: int, lo: int, hi: int) -> int:
     """A snapshot window setting as a clamped int; anything unusable is
     the default (settings.json is user-editable)."""
@@ -248,6 +299,12 @@ class DesktopAPI:
         # open a run by ref, never by path, so a script in that frame can
         # only ever open something this class itself just listed.
         self._history_refs: dict[str, tuple[str, str, Optional[int]]] = {}
+        # The report behind the report screen right now -- what analyze()
+        # produced or open_history_run() loaded last. The Snapshots strip
+        # asks for one of its snapshots by number (open_report_snapshot),
+        # by number rather than by shipping the report back over the
+        # bridge: with map art embedded a report is megabytes.
+        self._last_report: Optional[dict] = None
 
     # -- run listing --------------------------------------------------------
 
@@ -455,10 +512,21 @@ class DesktopAPI:
             _config.load_settings().get("wow_log_path") or ""
         )
         mapart.attach_map_backgrounds(report, mdt_dir, store)
+        # The run's snapshots ride inside the report (report["snapshots"],
+        # docs/SNAPSHOT.md) -- the same contract Watch Live's
+        # _write_recorded_reports keeps -- so the saved JSON, the history
+        # row and an upload all carry them. Best-effort inside.
+        _cli.attach_snapshots(
+            report, segment, store=store, avoidable=avoidable,
+            interrupt_data=interrupt_data, stealable=stealable,
+            pull_gap_seconds=float(params.get("pull_gap_seconds", DEFAULT_PULL_GAP_S)),
+        )
 
         html = render_html(report)
         saved = self._save_report_locally(report, html)
-        return {"ok": True, "report": report, "html": html, "saved": saved}
+        self._last_report = report
+        return {"ok": True, "report": report, "html": html, "saved": saved,
+                "snapshot_headlines": _snapshot_headlines(report)}
 
     def _save_report_locally(self, report: dict, html: str) -> Optional[dict]:
         """Best-effort: write this analyzed report's JSON/HTML next to
@@ -611,9 +679,38 @@ class DesktopAPI:
                 part for part in (run.get("zone"), f"+{level}" if level is not None else None)
                 if part
             )
-            return {"ok": True, "html": render_html(report), "report": report, "label": label}
+            self._last_report = report
+            return {"ok": True, "html": render_html(report), "report": report,
+                    "label": label, "snapshot_headlines": _snapshot_headlines(report)}
         except Exception as exc:  # never raise across the bridge
             return {"ok": False, "error": f"could not open that run: {exc}"}
+
+    def open_history_snapshot(self, ref: str, n: int) -> dict:
+        """Render snapshot ``n`` (1-based) of a run the last
+        ``list_history()`` call listed -- the run's ``report["snapshots"]``
+        (docs/SNAPSHOT.md), not a loose file. Returns ``{"ok": True,
+        "html", "label"}`` or ``{"ok": False, "error"}``. Never raises."""
+        opened = self.open_history_run(ref)
+        if not opened.get("ok"):
+            return opened
+        return _render_report_snapshot(opened["report"], n, opened.get("label"))
+
+    def open_report_snapshot(self, n: int) -> dict:
+        """Render snapshot ``n`` (1-based) of the report the report screen
+        is showing -- the last analyze() or open_history_run() result, so
+        the Snapshots strip works the same after New Analysis and from
+        History. ``{"ok": True, "html", "label"}`` or ``{"ok": False,
+        "error"}``. Never raises."""
+        report = self._last_report
+        if not isinstance(report, dict):
+            return {"ok": False, "error": "no report is open -- analyze a run first"}
+        run = report.get("run") or {}
+        level = run.get("keystone_level")
+        label = " ".join(
+            part for part in (run.get("zone"), f"+{level}" if level is not None else None)
+            if part
+        )
+        return _render_report_snapshot(report, n, label)
 
     # -- public tracker upload -----------------------------------------------
 

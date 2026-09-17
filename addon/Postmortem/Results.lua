@@ -147,6 +147,33 @@ local function BuildOffendersLines(r)
   return table.concat(lines, "\n")
 end
 
+-- "Snapshots" section: the moments the player marked in-game with the
+-- snapshot keybind (Snapshot.lua, docs/SNAPSHOT.md), one headline each as
+-- the desktop app summarised them -- "12:34  healer -- <line>". The full
+-- page for each lives in the app; this is the pointer that it exists.
+-- Nil when the run had none, so the section takes no height.
+local function BuildSnapshotLines(r)
+  local snaps = r.snapshots
+  if type(snaps) ~= "table" or #snaps == 0 then return nil end
+  local lines = { "Snapshots:" }
+  for i = 1, math.min(6, #snaps) do
+    local s = snaps[i]
+    local line = s.line
+    if type(line) ~= "string" or line == "" then line = "(no summary)" end
+    table.insert(lines, string.format(
+      "  %s  %s -- %s", tostring(s.t or "?"), tostring(s.role or "general"), line
+    ))
+  end
+  if #snaps > 6 then
+    table.insert(lines, string.format("  (+%d more in the desktop app)", #snaps - 6))
+  end
+  return table.concat(lines, "\n")
+end
+
+-- Exposed for the offline harness (addon/tests/results_window.lua); the
+-- live window only ever calls it through Results_Show.
+MA.Results_BuildSnapshotLines = BuildSnapshotLines
+
 local TITLE_BAR_HEIGHT = 40
 local BUTTON_HEIGHT = 22
 
@@ -234,9 +261,18 @@ local function CreateResultsFrame()
   offendersFS:SetSpacing(4)
   f.offendersFS = offendersFS
 
+  local snapshotsFS = f:CreateFontString(nil, "OVERLAY")
+  snapshotsFS:SetFontObject(GameFontHighlightSmall)
+  snapshotsFS:SetPoint("TOPLEFT", offendersFS, "BOTTOMLEFT", 0, -14)
+  snapshotsFS:SetPoint("RIGHT", f, "RIGHT", -16, 0)
+  snapshotsFS:SetJustifyH("LEFT")
+  snapshotsFS:SetJustifyV("TOP")
+  snapshotsFS:SetSpacing(4)
+  f.snapshotsFS = snapshotsFS
+
   local footerFS = f:CreateFontString(nil, "OVERLAY")
   footerFS:SetFontObject(GameFontDisableSmall)
-  footerFS:SetPoint("TOPLEFT", offendersFS, "BOTTOMLEFT", 0, -14)
+  footerFS:SetPoint("TOPLEFT", snapshotsFS, "BOTTOMLEFT", 0, -14)
   footerFS:SetPoint("RIGHT", f, "RIGHT", -16, 0)
   footerFS:SetJustifyH("LEFT")
   footerFS:SetText("Full breakdown (route, pulls, per-pull damage) is on the site "
@@ -279,6 +315,7 @@ function MA:Results_Show()
   -- side (absent when not computed).
   f.missedKicksFS:SetText(BuildMissedKicksLines(r) or "")
   f.offendersFS:SetText(BuildOffendersLines(r) or "")
+  f.snapshotsFS:SetText(BuildSnapshotLines(r) or "")
 
   -- Height from the actual rendered content (same approach as
   -- InfoWindow.lua): every FontString has its final SetText and its
@@ -288,6 +325,7 @@ function MA:Results_Show()
     + 14 + f.playersFS:GetStringHeight()
     + 14 + f.missedKicksFS:GetStringHeight()
     + 14 + f.offendersFS:GetStringHeight()
+    + 14 + f.snapshotsFS:GetStringHeight()
     + 14 + f.footerFS:GetStringHeight()
     + 14 + BUTTON_HEIGHT + 12
   f:SetHeight(totalHeight)
