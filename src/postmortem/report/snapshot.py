@@ -324,10 +324,15 @@ def _table(headers: list[tuple[str, bool]], rows: list[list[Any]]) -> str:
     body = []
     for row in rows:
         cells = []
-        for (_h, num), cell in zip(headers, row):
-            cells.append(f'<td class="num">{_esc(cell)}</td>' if num else f"<td>{_esc(cell)}</td>")
+        for (h, num), cell in zip(headers, row):
+            label = f' data-l="{_esc(h)}"'
+            cells.append(f'<td class="num"{label}>{_esc(cell)}</td>' if num
+                         else f"<td{label}>{_esc(cell)}</td>")
         body.append("<tr>" + "".join(cells) + "</tr>")
-    return f'<div class="wrap"><table><tr>{head}</tr>{"".join(body)}</table></div>'
+    # Five or more columns cannot survive a phone as a table; the brand
+    # block's phone rules turn a .cards table into labelled cards.
+    cls = ' class="cards"' if len(headers) >= 5 else ""
+    return f'<div class="wrap"><table{cls}><tr>{head}</tr>{"".join(body)}</table></div>'
 
 
 def _stat(value: Any, label: str) -> str:
