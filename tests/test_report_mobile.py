@@ -27,14 +27,14 @@ def test_every_section_is_a_details_with_its_h2_as_summary(real_report):  # noqa
     assert out.count("<summary><h2>") >= 6
     # every top-level section h2 is a summary; sections may nest their own
     assert out.count("<h2>") >= out.count("<summary><h2>")
-    assert "<summary><h2>Players</h2></summary>" in out
+    assert '<summary><h2><span class="sec-title">Players</span><button type="button" class="sec-toggle"' in out
 
 
 def test_index_has_one_chip_per_section_pointing_at_it(real_report):  # noqa: F811
     out = _rendered(real_report)
     n = out.count('<details class="sec" open id="sec-')
     assert out.count('<a href="#sec-') == n
-    assert 'href="#sec-1">Pull timeline</a>' in out
+    assert 'href="#sec-pull-timeline">Pull timeline</a>' in out
     # the enemy-casts title drops its "(n kicks total)" tail in the chip
     assert ">Enemy casts — kicked vs got through</a>" in out
 
@@ -57,7 +57,7 @@ def test_phone_rules_are_media_gated_and_desktop_hides_the_wrapper():
     css = render_html({"run": {}, "dungeon": {"name": "x"}})
     css = css[css.index("<style>"):css.index("</style>")]
     at = css.index("@media (max-width: 720px)")
-    assert css.index("details.sec > summary { list-style: none; cursor: default; pointer-events: none; }") < at
+    assert css.index("details.sec > summary { list-style: none; cursor: pointer; }") < at
     assert css.index(".sec-index { display: none; }") < at
     assert css.index(".tl-stack { display: none; }") < at
     for rule in ("table.cards tr:first-child { display: none; }",

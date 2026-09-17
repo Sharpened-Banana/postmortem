@@ -101,14 +101,37 @@ summary { cursor: pointer; }
 .map-wrap { padding: 0; }
 .map-wrap svg { display: block; width: 100%; height: auto; max-height: 560px;
   background: var(--panel2); }
-/* Every section is a <details> whose summary is its h2. On desktop that
-   is invisible: no marker, no pointer, always open. On a phone the
-   summary is a tap target and the sticky index below the stats jumps
-   between sections, so 13 tables are navigable rather than a scroll. */
+/* Every section is a <details> whose summary is its h2, so a reader can
+   fold away the tables they are not reading. The h2 carries a real
+   <button> (aria-expanded / aria-controls, keyboard-focusable) as the
+   chevron; clicking anywhere on the heading toggles too. Collapsed
+   sections are remembered in localStorage by section id. On a phone the
+   sticky index below the stats jumps between sections, so 13 tables are
+   navigable rather than a scroll. The native marker is hidden: the
+   button is the only affordance. */
 details.sec { margin: 0; }
-details.sec > summary { list-style: none; cursor: default; pointer-events: none; }
+details.sec > summary { list-style: none; cursor: pointer; }
 details.sec > summary::-webkit-details-marker { display: none; }
-details.sec > summary h2 { display: block; }
+details.sec > summary h2 { display: flex; align-items: center;
+  justify-content: space-between; gap: 10px; }
+details.sec > summary .sec-title { min-width: 0; }
+details.sec:not([open]) > summary h2 { color: var(--dim); }
+.sec-toggle, .sec-all { font-family: var(--mono); background: var(--panel);
+  color: var(--dim); border: 1px solid var(--line); border-radius: 999px;
+  cursor: pointer; line-height: 1; }
+.sec-toggle:hover, .sec-all:hover { color: var(--accent); border-color: var(--accent-dim); }
+.sec-toggle:focus-visible, .sec-all:focus-visible { outline: 2px solid var(--accent);
+  outline-offset: 2px; }
+.sec-toggle { flex: none; width: 28px; height: 28px; padding: 0; font-size: 12px;
+  display: inline-flex; align-items: center; justify-content: center; }
+.sec-toggle::before { content: "\\25BE"; }
+details.sec:not([open]) > summary .sec-toggle::before { content: "\\25B8"; }
+/* Collapse all / expand all, above the sections (and above the phone's
+   sticky index). Same pill vocabulary as the index chips. */
+.sec-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  justify-content: flex-end; margin: 16px 0 -12px; }
+.sec-all { font-size: 11px; text-transform: uppercase; letter-spacing: .12em;
+  padding: 6px 12px; }
 .sec-index { display: none; }
 /* The pull timeline as one row per pull, same time axis: shown on a
    phone in place of the single hover-only strip (no hover on a phone). */
@@ -126,12 +149,11 @@ details.sec > summary h2 { display: block; }
     border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px;
     text-decoration: none; white-space: nowrap; }
   .sec-index a:active { color: var(--accent); border-color: var(--accent); }
-  details.sec > summary { cursor: pointer; pointer-events: auto; position: relative; }
-  details.sec > summary h2 { padding-right: 24px; }
-  details.sec > summary::after { content: "\\25BE"; position: absolute; right: 4px;
-    top: 34px; color: var(--dim); font-size: 12px; }
-  details.sec:not([open]) > summary::after { content: "\\25B8"; }
-  details.sec:not([open]) > summary h2 { color: var(--dim); }
+  /* the chevron button grows to a thumb-sized target without growing
+     the heading: negative vertical margin eats the extra height */
+  .sec-toggle { width: 40px; height: 40px; margin: -8px 0; font-size: 14px; }
+  .sec-controls { justify-content: flex-start; margin: 14px 0 0; }
+  .sec-all { padding: 8px 14px; }
   /* timeline: one row per pull */
   .tl-row { display: none; }
   .tl-stack { display: block; }
@@ -261,7 +283,8 @@ function render() {
     ${R.death_cost && R.death_cost.deaths ? stat("-" + mmss(R.death_cost.total_s), "timer lost to deaths") : ""}
   </div>`;
 
-  sectionCount = 0;
+  sectionIds = {};
+  collapsed = loadCollapsed();
   const sections = [
     timeline(), playersTable(), avoidableDamage(),
     (R.comparison && !R.comparison.error) ? comparison()
@@ -269,33 +292,103 @@ function render() {
     mapSection(), pullsTable(), enemyCasts(), dispelEfficiency(), encounters(),
     deaths(), closeCalls(), utility(), downtime(),
   ].filter(Boolean).map(section);
+  html += `<div class="sec-controls">`
+    + `<button type="button" class="sec-all" data-all="collapse">Collapse all</button>`
+    + `<button type="button" class="sec-all" data-all="expand">Expand all</button></div>`;
   html += `<nav class="sec-index">${sections.map(x => `<a href="#${x.id}">${x.title}</a>`).join("")}</nav>`;
   html += sections.map(x => x.html).join("");
   const app = document.getElementById("app");
   app.innerHTML = html;
-  // Tapping an index chip opens a section the reader had collapsed, so the
-  // jump never lands on a closed summary. Delegated, no inline handlers
-  // (the public site names this script's hash in its CSP).
-  if (app.addEventListener) app.addEventListener("click", ev => {
-    const chip = ev.target.closest && ev.target.closest(".sec-index a[href^='#']");
+  wireSections(app);
+}
+
+// Section folding. Delegated on #app, no inline handlers (the public site
+// names this script's hash in its CSP), and attached once even if render()
+// runs again. Every path that changes a section goes through the native
+// <details> open state, so the "toggle" event is the one place that keeps
+// the button's aria-expanded and localStorage in step.
+let sectionsWired = false;
+function wireSections(app) {
+  if (sectionsWired || !app.addEventListener) return;
+  sectionsWired = true;
+  app.addEventListener("click", ev => {
+    const at = ev.target.closest ? ev.target : null;
+    if (!at) return;
+    const toggle = at.closest(".sec-toggle");
+    if (toggle) {
+      // The button sits inside the <summary>; handle it here and stop the
+      // summary's own activation so the click toggles exactly once.
+      ev.preventDefault();
+      const d = toggle.closest("details.sec");
+      if (d) d.open = !d.open;
+      return;
+    }
+    const all = at.closest(".sec-all");
+    if (all) {
+      const open = all.getAttribute("data-all") === "expand";
+      app.querySelectorAll("details.sec").forEach(d => { d.open = open; });
+      return;
+    }
+    // Tapping an index chip opens a section the reader had collapsed, so
+    // the jump never lands on a closed summary.
+    const chip = at.closest(".sec-index a[href^='#']");
     if (!chip) return;
     const target = document.getElementById(chip.getAttribute("href").slice(1));
     if (target && target.tagName === "DETAILS") target.open = true;
   });
+  // "toggle" does not bubble; capture it on the container instead.
+  app.addEventListener("toggle", ev => {
+    const d = ev.target;
+    if (!d || !d.classList || !d.classList.contains("sec")) return;
+    const btn = d.querySelector(".sec-toggle");
+    if (btn) {
+      btn.setAttribute("aria-expanded", d.open ? "true" : "false");
+      const t = d.querySelector(".sec-title");
+      btn.setAttribute("aria-label", (d.open ? "Collapse " : "Expand ") + (t ? t.textContent.trim() : "section"));
+    }
+    const map = loadCollapsed();
+    if (d.open) delete map[d.id]; else map[d.id] = 1;
+    saveCollapsed(map);
+  }, true);
 }
 
-// One report section: an h2 followed by its content, wrapped so a phone
-// can collapse it and the index can jump to it. Desktop CSS makes the
-// wrapper invisible. Section titles are the h2's own text, which came
-// through deTag() like everything else.
-let sectionCount = 0;  // reset per render() so ids are stable
+// Which sections the reader folded away last time, keyed by section id
+// (which is the section's slugged title, so it survives across reports).
+// Storage can be missing (the node test harness, private windows, a
+// webview with storage off) or throw on access; either way the report
+// simply renders fully expanded.
+const COLLAPSED_KEY = "postmortem.report.collapsed";
+let collapsed = {};
+function loadCollapsed() {
+  try {
+    const v = JSON.parse(localStorage.getItem(COLLAPSED_KEY) || "{}");
+    return v && typeof v === "object" && !Array.isArray(v) ? v : {};
+  } catch (e) { return {}; }
+}
+function saveCollapsed(map) {
+  try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify(map)); } catch (e) {}
+}
+
+// One report section: an h2 followed by its content, wrapped so it can be
+// collapsed and the index can jump to it. Section titles are the h2's own
+// text, which came through deTag() like everything else; the id is the
+// title slugged ("sec-pull-timeline"), numbered only on a repeat, so the
+// same section keeps the same id from one report to the next.
+let sectionIds = {};  // reset per render()
 function section(html) {
   const m = /^<h2>([\\s\\S]*?)<\\/h2>/.exec(html);
   if (!m) return { id: "", title: "", html };
-  const id = "sec-" + (++sectionCount);
   const title = m[1].replace(/<[^>]*>/g, "").replace(/\\s*\\(.*$/, "").trim();
-  return { id, title, html: `<details class="sec" open id="${id}"><summary><h2>${m[1]}</h2></summary>`
-    + html.slice(m[0].length) + `</details>` };
+  const base = "sec-" + (title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "section");
+  const n = (sectionIds[base] || 0) + 1;
+  sectionIds[base] = n;
+  const id = n === 1 ? base : `${base}-${n}`;
+  const open = !collapsed[id];
+  const button = `<button type="button" class="sec-toggle" aria-expanded="${open ? "true" : "false"}"`
+    + ` aria-controls="${id}-body" aria-label="${open ? "Collapse" : "Expand"} ${esc(title)}"></button>`;
+  return { id, title, html: `<details class="sec"${open ? " open" : ""} id="${id}">`
+    + `<summary><h2><span class="sec-title">${m[1]}</span>${button}</h2></summary>`
+    + `<div class="sec-body" id="${id}-body">` + html.slice(m[0].length) + `</div></details>` };
 }
 
 const stat = (v, l) => `<div class="stat"><div class="v">${esc(v)}</div><div class="l">${esc(l)}</div></div>`;
