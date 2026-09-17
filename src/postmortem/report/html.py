@@ -101,6 +101,67 @@ summary { cursor: pointer; }
 .map-wrap { padding: 0; }
 .map-wrap svg { display: block; width: 100%; height: auto; max-height: 560px;
   background: var(--panel2); }
+/* Every section is a <details> whose summary is its h2. On desktop that
+   is invisible: no marker, no pointer, always open. On a phone the
+   summary is a tap target and the sticky index below the stats jumps
+   between sections, so 13 tables are navigable rather than a scroll. */
+details.sec { margin: 0; }
+details.sec > summary { list-style: none; cursor: default; pointer-events: none; }
+details.sec > summary::-webkit-details-marker { display: none; }
+details.sec > summary h2 { display: block; }
+.sec-index { display: none; }
+/* The pull timeline as one row per pull, same time axis: shown on a
+   phone in place of the single hover-only strip (no hover on a phone). */
+.tl-stack { display: none; }
+@media (max-width: 720px) {
+  body { padding: 16px; }
+  h1 { font-size: 28px; }
+  .wrap { padding: 4px 2px; }
+  th, td { padding: 5px 8px; }
+  /* section index: a sticky strip of chips */
+  .sec-index { display: flex; flex-wrap: wrap; gap: 6px; position: sticky;
+    top: 0; z-index: 5; background: var(--bg); padding: 10px 0 8px;
+    margin-top: 10px; border-bottom: 1px solid var(--line); }
+  .sec-index a { font-size: 11px; letter-spacing: .04em; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px;
+    text-decoration: none; white-space: nowrap; }
+  .sec-index a:active { color: var(--accent); border-color: var(--accent); }
+  details.sec > summary { cursor: pointer; pointer-events: auto; position: relative; }
+  details.sec > summary h2 { padding-right: 24px; }
+  details.sec > summary::after { content: "\\25BE"; position: absolute; right: 4px;
+    top: 34px; color: var(--dim); font-size: 12px; }
+  details.sec:not([open]) > summary::after { content: "\\25B8"; }
+  details.sec:not([open]) > summary h2 { color: var(--dim); }
+  /* timeline: one row per pull */
+  .tl-row { display: none; }
+  .tl-stack { display: block; }
+  .tl-srow { display: flex; align-items: center; gap: 8px; height: 20px; }
+  .tl-slabel { flex: none; width: 34px; font-size: 11px; color: var(--dim);
+    text-align: right; font-variant-numeric: tabular-nums; }
+  .tl-slabel.boss { color: var(--accent); }
+  .tl-strack { flex: 1; position: relative; height: 20px; min-width: 0; }
+  .tl-strack .tl-pull { top: 3px; height: 14px; }
+  .tl-strack .tl-death, .tl-strack .tl-lust { height: 20px; }
+  .tl-axis { margin-left: 42px; }
+  .legend { line-height: 1.9; }
+  /* wide tables as cards: header row hidden, cells labelled by data-l */
+  table.cards, table.cards tbody, table.cards tr, table.cards td { display: block; }
+  table.cards tr:first-child { display: none; }
+  table.cards tr { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 10px;
+    padding: 10px 8px; border-bottom: 1px solid var(--line); }
+  table.cards tr:last-child { border-bottom: none; }
+  table.cards td, table.cards td.num { padding: 0; border: 0; white-space: normal;
+    text-align: left; min-width: 0; overflow-wrap: anywhere; }
+  table.cards td:first-child, table.cards td[colspan], table.cards td.wide { grid-column: 1 / -1; }
+  table.cards td:first-child:not([data-l]) { color: var(--text); font-weight: 600;
+    font-size: 14.5px; }
+  table.cards td[data-l]::before { content: attr(data-l); display: block;
+    color: var(--dim); font-size: 10px; text-transform: uppercase; letter-spacing: .12em; }
+  table.cards.list tr { grid-template-columns: 1fr; }
+  table.cards.players td:nth-child(2) { grid-column: 1 / -1; margin: -2px 0 4px; }
+  table.cards tr.stealable { box-shadow: inset 3px 0 0 var(--steal); }
+  .map-wrap svg { max-height: 70vh; }
+}
 </style>
 </head>
 <body>
@@ -200,21 +261,41 @@ function render() {
     ${R.death_cost && R.death_cost.deaths ? stat("-" + mmss(R.death_cost.total_s), "timer lost to deaths") : ""}
   </div>`;
 
-  html += timeline();
-  html += playersTable();
-  html += avoidableDamage();
-  if (R.comparison && !R.comparison.error) html += comparison();
-  else if (R.route) html += `<h2>Route</h2><div class="dim">${esc((R.comparison||{}).error || "")}</div>` + routeOnly();
-  html += mapSection();
-  html += pullsTable();
-  html += enemyCasts();
-  html += dispelEfficiency();
-  html += encounters();
-  html += deaths();
-  html += closeCalls();
-  html += utility();
-  html += downtime();
-  document.getElementById("app").innerHTML = html;
+  sectionCount = 0;
+  const sections = [
+    timeline(), playersTable(), avoidableDamage(),
+    (R.comparison && !R.comparison.error) ? comparison()
+      : (R.route ? `<h2>Route</h2><div class="dim">${esc((R.comparison||{}).error || "")}</div>` + routeOnly() : ""),
+    mapSection(), pullsTable(), enemyCasts(), dispelEfficiency(), encounters(),
+    deaths(), closeCalls(), utility(), downtime(),
+  ].filter(Boolean).map(section);
+  html += `<nav class="sec-index">${sections.map(x => `<a href="#${x.id}">${x.title}</a>`).join("")}</nav>`;
+  html += sections.map(x => x.html).join("");
+  const app = document.getElementById("app");
+  app.innerHTML = html;
+  // Tapping an index chip opens a section the reader had collapsed, so the
+  // jump never lands on a closed summary. Delegated, no inline handlers
+  // (the public site names this script's hash in its CSP).
+  if (app.addEventListener) app.addEventListener("click", ev => {
+    const chip = ev.target.closest && ev.target.closest(".sec-index a[href^='#']");
+    if (!chip) return;
+    const target = document.getElementById(chip.getAttribute("href").slice(1));
+    if (target && target.tagName === "DETAILS") target.open = true;
+  });
+}
+
+// One report section: an h2 followed by its content, wrapped so a phone
+// can collapse it and the index can jump to it. Desktop CSS makes the
+// wrapper invisible. Section titles are the h2's own text, which came
+// through deTag() like everything else.
+let sectionCount = 0;  // reset per render() so ids are stable
+function section(html) {
+  const m = /^<h2>([\\s\\S]*?)<\\/h2>/.exec(html);
+  if (!m) return { id: "", title: "", html };
+  const id = "sec-" + (++sectionCount);
+  const title = m[1].replace(/<[^>]*>/g, "").replace(/\\s*\\(.*$/, "").trim();
+  return { id, title, html: `<details class="sec" open id="${id}"><summary><h2>${m[1]}</h2></summary>`
+    + html.slice(m[0].length) + `</details>` };
 }
 
 const stat = (v, l) => `<div class="stat"><div class="v">${esc(v)}</div><div class="l">${esc(l)}</div></div>`;
@@ -256,8 +337,22 @@ function timeline() {
   const step = span > 2400 ? 600 : span > 1200 ? 300 : 120;
   for (let t = 0; t <= span; t += step)
     axis += `<span style="left:${x(t)}">${mmss(t)}</span>`;
+  // Phone layout: the same bars, one row per pull, so each pull is
+  // readable without hover. Deaths and lusts sit on the pull they fell in.
+  const within = (t, p) => t >= p.t_start && t <= p.t_end;
+  const stack = pulls.map(p => {
+    const w = Math.max(0.15, 100 * (p.t_end - p.t_start) / span).toFixed(2) + "%";
+    const cls = "tl-pull" + (p.boss ? " boss" : "") + (devByPull[p.pull] ? " dev" : "");
+    const marks = (R.deaths||[]).filter(d => within(d.t, p)).map(d =>
+        `<div class="tl-death" style="left:${x(d.t)}"></div>`).join("")
+      + (R.lust||[]).filter(l => within(l.t, p)).map(l =>
+        `<div class="tl-lust" style="left:${x(l.t)}"></div>`).join("");
+    return `<div class="tl-srow"><span class="tl-slabel${p.boss ? " boss" : ""}" title="${esc(p.boss || "")}">${plain(p.pull)}</span>`
+      + `<div class="tl-strack"><div class="${cls}" style="left:${x(p.t_start)};width:${w}"></div>${marks}</div></div>`;
+  }).join("");
   return `<h2>Pull timeline</h2><div class="timeline">
     <div class="tl-row">${bars}${deaths}${lust}</div>
+    <div class="tl-stack">${stack}</div>
     <div class="tl-axis">${axis}</div>
     <div class="legend">hover a bar for pack details
       <i style="background:var(--blue)"></i>trash pull
@@ -274,17 +369,17 @@ function playersTable() {
   const rows = players.map(p => `<tr>
     <td>${esc(p.name || p.guid)}</td>
     <td class="dim">${esc([p.spec, p.class].filter(Boolean).join(" ") || "?")}${p.raiderio && p.raiderio.score ? ` <span title="Raider.io M+ score">· ${Math.round(p.raiderio.score)} io</span>` : ""}</td>
-    <td class="num">${num(p.dps)}</td><td class="num">${num(p.hps)}</td>
-    <td class="num">${num(p.damage_done)}</td>
-    <td class="num">${num(p.healing_done)}</td>
-    <td class="num">${num(p.absorbs_granted)}</td>
-    <td class="num">${num(p.damage_taken)}</td>
-    <td class="num">${p.interrupts}</td>
-    <td class="num" title="estimated damage + healing prevented by this player's interrupts">${(p.kick_prevented_damage || p.kick_prevented_healing) ? "~" + num((p.kick_prevented_damage||0) + (p.kick_prevented_healing||0)) : ""}</td>
-    <td class="num">${(p.dispels||0) + (p.purges||0)}</td>
-    <td class="num">${p.killing_blows ?? ""}</td>
-    <td class="num">${p.cpm ?? ""}</td>
-    <td class="num${p.deaths ? ' dev-off' : ''}">${p.deaths}</td></tr>
+    <td class="num" data-l="DPS">${num(p.dps)}</td><td class="num" data-l="HPS">${num(p.hps)}</td>
+    <td class="num" data-l="Damage">${num(p.damage_done)}</td>
+    <td class="num" data-l="Healing">${num(p.healing_done)}</td>
+    <td class="num" data-l="Absorbs">${num(p.absorbs_granted)}</td>
+    <td class="num" data-l="Taken">${num(p.damage_taken)}</td>
+    <td class="num" data-l="Kicks">${p.interrupts}</td>
+    <td class="num" data-l="Kick prev." title="estimated damage + healing prevented by this player's interrupts">${(p.kick_prevented_damage || p.kick_prevented_healing) ? "~" + num((p.kick_prevented_damage||0) + (p.kick_prevented_healing||0)) : ""}</td>
+    <td class="num" data-l="Dispels">${(p.dispels||0) + (p.purges||0)}</td>
+    <td class="num" data-l="KB">${p.killing_blows ?? ""}</td>
+    <td class="num" data-l="CPM">${p.cpm ?? ""}</td>
+    <td class="num${p.deaths ? ' dev-off' : ''}" data-l="Deaths">${p.deaths}</td></tr>
     <tr><td colspan="14" style="border-bottom:1px solid var(--line)">
       <details><summary class="dim">top abilities & buffs</summary>
       <div class="dim">Damage: ${(p.top_damage_spells||[]).slice(0,8).map(s => `${esc(s.name)} ${num(s.total)}`).join(" · ")}</div>
@@ -295,7 +390,7 @@ function playersTable() {
       ${(p.potions_used || p.healthstones_used || p.distance_traveled) ? `<div class="dim">${p.potions_used ? p.potions_used + " potions · " : ""}${p.healthstones_used ? p.healthstones_used + " healthstones · " : ""}${p.distance_traveled ? "~" + num(p.distance_traveled) + " yd traveled" : ""}</div>` : ""}
       ${buildDetail(p)}
       </details></td></tr>`).join("");
-  return `<h2>Players</h2><div class="wrap"><table>
+  return `<h2>Players</h2><div class="wrap"><table class="cards players">
     <tr><th>Player</th><th>Spec</th><th class="num">DPS</th><th class="num">HPS</th>
     <th class="num">Damage</th><th class="num">Healing</th><th class="num">Absorbs</th>
     <th class="num">Taken</th><th class="num">Kicks</th>
@@ -509,7 +604,7 @@ function pullsTable() {
     <td class="num">${num(p.group_damage)}</td>
     <td class="num${p.player_deaths ? ' dev-off' : ''}">${p.player_deaths || ""}</td>
     <td>${p.boss ? `<b>${esc(p.boss)}</b>` : ""}</td>
-    <td style="white-space:normal" class="dim">${npcs(p.npcs)}</td></tr>`).join("");
+    <td class="txt dim">${npcs(p.npcs)}</td></tr>`).join("");
   return `<h2>Pulls</h2><div class="wrap"><table>
     <tr><th class="num">#</th><th>Window</th><th class="num">Length</th>
     <th class="num">Mobs</th><th class="num">Forces</th><th class="num">Group dmg</th>
@@ -525,7 +620,7 @@ function enemyCasts() {
   const spells = all.filter((s, i) => i < 15 || s.kicked > 0);
   const kickedTotal = spells.reduce((n, s) => n + s.kicked, 0);
   const anyStealable = spells.some(s => s.stealable);
-  return `<h2>Enemy casts — kicked vs got through <span class="dim" style="font-weight:400;font-size:13px">(${kickedTotal} kick${kickedTotal === 1 ? "" : "s"} total)</span></h2><div class="wrap"><table>
+  return `<h2>Enemy casts — kicked vs got through <span class="dim" style="font-weight:400;font-size:13px">(${kickedTotal} kick${kickedTotal === 1 ? "" : "s"} total)</span></h2><div class="wrap"><table class="cards">
     <tr><th>Spell</th><th class="num">Got through</th><th class="num">Kicked</th>
     <th class="num">Died mid-cast</th><th>Kick rate</th></tr>
     ${spells.map(s => {
@@ -534,9 +629,9 @@ function enemyCasts() {
       const cls = pct >= 70 ? "ok" : pct >= 30 ? "dev-early" : "dev-off";
       return `<tr class="${s.stealable ? "stealable" : ""}"${s.stealable ? ' title="Worth Spellstealing"' : ""}>
         <td>${esc(s.name)}</td>
-        <td class="num${s.got_through ? " dev-off" : ""}">${plain(s.got_through, "0")}</td>
-        <td class="num">${plain(s.kicked, "0")}</td><td class="num">${s.expired ? plain(s.expired, "") : ""}</td>
-        <td><span class="${cls}">${pct}%</span></td></tr>`;
+        <td class="num${s.got_through ? " dev-off" : ""}" data-l="Got through">${plain(s.got_through, "0")}</td>
+        <td class="num" data-l="Kicked">${plain(s.kicked, "0")}</td><td class="num" data-l="Died mid-cast">${s.expired ? plain(s.expired, "") : ""}</td>
+        <td data-l="Kick rate"><span class="${cls}">${pct}%</span></td></tr>`;
     }).join("")}</table></div>${anyStealable
       ? `<div class="legend"><i style="background:var(--steal)"></i>★ worth Spellstealing</div>` : ""}`;
 }
@@ -597,16 +692,16 @@ function deaths() {
       // "unknown" label on every such death
       defensive = `<span class="dim">—</span>`;
     }
-    return `<tr><td>${mmss(d.t)}</td><td>${esc(d.player)}</td>
-      <td class="num">${d.pull ?? ""}</td>
-      <td>${kb.spell ? `${esc(kb.spell)} from ${esc(kb.source)} for ${num(kb.amount)}` : '<span class="dim">?</span>'}</td>
-      <td class="num">${num(d.biggest_hit)}</td>
-      <td class="num">${num(d.damage_last_5s)}</td>
-      <td>${defensive}</td>
-      <td>${postMortem(d)}</td>
-      <td><details><summary class="dim">recap</summary>${recap}</details></td></tr>`;
+    return `<tr><td data-l="Time">${mmss(d.t)}</td><td data-l="Player">${esc(d.player)}</td>
+      <td class="num" data-l="Pull">${d.pull ?? ""}</td>
+      <td data-l="Killing blow">${kb.spell ? `${esc(kb.spell)} from ${esc(kb.source)} for ${num(kb.amount)}` : '<span class="dim">?</span>'}</td>
+      <td class="num" data-l="Biggest hit">${num(d.biggest_hit)}</td>
+      <td class="num" data-l="Last 5s">${num(d.damage_last_5s)}</td>
+      <td data-l="Defensive">${defensive}</td>
+      <td data-l="Post-mortem">${postMortem(d)}</td>
+      <td data-l="Last hits"><details><summary class="dim">recap</summary>${recap}</details></td></tr>`;
   }).join("");
-  return `<h2>Deaths</h2><div class="wrap"><table>
+  return `<h2>Deaths</h2><div class="wrap"><table class="cards list">
     <tr><th>Time</th><th>Player</th><th class="num">Pull</th><th>Killing blow</th>
       <th class="num">Biggest hit</th><th class="num">Last 5s</th><th>Defensive</th>
       <th>Post-mortem</th><th>Last hits</th></tr>
@@ -676,12 +771,12 @@ function postMortem(d) {
 function closeCalls() {
   const list = R.close_calls || [];
   if (!list.length) return "";
-  const rows = list.map(c => `<tr><td>${mmss(c.t)}</td><td>${esc(c.player)}</td>
-    <td class="num">${c.pull ?? ""}</td>
-    <td class="num dev-off">${c.hp_pct}%</td>
-    <td>${esc(c.spell)}</td><td>${esc(c.source)}</td>
-    <td class="num">${num(c.amount)}</td></tr>`).join("");
-  return `<h2>Close calls</h2><div class="wrap"><table>
+  const rows = list.map(c => `<tr><td data-l="Time">${mmss(c.t)}</td><td data-l="Player">${esc(c.player)}</td>
+    <td class="num" data-l="Pull">${c.pull ?? ""}</td>
+    <td class="num dev-off" data-l="HP left">${c.hp_pct}%</td>
+    <td data-l="Spell">${esc(c.spell)}</td><td data-l="Source">${esc(c.source)}</td>
+    <td class="num" data-l="Amount">${num(c.amount)}</td></tr>`).join("");
+  return `<h2>Close calls</h2><div class="wrap"><table class="cards list">
     <tr><th>Time</th><th>Player</th><th class="num">Pull</th><th class="num">HP left</th>
       <th>Spell</th><th>Source</th><th class="num">Amount</th></tr>
     ${rows}</table></div>`;
