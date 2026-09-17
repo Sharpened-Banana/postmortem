@@ -1543,13 +1543,24 @@ class DesktopAPI:
         this alike, since none of them are errors. Never raises.
         """
         try:
-            channel = str(_config.load_settings().get("update_channel") or "stable")
-            if channel not in _updater.CHANNELS:
-                channel = "stable"
+            channel = self._update_channel()
             return {"ok": True, "update": _updater.check_for_update(channel=channel),
                     "channel": channel}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+
+    @staticmethod
+    def _update_channel() -> str:
+        """The release channel from settings ("stable" unless the user
+        opted into "beta" -- docs/RELEASE_CHANNELS.md), falling back to
+        stable for anything unrecognised. Shared by check_for_update()
+        and start_update() so both resolve against the *same* channel:
+        the two used to disagree (start_update() re-resolved on the
+        stable default), which made every beta-channel update fail with
+        "no longer matches the published release" (2026-09-17).
+        """
+        channel = str(_config.load_settings().get("update_channel") or "stable")
+        return channel if channel in _updater.CHANNELS else "stable"
 
     def start_update(self, download_url: str) -> dict:
         """Start downloading and applying an update (the
@@ -1583,8 +1594,10 @@ class DesktopAPI:
                 # attacker who could choose the URL could otherwise also
                 # choose the digest it is checked against, which would
                 # make the check theatre. The URL is required to match
-                # what the API itself reports for the current release.
-                available = _updater.check_for_update()
+                # what the API itself reports for the current release --
+                # on the same channel the check ran on, or a beta build
+                # never matches the stable release it's compared against.
+                available = _updater.check_for_update(channel=self._update_channel())
                 if not available or available.get("download_url") != download_url:
                     self._emit_update_event({
                         "type": "failed",
