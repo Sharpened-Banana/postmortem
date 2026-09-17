@@ -242,6 +242,52 @@ select { background:var(--panel); color:var(--text); border:1px solid var(--line
 .run-detail .deaths { margin-top:6px; color:var(--dim); }
 .run-detail .deaths b { color:var(--text); font-weight:500; }
 .run-detail .open { float:right; margin-left:20px; }
+
+/* Phone: each row becomes a card on the same DOM (docs/MOBILE_PLAN.md
+   phase 2). The grid header turns into a strip of sort chips -- the
+   same elements, same click handler -- and the two score cells get
+   their column names from CSS since the header no longer sits above
+   them. Nothing above 720px changes. */
+@media (max-width:720px) {
+  body { padding:16px; }
+  h1 { font-size:28px; }
+  .board { min-width:0; }
+  .wrap { padding:0; }
+  .run-head { display:flex; flex-wrap:wrap; align-items:center; gap:6px;
+    padding:10px; border-bottom:1px solid var(--line); }
+  .run-head::before { content:"Sort by"; flex-basis:100%; font-size:10px;
+    letter-spacing:.14em; color:var(--dim); }
+  .run-head > div { padding:5px 11px; border:1px solid var(--line);
+    border-radius:999px; font-size:11px; letter-spacing:.06em;
+    color:var(--muted); min-height:30px; display:flex; align-items:center;
+    text-align:left; }
+  .run-head > div.static { display:none; }
+  .run-row { grid-template-columns:36px minmax(0,1fr) auto;
+    grid-template-areas:"rank dungeon time" "rank level level"
+      "affixes affixes affixes"; gap:2px 8px; padding:10px 10px 12px;
+    white-space:normal; min-height:0; }
+  .run-row .caret { display:none; }
+  .run-row .rank { grid-area:rank; align-self:start; font-size:18px;
+    line-height:1.2; }
+  .run-row .dungeon { grid-area:dungeon; font-size:15px; }
+  .run-row .level { grid-area:level; }
+  .run-row .time { grid-area:time; text-align:right; }
+  .run-row .affixes { grid-area:affixes; margin-top:4px; }
+  .run-row .party { grid-column:1 / -1; white-space:normal; overflow:visible;
+    text-overflow:clip; line-height:1.5; }
+  .run-row .party:empty { display:none; }
+  .run-row .score { margin-top:6px; padding:3px 9px; border:1px solid var(--line);
+    border-radius:4px; font-size:12px; text-align:left; background:var(--bg); }
+  .run-row .score::before { color:var(--dim); font-size:10px; text-transform:uppercase;
+    letter-spacing:.1em; margin-right:6px; }
+  .run-row .score:nth-last-child(2) { grid-column:1 / 3; }
+  .run-row .score:nth-last-child(2)::before { content:"Kicks"; }
+  .run-row .score:last-child { grid-column:3; }
+  .run-row .score:last-child::before { content:"Route"; }
+  .run-detail { padding:10px 12px; }
+  .run-detail .open { float:none; display:block; margin:0 0 8px; }
+  .run-detail .stats { gap:4px 16px; }
+}
 </style>
 </head>
 <body>
