@@ -568,6 +568,27 @@ td.num, th.num {
 
 .watch-status[hidden] { display: none; }
 
+/* The snapshot hotkey's state, shown under the watch status the moment
+   Watch Live starts: "armed" or "not set up" has to be visible before
+   the key begins, not buried as one line in the activity log. */
+.watch-hotkey {
+  margin: -8px 0 18px;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--dim);
+  font-size: 13px;
+}
+.watch-hotkey[hidden] { display: none; }
+.watch-hotkey.ok { border-color: rgba(88, 196, 124, 0.4); color: #b9e8c8; }
+.watch-hotkey.err { border-color: rgba(220, 90, 90, 0.5); color: #f0b4b4; }
+.watch-hotkey code { font-family: var(--mono, monospace); }
+
+.field-hint.hotkey-hint { margin-top: 6px; font-size: 12px; }
+.field-hint.hotkey-hint.err { color: #f0b4b4; }
+.field-hint.hotkey-hint[hidden] { display: none; }
+
 .watch-status.live {
   border-color: rgba(88, 196, 124, 0.4);
   background: var(--good-dim);

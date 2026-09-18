@@ -49,7 +49,9 @@ what Watch Live uses); the CLI takes flags.
 `COMBAT_LOG_VERSION` events are ordinary events in a RunSegment. Cluster
 consecutive header events whose ts is within 0.6 s of the previous
 header (gap between neighbours, not span from the first: the addon's
-own re-assert at key start writes a pair exactly 1.0 s apart); a
+own re-assert at key start writes a pair exactly 1.0 s apart), ignoring
+a header less than 0.05 s after the previous one (a /reload writes its
+pair with the identical millisecond: one write, not a toggle); a
 cluster of 2 is a healer marker, 3 a tank marker, 4 or more a general
 one, 1 is nothing. `Marker(ts, role, count)`; `ts` is the first
 header's timestamp.
@@ -105,7 +107,8 @@ the run's reports for every marker found.
 ## 3. The desktop side (`recorder.py`, `desktop/api.py`, shell)
 
 - `Recorder` notices header clusters while tailing (`_feed`) and calls
-  `on_snapshot_marker(run, ts, role)`; the same 0.6 s neighbour-gap rule
+  `on_snapshot_marker(run, ts, role)`; the same 0.6 s neighbour-gap and
+  0.05 s duplicate rule
   as the analyzer, applied to the raw lines' timestamps.
 - `start_watch` schedules the build for `ts + after_s` (or the run's
   end, whichever comes first): slice the run's recorded lines, build,
@@ -128,6 +131,13 @@ stamps the log with, and goes through the same `_on_snapshot_marker`
 path with `source="hotkey"`. **Nothing about combat logging changes**;
 this is why it is the primary trigger and the addon keybind the
 fallback.
+
+The hotkey must include a modifier (`ctrl+``, `ctrl+alt+s`); a bare key
+would also type into the game. Settings checks this as you type
+(`validate_hotkey`) and `save_settings` refuses one that fails, so the
+key never reaches Watch Live only to fail there. The Watch screen shows
+the hotkey's state under the watch status line ("armed ... tank
+snapshot on press", or why it is not set up) the moment watching starts.
 
 No marker in the log carries a role for this path, so the focus is a
 setting: `snapshot_focus` (`healer` / `tank` / `general`), or

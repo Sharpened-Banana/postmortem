@@ -97,7 +97,8 @@ class TestApiWiring:
         settings = {"snapshot_hotkey": "ctrl+alt+s", "snapshot_focus": "tank",
                     "snapshot_character": "Dasfloof"}
         api._start_snapshot_hotkey(settings, 120, 60, None, None, None, None)
-        assert events[-1] == {"type": "snapshot_hotkey", "ok": True, "message": "fake active"}
+        assert events[-1] == {"type": "snapshot_hotkey", "ok": True, "message": "fake active",
+                              "focus": "Dasfloof"}
         assert api._hotkey is not None
 
         api._watch_recorder = None
@@ -133,8 +134,40 @@ class TestApiWiring:
                             lambda: FakeBackend(ok=False, message="taken"))
         api._start_snapshot_hotkey({"snapshot_hotkey": "ctrl+alt+s"}, 120, 60,
                                    None, None, None, None)
-        assert events[-1] == {"type": "snapshot_hotkey", "ok": False, "message": "taken"}
+        assert events[-1] == {"type": "snapshot_hotkey", "ok": False, "message": "taken",
+                              "focus": "healer"}
         assert api._hotkey is None
+
+    def test_the_event_names_the_focus_a_press_will_build(self, api, monkeypatch):
+        events = []
+        api._emit_watch_event = lambda ev: events.append(ev)
+        monkeypatch.setattr("postmortem.desktop.hotkey.default_backend", lambda: FakeBackend())
+        api._start_snapshot_hotkey({"snapshot_hotkey": "ctrl+`", "snapshot_focus": "tank"},
+                                   120, 60, None, None, None, None)
+        assert events[-1]["ok"] and events[-1]["focus"] == "tank"
+        api.stop_watch()
+
+
+class TestSettingsGuard:
+    """A bare "`" saved fine and only failed as a log line when Watch
+    Live started (2026-09-17); now Settings refuses it up front."""
+
+    def test_validate_hotkey(self, api):
+        assert api.validate_hotkey("ctrl+`") == {"ok": True, "combo": "ctrl+`"}
+        assert api.validate_hotkey(" Control + Option + S ") == {"ok": True, "combo": "ctrl+alt+s"}
+        assert api.validate_hotkey("") == {"ok": True, "combo": ""}
+        assert api.validate_hotkey(None) == {"ok": True, "combo": ""}
+        bad = api.validate_hotkey("`")
+        assert bad["ok"] is False and "modifier" in bad["error"]
+
+    def test_save_settings_rejects_a_bare_key_and_keeps_the_rest(self, api):
+        result = api.save_settings({"snapshot_hotkey": "`", "snapshot_focus": "tank"})
+        assert result["ok"] is False and "modifier" in result["error"]
+        assert api.get_settings()["snapshot_focus"] != "tank"   # nothing was written
+        assert api.save_settings({"snapshot_hotkey": "ctrl+`", "snapshot_focus": "tank"}) == {"ok": True}
+        saved = api.get_settings()
+        assert saved["snapshot_hotkey"] == "ctrl+`" and saved["snapshot_focus"] == "tank"
+        assert api.save_settings({"snapshot_hotkey": ""}) == {"ok": True}   # empty = disabled
 
 
 class TestFocusByName:

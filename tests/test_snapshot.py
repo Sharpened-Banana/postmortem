@@ -95,6 +95,18 @@ class TestFindMarkers:
         events = [_header(0.0), _header(0.5), _header(1.0), _header(1.5)]
         assert find_markers(events) == [Marker(0.0, "general", 4)]
 
+    def test_a_reload_pair_with_one_timestamp_is_not_a_marker(self):
+        # /reload writes its two headers with the identical millisecond
+        # (real key, 2026-09-17 21:05:10.873 x2): one write, not a press
+        assert find_markers([_header(367.7), _header(367.7)]) == []
+        assert find_markers([_header(367.7), _header(367.72)]) == []
+        # ...and a real press right after is still seen, at its own time
+        events = [_header(10.0), _header(10.0), _header(40.0), _header(40.25), _header(40.5)]
+        assert find_markers(events) == [Marker(40.0, "tank", 3)]
+        # a duplicate INSIDE a real cluster does not inflate the count
+        events = [_header(40.0), _header(40.0), _header(40.25)]
+        assert find_markers(events) == [Marker(40.0, "healer", 2)]
+
     def test_ts_is_the_first_headers_and_other_events_are_ignored(self):
         events = [
             Event(99.0, "SPELL_DAMAGE", []), _header(100.0),

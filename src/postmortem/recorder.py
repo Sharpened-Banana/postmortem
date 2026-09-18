@@ -59,6 +59,10 @@ _HEADER_RE = re.compile(r"  COMBAT_LOG_VERSION,")
 #: the addon's 1.0 s-apart re-assert at key start must NOT -- same rule
 #: and reasoning as analysis/snapshot.MARKER_GAP_S.
 MARKER_GAP_S = 0.6
+#: ...and headers closer than this are one header written twice (a
+#: /reload stamps its pair with the identical millisecond) -- same as
+#: analysis/snapshot.MARKER_MIN_GAP_S.
+MARKER_MIN_GAP_S = 0.05
 _MARKER_ROLES = {2: "healer", 3: "tank"}
 
 
@@ -716,6 +720,8 @@ class Recorder:
             self._flush_marker_cluster()
             cluster = self._marker_cluster
         if is_header:
+            if cluster and event.ts - cluster[-1] < MARKER_MIN_GAP_S:
+                return  # a /reload's duplicate stamp, not a toggle
             cluster.append(event.ts)
 
     def _flush_marker_cluster(self) -> None:
