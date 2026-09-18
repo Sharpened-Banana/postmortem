@@ -62,6 +62,12 @@ class TestRecorderMarkers:
         assert self._run(tmp_path, [40.0, 42.0]) == []   # 2 s apart: two ordinary toggles
         assert self._run(tmp_path, [40.0, 41.0]) == []   # 1 s apart: the addon's key-start re-assert
 
+    def test_a_reload_pair_with_one_timestamp_is_not_a_marker(self, tmp_path):
+        # /reload stamps both headers with the same millisecond (2026-09-17)
+        assert self._run(tmp_path, [40.0, 40.0]) == []
+        seen = self._run(tmp_path, [40.0, 40.0, 60.0, 60.25, 60.5])
+        assert [role for _z, _ts, role in seen] == ["tank"]
+
     def test_a_cluster_still_open_at_run_end_is_reported(self, tmp_path):
         seen = []
         rec = Recorder(log_path=tmp_path / "log.txt", out_dir=tmp_path / "out",

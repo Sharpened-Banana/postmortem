@@ -70,6 +70,12 @@ from .stealable import StealableData
 #: ("within 1.5 s of the cluster's FIRST header") would have read as a
 #: healer marker at every key start. Gap between neighbours, not span.
 MARKER_GAP_S = 0.6
+#: Headers closer together than this are ONE header written twice, not
+#: two toggles: a /reload writes a pair with the identical millisecond
+#: (real key, 2026-09-17: 21:05:10.873 and 21:05:10.873), which the gap
+#: rule alone read as a healer press. The addon's toggles are 0.25 s
+#: apart, so nothing real is lost.
+MARKER_MIN_GAP_S = 0.05
 #: Kept for callers that match a marker back to a timestamp (see
 #: build_snapshot): the widest span a real marker can have.
 MARKER_CLUSTER_S = 1.5
@@ -120,6 +126,8 @@ def find_markers(events: list[Event]) -> list[Marker]:
     for ev in events:
         if ev.name != "COMBAT_LOG_VERSION":
             continue
+        if last_ts is not None and ev.ts - last_ts < MARKER_MIN_GAP_S:
+            continue  # the same write repeated (a /reload), not a toggle
         if last_ts is not None and ev.ts - last_ts <= MARKER_GAP_S:
             count += 1
             last_ts = ev.ts

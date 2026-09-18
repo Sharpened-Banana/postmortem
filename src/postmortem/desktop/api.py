@@ -1292,7 +1292,10 @@ class DesktopAPI:
         listener = HotkeyListener(combo, on_press)
         ok, message = listener.start()
         self._hotkey = listener if ok else None
-        self._emit_watch_event({"type": "snapshot_hotkey", "ok": ok, "message": message})
+        # ``focus`` rides along so the Watch screen can say what a press
+        # will build ("tank snapshot"), not just that a key is armed.
+        self._emit_watch_event({"type": "snapshot_hotkey", "ok": ok, "message": message,
+                                "focus": character or focus})
 
     def _on_snapshot_marker(self, run, marker_ts: float, role: str,
                             before_s: int, after_s: int, store, avoidable,
@@ -1761,6 +1764,21 @@ class DesktopAPI:
         corrupt settings file."""
         return _config.load_settings()
 
+    def validate_hotkey(self, text: str) -> dict:
+        """Whether ``text`` is a hotkey the listener would accept:
+        ``{"ok": True, "combo": "ctrl+alt+s"}`` (the normalized form) or
+        ``{"ok": False, "error": "..."}``. An empty string is fine -- it
+        means "no hotkey". The Settings screen calls this as the user
+        types so a bare key is flagged before Save. Never raises."""
+        from .hotkey import parse_combo
+        raw = str(text or "").strip()
+        if not raw:
+            return {"ok": True, "combo": ""}
+        try:
+            return {"ok": True, "combo": str(parse_combo(raw))}
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+
     def get_settings_status(self) -> dict:
         """Whether the last settings load fell back to defaults because the
         file could not be read.
@@ -1795,6 +1813,17 @@ class DesktopAPI:
         address, not a ``javascript:``/``file:`` URL or junk.
         """
         settings = dict(settings or {})
+        if settings.get("snapshot_hotkey"):
+            # A hotkey the listener would refuse (a bare "`", say) used to
+            # save fine and only fail as one line in the watch log when
+            # Watch Live started (2026-09-17: a whole evening of presses
+            # that never armed anything). Refuse it here, with the same
+            # message, so the Settings screen says so at save time.
+            from .hotkey import parse_combo
+            try:
+                parse_combo(str(settings["snapshot_hotkey"]))
+            except ValueError as exc:
+                return {"ok": False, "error": f"Snapshot hotkey: {exc}"}
         if "site_url" in settings:
             raw = settings["site_url"]
             if raw in (None, ""):

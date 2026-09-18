@@ -564,6 +564,7 @@ function initWatch() {
   wt.startBtn = document.getElementById("watch-start-btn");
   wt.stopBtn = document.getElementById("watch-stop-btn");
   wt.status = document.getElementById("watch-status");
+  wt.hotkeyStatus = document.getElementById("watch-hotkey-status");
   wt.logListWrap = document.getElementById("watch-log-list-wrap");
   wt.logList = document.getElementById("watch-log-list");
 
@@ -745,6 +746,26 @@ function setWatchStatus(live, text) {
   wt.status.hidden = false;
   wt.status.classList.toggle("live", live);
   wt.status.innerHTML = `<span class="dot"></span><span>${esc(text)}</span>`;
+  if (!live) setHotkeyStatus(null); // a stopped watch has no armed key
+}
+
+// The snapshot hotkey's state, right under the watch status: an evening
+// of presses went nowhere because "bad hotkey" was one line in the log
+// (2026-09-17). null hides it; otherwise the snapshot_hotkey event.
+function setHotkeyStatus(event) {
+  if (!wt.hotkeyStatus) return;
+  if (!event) {
+    wt.hotkeyStatus.hidden = true;
+    wt.hotkeyStatus.textContent = "";
+    return;
+  }
+  wt.hotkeyStatus.hidden = false;
+  wt.hotkeyStatus.classList.toggle("ok", !!event.ok);
+  wt.hotkeyStatus.classList.toggle("err", !event.ok);
+  const what = event.focus ? ` — ${esc(event.focus)} snapshot on press` : "";
+  wt.hotkeyStatus.innerHTML = event.ok
+    ? `Snapshot hotkey armed: ${esc(event.message)}${what}`
+    : `Snapshot hotkey NOT set up: ${esc(event.message)} — fix it in Settings and start watching again`;
 }
 
 // Called by Python (webview.windows[0].evaluate_js(...)) from the watch
@@ -847,6 +868,7 @@ window.onWatchEvent = function (event) {
       break;
     case "snapshot_hotkey":
       addWatchLogEntry(event.ok ? "info" : "err", `Snapshot hotkey: ${esc(event.message)}`);
+      setHotkeyStatus(event);
       break;
     case "run_failed":
       addWatchLogEntry("err", `Run failed: ${esc(event.error)}`);
@@ -1021,6 +1043,7 @@ function initSettings() {
   set.snapshotAfter = document.getElementById("set-snapshot-after");
   set.updateChannel = document.getElementById("set-update-channel");
   set.snapshotHotkey = document.getElementById("set-snapshot-hotkey");
+  set.snapshotHotkeyHint = document.getElementById("set-snapshot-hotkey-hint");
   set.snapshotFocus = document.getElementById("set-snapshot-focus");
   set.snapshotCharacter = document.getElementById("set-snapshot-character");
   set.siteUrl = document.getElementById("set-site-url");
@@ -1072,6 +1095,8 @@ function initSettings() {
   set.kgSyncBtn.addEventListener("click", onSyncKeystoneGuru);
 
   set.wowAddonPath.addEventListener("input", updateExtractButtonState);
+  set.snapshotHotkey.addEventListener("input", validateHotkeyField);
+  set.snapshotHotkey.addEventListener("change", validateHotkeyField);
   set.extractOutputPickBtn.addEventListener("click", onPickExtractOutputFolder);
   set.extractBtn.addEventListener("click", onExtractDungeonData);
 }
@@ -1090,6 +1115,7 @@ async function applySettingsToForm() {
   set.snapshotAfter.value = s.snapshot_after_s ?? 60;
   set.updateChannel.value = s.update_channel === "beta" ? "beta" : "stable";
   set.snapshotHotkey.value = s.snapshot_hotkey ?? "ctrl+alt+s";
+  validateHotkeyField();
   set.snapshotFocus.value = s.snapshot_focus || "healer";
   set.snapshotCharacter.value = s.snapshot_character || "";
   renderDefaultRoutes(s.default_routes || []);
@@ -1263,11 +1289,53 @@ async function onSyncKeystoneGuru() {
   }
 }
 
+// Ask the bridge (the same parser the listener uses) whether the typed
+// hotkey is usable; writes the verdict under the field. Resolves to
+// true when the value is fine or empty (= hotkey disabled).
+async function validateHotkeyField() {
+  const hint = set.snapshotHotkeyHint;
+  const raw = (set.snapshotHotkey.value || "").trim();
+  if (!hint) return true;
+  if (!raw) {
+    hint.hidden = true;
+    hint.textContent = "";
+    hint.classList.remove("err");
+    return true;
+  }
+  let result;
+  try {
+    result = await api().validate_hotkey(raw);
+  } catch (e) {
+    return true; // no bridge (e.g. a browser preview): save_settings still checks
+  }
+  if (result && result.ok) {
+    hint.hidden = false;
+    hint.classList.remove("err");
+    hint.textContent = `Will register as ${result.combo}.`;
+    return true;
+  }
+  hint.hidden = false;
+  hint.classList.add("err");
+  hint.textContent = (result && result.error) || "not a usable hotkey";
+  return false;
+}
+
 async function onSaveSettings() {
   hideBanner(set.errorBanner);
   hideBanner(set.successBanner);
   setBusy(set.busyOverlay, true, "Saving…");
   set.saveBtn.disabled = true;
+
+  // A hotkey the listener would refuse never gets as far as the file:
+  // the bridge rejects it too, but saying so next to the field is kinder
+  // than a banner after the fact.
+  const hotkeyOk = await validateHotkeyField();
+  if (!hotkeyOk) {
+    showBanner(set.errorBanner, "Snapshot hotkey: " + (set.snapshotHotkeyHint.textContent || "not usable"));
+    setBusy(set.busyOverlay, false);
+    set.saveBtn.disabled = false;
+    return;
+  }
 
   const payload = {
     wow_addon_path: set.wowAddonPath.value.trim() || null,

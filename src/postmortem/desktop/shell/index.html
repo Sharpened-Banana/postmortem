@@ -243,6 +243,7 @@
         </div>
 
         <div class="watch-status" id="watch-status" hidden></div>
+        <div class="watch-hotkey" id="watch-hotkey-status" hidden></div>
 
         <div class="watch-log-wrap" id="watch-log-list-wrap" hidden>
           <div class="watch-log-head">Activity</div>
@@ -419,7 +420,7 @@
         <div class="field">
           <label>Snapshot hotkey (works while WoW has focus)</label>
           <div class="row" style="display:flex;gap:8px;align-items:center;">
-            <input type="text" id="set-snapshot-hotkey" placeholder="ctrl+alt+s" style="width:160px;">
+            <input type="text" id="set-snapshot-hotkey" placeholder="ctrl+alt+s" style="width:160px;" aria-describedby="set-snapshot-hotkey-hint">
             <select id="set-snapshot-focus">
               <option value="healer">Healer snapshot</option>
               <option value="tank">Tank snapshot</option>
@@ -427,6 +428,7 @@
             </select>
             <input type="text" id="set-snapshot-character" placeholder="or your character name" style="width:200px;">
           </div>
+          <div class="field-hint hotkey-hint" id="set-snapshot-hotkey-hint" hidden></div>
           <div class="help">Press it mid-key and Watch Live snapshots the moment without touching the combat log at all. The role comes from the choice here, or from your character's spec in the run when a name is given. Leave the hotkey empty to disable it; the addon's own "Mark a snapshot" keybind still works as a fallback. On macOS the first use asks for the Input Monitoring permission.</div>
         </div>
 
