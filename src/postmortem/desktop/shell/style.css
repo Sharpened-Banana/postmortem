@@ -131,9 +131,13 @@ a { color: var(--blue); }
   letter-spacing: 0.01em;
 }
 
+/* The melted-skull mark (shell/mark.svg, from media/melted-skull-logo):
+   a 280x420 drawing, so it is sized by height and keeps its own colours. */
 .brand-mark {
-  color: var(--accent);
-  font-size: 17px;
+  display: block;
+  height: 21px;
+  width: auto;
+  flex: none;
 }
 
 .topnav {
