@@ -10,87 +10,83 @@ Escape > Options > AddOns > Postmortem. Slots are marked TODO below.
 -->
 ---
 
-# Postmortem — see exactly what happened on your Mythic+ key
+# Postmortem
 
-**Postmortem** is two halves that work together:
+I got tired of arguing in discord about why a key died. "The healer was oom", "no, the tank pulled the extra pack", "somebody didn't kick the fear"... nobody actually knows, everyone just remembers the part where they were right. So I built a thing that reads the combat log and tells you.
 
-- an **in-game addon** (this page) that makes sure every key is logged, shows live stats while you play, and captures a few things only the client can see; and
-- a free **desktop companion app + website** that turns the combat log into a full post-mortem the moment the key ends: route vs. plan, every death with a killing-blow recap, kick efficiency, avoidable damage, dispels, downtime, and timer pace, in one shareable link.
+Postmortem is an addon plus a little desktop app. The addon handles the in-game side. The app watches your Logs folder and, every time a key ends, spits out a full breakdown you can send to the group as a link. Timeline of every pull, where you went off the MDT route, who died to what, which casts got through that should've been kicked, dispels, downtime, how much timer the deaths cost. That kind of thing.
 
-No account is needed. The addon works on its own; the app and site are what turn "we wiped on the third pull" into "here is the cast that killed the healer, who could have kicked it, and what it cost the timer."
+![a run report](https://raw.githubusercontent.com/Sharpened-Banana/postmortem/main/media/site-report-hero.png)
 
-![Run report on the site](https://raw.githubusercontent.com/Sharpened-Banana/postmortem/main/media/site-report-hero.png)
+## The addon part
 
-## What the addon does in-game
+Honestly the main reason I wrote the addon was that I kept forgetting /combatlog. So: it turns combat logging on (advanced logging too) the second the key starts and turns it off when it ends. That alone was worth it for me.
 
-**Never forget /combatlog again.** Combat logging (with advanced logging) switches on at the moment the key starts and off when it ends or resets. Nothing to remember before the countdown.
+Beyond that, while you're in a key it shows a small overlay you can drag wherever. Forces %, the timer, a +2/+3 countdown so you know how much slack you've got, boss splits, deaths with how much time they cost you, and the group's interrupt count. It only shows up during a key, the rest of the time it's gone.
 
-**Live overlay, only during a key.** A small draggable window with forces progress, the timer, a **+2 / +3 chest countdown**, boss and objective splits, deaths with the time they cost, and the group's interrupt count.
+If you've got MDT installed and a route picked for the dungeon it'll also show "Pull 7 / 23" and complain if a pull looks a lot bigger or smaller than the route said. Fair warning, that's counting enemies, not identifying packs. MDT keeps its NPC data private so I can't tell *which* pack you pulled from inside the game. The desktop app can, from the log.
 
-**Pull progress against your MDT route.** With Mythic Dungeon Tools installed and a route selected, the overlay shows "Pull N / M" and flags a pull that looks bigger or smaller than planned.
+Other bits:
 
-**Death cause tagging.** When someone dies, the recap says what hit them.
+- Deaths in the recap get tagged with what actually killed you.
+- Tanks get a short "here's what hit you and what you had up" after dying, and an incoming panel.
+- There's a keybind called "Mark a snapshot" (Key Bindings > AddOns > Postmortem, or `/pm snapshot`). Hit it when something goes wrong and the app writes a report of the 2 minutes before and 1 minute after, focused on your role. Healer gets healing/mana/cooldowns, tank gets intake and mitigation uptime. Adjustable.
+- `/pm results` for the run's numbers, `/pm history` for your last few keys, optional "timed for +2" message to the party when you finish.
+- It grabs Blizzard's own avoidable-damage classification at the end of every key. That's what the app's avoidable damage section is built on, so every key you run makes that list a bit better for everyone.
+- Options are under Escape > Options > AddOns > Postmortem (or `/pm options`). Every overlay row can be turned off.
+- Minimap button. Left click shows what the addon does vs what needs the app, right click copies the download link.
 
-**Tank death post-mortem and incoming panel.** For tanks, a short breakdown after a death of what came in and what mitigation was up.
+*TODO screenshot: overlay mid-key*
+*TODO screenshot: /pm results*
+*TODO screenshot: options panel*
 
-**Snapshot keybind.** Bind "Mark a snapshot" (Key Bindings > AddOns > Postmortem) or type `/pm snapshot` the moment something goes wrong. The desktop app then writes a role-focused report of the two minutes before and one minute after: a healer gets healing, mana, who took what and cooldown use; a tank gets intake, mitigation uptime and the biggest hits.
+## The app part
 
-**Results and history in-game.** `/pm results` shows the run's stats, `/pm history` lists your last keys, and an optional party message announces the completion and chest level.
+This is the bit most addons don't have, and it's optional, but it's the whole point.
 
-**Avoidable-damage capture.** At the end of each key the addon reads which spells Blizzard's own damage meter classed as avoidable, which feeds the app's avoidable-damage section for everyone.
+You install it (Windows or Mac, both signed, it updates itself), point it at your WoW Logs folder once, and leave it running with Watch Live on. When a key finishes it analyzes the log and puts the report up on the site. You don't touch it. If you'd rather not run it you can also just upload a log by hand on the website.
 
-**Options panel.** Escape > Options > AddOns > Postmortem, or `/pm options`. Every overlay row, the history size, the snapshot window and the announcements are toggles.
+![watch live](https://raw.githubusercontent.com/Sharpened-Banana/postmortem/main/media/app-watch-live.png)
 
-**Minimap icon.** Left-click for a window showing what is live in the addon and what the companion app adds. Right-click copies the download link.
+What's in a report:
 
-*TODO screenshot: the overlay mid-key (`addon-overlay.png`).*
-*TODO screenshot: the `/pm results` window (`addon-results.png`).*
-*TODO screenshot: the Options panel (`addon-options.png`).*
+- pull timeline, deviations from the route outlined, deaths and lust marked
+- a route map with the MDT plan drawn over where people actually walked
+- per player dps/hps/damage taken/kicks, and an estimate of damage prevented by kicks
+- every enemy cast that was kickable, whether it got kicked, and what it cost when it didn't
+- deaths and close calls with the last few hits before each
+- avoidable damage taken, dispel efficiency, utility usage, longest downtime
 
-## What the companion app adds
+![report in the app](https://raw.githubusercontent.com/Sharpened-Banana/postmortem/main/media/app-report.png)
 
-Leave the desktop app watching your Logs folder while you play. Every finished key is analyzed and, if you want, uploaded to the site automatically. No clicks per run.
+![route map](https://raw.githubusercontent.com/Sharpened-Banana/postmortem/main/media/site-report-route-map.png)
 
-![Watch Live in the desktop app](https://raw.githubusercontent.com/Sharpened-Banana/postmortem/main/media/app-watch-live.png)
+![deaths](https://raw.githubusercontent.com/Sharpened-Banana/postmortem/main/media/app-report-deaths.png)
 
-The report opens in the app and on the site:
+The site keeps everything you upload. There's a Browse page for comparing keys, a Players page, and a Kicks page that's basically a list of which casts get let through the most across all uploaded runs, which is a fun read. Works fine on a phone too, so you can read the post-mortem in the car.
 
-- **Pull timeline** with route deviations outlined, deaths and bloodlust marked.
-- **Route map**: planned enemies from your MDT route over the actual player paths.
-- **Players**: DPS, HPS, damage taken, kicks, and damage prevented by kicks.
-- **Enemy casts, kicked vs. got through**, with what each missed kick cost.
-- **Deaths and close calls** with killing-blow recaps.
-- **Avoidable damage taken**, **dispel efficiency**, **utility timeline**, and **longest downtime**.
-- Every section collapses, and the whole thing works on a phone.
+![browse runs](https://raw.githubusercontent.com/Sharpened-Banana/postmortem/main/media/site-runs-desktop.png)
 
-![Report in the desktop app](https://raw.githubusercontent.com/Sharpened-Banana/postmortem/main/media/app-report.png)
+![on a phone](https://raw.githubusercontent.com/Sharpened-Banana/postmortem/main/media/site-report-phone.png)
 
-![Route map](https://raw.githubusercontent.com/Sharpened-Banana/postmortem/main/media/site-report-route-map.png)
+You can sign in with Battle.net if you want your runs on your character page. You don't have to. Reports are public links regardless, no account needed to read one.
 
-![Deaths section in the app](https://raw.githubusercontent.com/Sharpened-Banana/postmortem/main/media/app-report-deaths.png)
+## Getting set up
 
-**History** keeps every run you have analyzed, and the site's **Browse Runs**, **Players** and **Kicks** pages let your group compare keys, look up a player, and see which enemy casts get kicked the least across every uploaded run.
+1. Install the addon from here like normal.
+2. Grab the app from the [releases page](https://github.com/Sharpened-Banana/postmortem/releases/latest).
+3. Open it, pick your Logs folder in Settings, turn on Watch Live. There's a [guide](https://postmortem-mplus.fly.dev/guide) with pictures if you get stuck.
 
-![Browse runs on the site](https://raw.githubusercontent.com/Sharpened-Banana/postmortem/main/media/site-runs-desktop.png)
+![first launch](https://raw.githubusercontent.com/Sharpened-Banana/postmortem/main/media/app-home-first-run.png)
 
-![Report on a phone](https://raw.githubusercontent.com/Sharpened-Banana/postmortem/main/media/site-report-phone.png)
-
-Sign in with Battle.net on the site and link the app once, and your uploads show up on your character pages. Signing in is optional; reports are public links either way.
-
-## Setup in three steps
-
-1. **Install this addon** through the CurseForge app, as usual.
-2. **Get the desktop app** for Windows or macOS from the [releases page](https://github.com/Sharpened-Banana/postmortem/releases/latest). Both builds are signed, and the app updates itself.
-3. **Open the app, point it at your Logs folder, and turn on Watch Live.** The [guide](https://postmortem-mplus.fly.dev/guide) walks through it with screenshots. No app? Upload the log by hand at [postmortem-mplus.fly.dev/upload](https://postmortem-mplus.fly.dev/upload).
-
-![First run of the desktop app](https://raw.githubusercontent.com/Sharpened-Banana/postmortem/main/media/app-home-first-run.png)
-
-![App settings](https://raw.githubusercontent.com/Sharpened-Banana/postmortem/main/media/app-settings.png)
+![settings](https://raw.githubusercontent.com/Sharpened-Banana/postmortem/main/media/app-settings.png)
 
 ## Links
 
-- Website and live reports: [postmortem-mplus.fly.dev](https://postmortem-mplus.fly.dev)
-- Desktop app downloads: [GitHub releases](https://github.com/Sharpened-Banana/postmortem/releases/latest)
-- Source, issues and roadmap: [github.com/Sharpened-Banana/postmortem](https://github.com/Sharpened-Banana/postmortem)
+- The site: [postmortem-mplus.fly.dev](https://postmortem-mplus.fly.dev)
+- App downloads: [GitHub releases](https://github.com/Sharpened-Banana/postmortem/releases/latest)
+- Code, bugs, roadmap: [github.com/Sharpened-Banana/postmortem](https://github.com/Sharpened-Banana/postmortem)
 
-Postmortem is open source and free. The addon never sends anything anywhere; uploading is something the app or you do, and only for runs you choose.
+It's all open source and free. The addon itself never talks to the internet. Uploading is something the app does, only for runs you chose to watch, and you can turn it off.
+
+Bug reports welcome, it's early and I'm mostly testing this with my own group. If a report looks wrong, send me the log and I'll figure out why.
