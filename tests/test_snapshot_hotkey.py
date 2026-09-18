@@ -18,7 +18,22 @@ class TestParseCombo:
         assert parse_combo("cmd-shift-space") == Combo(frozenset({"cmd", "shift"}), "space")
         assert str(parse_combo("shift+ctrl+x")) == "ctrl+shift+x"
 
-    @pytest.mark.parametrize("bad", ["", "s", "ctrl+", "hyper+s", "ctrl+enterprise"])
+    def test_shift_and_punctuation_and_space_separators(self):
+        # what a person types for "hold shift, press backtick" (2026-09-18)
+        assert parse_combo("shift+`") == Combo(frozenset({"shift"}), "`")
+        assert parse_combo("shift `") == Combo(frozenset({"shift"}), "`")
+        assert parse_combo("ctrl + shift + `") == Combo(frozenset({"ctrl", "shift"}), "`")
+        assert parse_combo("shift+-") == Combo(frozenset({"shift"}), "-")
+        assert parse_combo("ctrl++") == Combo(frozenset({"ctrl"}), "+")
+
+    def test_mac_unshift_maps_a_shifted_press_back_to_its_key(self):
+        from postmortem.desktop.hotkey import _unshift
+        assert _unshift("~") == "`"
+        assert _unshift("S") == "s"
+        assert _unshift("`") == "`"
+        assert _unshift("f8") == "f8"
+
+    @pytest.mark.parametrize("bad", ["", "s", "ctrl+", "hyper+s", "ctrl+enterprise", "~"])
     def test_rejects_unusable_combos(self, bad):
         with pytest.raises(ValueError):
             parse_combo(bad)

@@ -1097,6 +1097,7 @@ function initSettings() {
   set.wowAddonPath.addEventListener("input", updateExtractButtonState);
   set.snapshotHotkey.addEventListener("input", validateHotkeyField);
   set.snapshotHotkey.addEventListener("change", validateHotkeyField);
+  set.snapshotHotkey.addEventListener("keydown", onHotkeyFieldKeydown);
   set.extractOutputPickBtn.addEventListener("click", onPickExtractOutputFolder);
   set.extractBtn.addEventListener("click", onExtractDungeonData);
 }
@@ -1287,6 +1288,58 @@ async function onSyncKeystoneGuru() {
   } finally {
     set.kgSyncBtn.disabled = false;
   }
+}
+
+// The hotkey box records the keys you press in it, like a game's keybind
+// screen: pressing shift+` used to type "~" (a bare key, refused) --
+// 2026-09-18. Physical key from event.code so Shift never changes the
+// key's name; modifiers from the event flags. Backspace/Delete clears,
+// Tab and Escape behave normally, and typing "ctrl+alt+s" by hand still
+// works because a lone letter with no modifier is left to the text field.
+const HOTKEY_CODE_NAMES = {
+  Backquote: "`", Minus: "-", Equal: "=", BracketLeft: "[", BracketRight: "]",
+  Backslash: "\\", Semicolon: ";", Quote: "'", Comma: ",", Period: ".", Slash: "/",
+  Space: "space", Insert: "insert", Delete: "delete", Home: "home", End: "end",
+  PageUp: "pageup", PageDown: "pagedown", Pause: "pause", ScrollLock: "scrolllock",
+  PrintScreen: "printscreen",
+};
+const HOTKEY_MODIFIER_CODES = /^(Shift|Control|Alt|Meta|OS|CapsLock|NumLock)/;
+
+function hotkeyKeyNameFromEvent(e) {
+  const code = e.code || "";
+  if (HOTKEY_CODE_NAMES[code]) return HOTKEY_CODE_NAMES[code];
+  let m;
+  if ((m = /^Key([A-Z])$/.exec(code))) return m[1].toLowerCase();
+  if ((m = /^Digit([0-9])$/.exec(code))) return m[1];
+  if ((m = /^Numpad([0-9])$/.exec(code))) return m[1];
+  if ((m = /^F([0-9]{1,2})$/.exec(code))) return "f" + m[1];
+  // no usable code (some webviews): fall back to the reported key
+  const k = (e.key || "").toLowerCase();
+  return k.length === 1 ? k : "";
+}
+
+function onHotkeyFieldKeydown(e) {
+  if (e.key === "Tab" || e.key === "Escape") return;
+  if (e.key === "Backspace" || e.key === "Delete") {
+    e.preventDefault();
+    set.snapshotHotkey.value = "";
+    validateHotkeyField();
+    return;
+  }
+  if (HOTKEY_MODIFIER_CODES.test(e.code || "") || e.key === "Shift" || e.key === "Control"
+      || e.key === "Alt" || e.key === "Meta") {
+    return; // wait for the real key
+  }
+  const mods = [];
+  if (e.ctrlKey) mods.push("ctrl");
+  if (e.altKey) mods.push("alt");
+  if (e.shiftKey) mods.push("shift");
+  if (e.metaKey) mods.push("cmd");
+  const key = hotkeyKeyNameFromEvent(e);
+  if (!mods.length || !key) return; // plain typing: leave the text field alone
+  e.preventDefault();
+  set.snapshotHotkey.value = mods.concat(key).join("+");
+  validateHotkeyField();
 }
 
 // Ask the bridge (the same parser the listener uses) whether the typed

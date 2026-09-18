@@ -25,6 +25,8 @@ that could not be set up must not stop Watch Live from starting.
 
 from __future__ import annotations
 
+import re
+
 import sys
 import threading
 from dataclasses import dataclass, field
@@ -61,7 +63,17 @@ def parse_combo(text: str) -> Combo:
     Raises ValueError on an empty key, an unknown modifier, or a key
     that is neither one character nor a named key. At least one modifier
     is required: a bare letter would type into the game."""
-    parts = [p.strip().lower() for p in str(text or "").replace("-", "+").split("+")]
+    # "+", "-" and whitespace all separate parts ("shift `" is what a
+    # person types when the box does not say otherwise, 2026-09-18).
+    raw = str(text or "").strip()
+    trailing_key = ""
+    if len(raw) > 2 and raw[-1] in "+-" and raw[-2] in "+- \t":
+        # the key itself is a separator character ("shift+-", "ctrl++");
+        # a lone trailing "+" ("ctrl+") is still an unfinished combo
+        trailing_key, raw = raw[-1], raw[:-1]
+    parts = [p.strip().lower() for p in re.split(r"[+\-\s]+", raw)] if raw else []
+    if trailing_key:
+        parts.append(trailing_key)
     parts = [p for p in parts if p]
     if not parts:
         raise ValueError("no key")
@@ -178,6 +190,22 @@ PERMISSION_HINT = (
 )
 
 
+#: US-layout shifted punctuation -> the key it lives on. AppKit's
+#: charactersIgnoringModifiers ignores every modifier EXCEPT Shift, so a
+#: "shift+`" press reports "~"; without this the combo never matched.
+_US_UNSHIFT = {
+    "~": "`", "!": "1", "@": "2", "#": "3", "$": "4", "%": "5", "^": "6",
+    "&": "7", "*": "8", "(": "9", ")": "0", "_": "-", "+": "=", "{": "[",
+    "}": "]", "|": "\\", ":": ";", '"': "'", "<": ",", ">": ".", "?": "/",
+}
+
+
+def _unshift(chars: str) -> str:
+    """The unshifted key for what a shifted press reports ("~" -> "`",
+    "S" -> "s"); anything else unchanged."""
+    return _US_UNSHIFT.get(chars, chars.lower())
+
+
 class MacBackend(Backend):
     def __init__(self) -> None:
         self._monitor = None
@@ -210,8 +238,8 @@ class MacBackend(Backend):
                 if keycode is not None:
                     hit = int(event.keyCode()) == keycode
                 else:
-                    chars = str(event.charactersIgnoringModifiers() or "").lower()
-                    hit = chars == combo.key
+                    chars = str(event.charactersIgnoringModifiers() or "")
+                    hit = _unshift(chars) == combo.key
                 if hit:
                     on_press()
             except Exception:
