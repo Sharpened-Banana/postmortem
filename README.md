@@ -10,6 +10,9 @@ Pure Python 3.10+, zero runtime dependencies.
 
 ![report](docs/report-example.png)
 
+**Screenshots:** the desktop app, the website and the setup process are in
+[media/README.md](media/README.md).
+
 ## Install
 
 ```bash
