@@ -60,6 +60,18 @@ class RunSegment:
                 return True
         return False
 
+    @property
+    def timed(self) -> Optional[bool]:
+        """Final time against the dungeon's timer; None when the key was
+        not finished or no timer is known for the dungeon. Deliberately
+        NOT ``success``: CHALLENGE_MODE_END sets that to 1 on every
+        completed key, over time or not (see apply_timed_verdict)."""
+        if not self.completed or not self.duration_ms:
+            return None
+        from ..analysis.run_analyzer import bundled_par_ms
+        par_ms = bundled_par_ms(self.challenge_map_id)
+        return None if par_ms is None else self.duration_ms <= par_ms
+
     def summary(self) -> dict[str, Any]:
         return {
             "zone": self.zone_name,
@@ -77,7 +89,7 @@ class RunSegment:
             # itself until 2026-09-11 -- nothing outside this file read the
             # flag, so a capped run was reported to the user as abandoned.
             "truncated": self.truncated,
-            "timed": self.success,
+            "timed": self.timed,
             "duration_ms": self.duration_ms,
             "wall_duration_s": round(self.wall_duration, 1),
             "event_count": len(self.events),

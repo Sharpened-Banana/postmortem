@@ -412,6 +412,7 @@ function stars(r) {
 
 function result(r) {
   if (!r.completed) return '<span class="dnf">incomplete</span>';
+  if (r.timed == null) return '<span class="dnf">completed</span>';
   return r.timed ? '<span class="timed">timed</span>'
                  : '<span class="over">over timer</span>';
 }

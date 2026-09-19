@@ -232,9 +232,14 @@ class TestTimerReportBlock:
         assert self._report(run_segment, 600_000)["timer"]["threshold"] == 3
         assert self._report(run_segment, 1_000_000)["timer"]["threshold"] == 1
 
-    def test_no_par_ms_means_no_timer_block(self, run_segment):
+    def test_no_par_ms_falls_back_to_the_bundled_season_timer(self, run_segment):
+        # Murder Row (587) is in the packaged table at 34:00
         report = analyze_run(run_segment)
-        assert "timer" not in report
+        assert report["timer"]["par_ms"] == 2_040_000
+
+    def test_a_dungeon_with_no_known_timer_has_no_timer_block(self, run_segment):
+        run_segment.challenge_map_id = 99999
+        assert "timer" not in analyze_run(run_segment)
 
     def test_par_ms_without_a_finished_run_omits_verdict_not_thresholds(self, run_segment):
         run_segment.duration_ms = None
@@ -273,6 +278,7 @@ class TestTimerRendering:
         assert "over timer by" in text
 
     def test_text_omits_timer_line_when_absent(self, run_segment):
+        run_segment.challenge_map_id = 99999   # no timer known for it
         report = analyze_run(run_segment)
         text = render_text(report)
         assert "Timer:" not in text
@@ -293,6 +299,7 @@ class TestTimerRendering:
         assert "over timer by" in html
 
     def test_html_omits_timer_block_when_absent(self, run_segment):
+        run_segment.challenge_map_id = 99999   # no timer known for it
         report = analyze_run(run_segment)
         html = render_html(report)
         assert '"timer"' not in html
@@ -302,10 +309,12 @@ class TestTimerRendering:
 
 
 class TestTimerCLI:
-    def test_no_timer_flags_means_no_block(self, log_file, capsys):
+    def test_no_timer_flags_means_the_bundled_season_timer(self, log_file, capsys):
+        # No flag and no network: the verdict still needs a par, so the
+        # packaged table answers (Murder Row = 34:00).
         assert main(["analyze", str(log_file), "--format", "json"]) == 0
         out = json.loads(capsys.readouterr().out)
-        assert "timer" not in out
+        assert out["timer"]["par_ms"] == 2_040_000 and out["run"]["timed"] is True
 
     def test_timer_data_flag_alone_adds_block_with_no_network(self, log_file, tmp_path, capsys):
         timer_file = tmp_path / "timers.json"
@@ -349,8 +358,111 @@ class TestTimerCLI:
     def test_expansion_id_without_raiderio_is_a_no_op(self, log_file, capsys):
         # --expansion-id only matters alongside --raiderio (an already
         # internet-enabled invocation) -- on its own it doesn't trigger
-        # a live fetch, and without --timer-data either, no timer block.
+        # a live fetch: the par is the packaged one, not a fetched one.
         assert main(["analyze", str(log_file), "--expansion-id", "5",
                      "--format", "json"]) == 0
         out = json.loads(capsys.readouterr().out)
-        assert "timer" not in out
+        assert out["timer"]["par_ms"] == 2_040_000
+
+
+# --- timed vs over timer -----------------------------------------------------
+#
+# CHALLENGE_MODE_END's success field is 1 on every completed key, timed
+# or not, so it must never decide the verdict (2026-09-19: a 30:14 run of
+# a 30:00 dungeon was shown as TIMED).
+
+
+class TestTimedVerdict:
+    def test_over_par_is_not_timed_whatever_the_log_says(self, run_segment):
+        from postmortem.analysis.run_analyzer import apply_timed_verdict
+        assert run_segment.success is True
+        run_segment.challenge_map_id = 585       # Voidscar Arena, 30:00
+        run_segment.duration_ms = 1_814_455      # the real 30:14 run
+        report = analyze_run(run_segment)
+        assert report["run"]["timed"] is False
+        assert report["timer"]["threshold"] == 0
+        assert report["timer"]["margin_ms"] == -14_455
+        assert apply_timed_verdict(report)["run"]["timed"] is False  # idempotent
+
+    def test_at_or_under_par_is_timed_even_if_the_log_said_otherwise(self, run_segment):
+        run_segment.success = False
+        run_segment.challenge_map_id = 585
+        run_segment.duration_ms = 1_800_000
+        assert analyze_run(run_segment)["run"]["timed"] is True
+
+    def test_unknown_dungeon_gets_no_verdict_rather_than_a_guess(self, run_segment):
+        run_segment.challenge_map_id = 99999
+        assert analyze_run(run_segment)["run"]["timed"] is None
+
+    def test_explicit_par_wins_over_the_bundled_one(self, run_segment):
+        report = analyze_run(run_segment, par_ms=500_000)   # fixture ran 600s
+        assert report["run"]["timed"] is False
+
+    def test_an_unfinished_run_is_left_alone(self, run_segment):
+        run_segment.completed = False
+        run_segment.success = None
+        run_segment.duration_ms = None
+        assert analyze_run(run_segment)["run"]["timed"] is None
+
+    def test_a_stored_report_with_the_old_wrong_value_is_corrected(self):
+        from postmortem.analysis.run_analyzer import apply_timed_verdict
+        stored = {"run": {"completed": True, "timed": True, "challenge_map_id": 585,
+                          "duration_ms": 1_814_455}}
+        apply_timed_verdict(stored)
+        assert stored["run"]["timed"] is False and stored["timer"]["par_ms"] == 1_800_000
+
+    def test_every_bundled_timer_is_a_whole_number_of_seconds(self):
+        timers = load_fallback_timers()
+        assert set(timers) >= {249, 250, 399, 584, 585, 586, 587, 588}
+        assert all(v % 1000 == 0 and 20 * 60_000 <= v <= 45 * 60_000 for v in timers.values())
+
+
+class TestStoredRunsAreCorrected:
+    """Rows written before the fix hold timed=1 for over-time keys."""
+
+    def _old_row(self, tmp_path, run_segment):
+        import json as _json
+        import sqlite3
+        from postmortem.history.store import Store
+        run_segment.challenge_map_id = 585
+        run_segment.duration_ms = 1_814_455
+        report = analyze_run(run_segment)
+        db = tmp_path / "h.db"
+        with Store(db) as store:
+            run_id = store.ingest(report)
+        # put it back the way the old code stored it
+        report["run"]["timed"] = True
+        report.pop("timer")
+        conn = sqlite3.connect(db)
+        conn.execute("UPDATE runs SET timed = 1, threshold = NULL, margin_ms = NULL, "
+                     "timed_checked = NULL, report_json = ? WHERE id = ?",
+                     (_json.dumps(report), run_id))
+        conn.commit(); conn.close()
+        return db, run_id
+
+    def test_opening_the_store_fixes_the_row_and_reading_fixes_the_report(
+        self, tmp_path, run_segment,
+    ):
+        from postmortem.history.store import Store
+        db, run_id = self._old_row(tmp_path, run_segment)
+        with Store(db) as store:
+            report = store.get_report(run_id)
+        assert report["run"]["timed"] is False and report["timer"]["threshold"] == 0
+        import sqlite3
+        conn = sqlite3.connect(db)
+        assert conn.execute("SELECT timed, threshold, margin_ms, timed_checked FROM runs").fetchone() \
+            == (0, 0, -14_455, 1)
+        conn.close()
+
+    def test_an_old_clients_report_is_corrected_on_ingest(self, tmp_path, run_segment):
+        import sqlite3
+        from postmortem.history.store import Store
+        run_segment.challenge_map_id = 585
+        run_segment.duration_ms = 1_814_455
+        report = analyze_run(run_segment)
+        report["run"]["timed"] = True      # what an app older than the fix uploads
+        with Store(tmp_path / "h.db") as store:
+            store.ingest(report)
+        conn = sqlite3.connect(tmp_path / "h.db")
+        assert conn.execute("SELECT timed FROM runs").fetchone() == (0,)
+        conn.close()

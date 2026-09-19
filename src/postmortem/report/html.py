@@ -257,7 +257,11 @@ function render() {
   let badge = run.truncated
     ? '<span class="badge abandoned">PARTIAL ANALYSIS (SIZE LIMIT)</span>'
     : '<span class="badge abandoned">INCOMPLETE / ABANDONED</span>';
-  if (run.completed) badge = run.timed
+  // timed is null when the dungeon's timer is not known: say completed,
+  // never guess (the log's own "success" flag is 1 on every finished key).
+  if (run.completed) badge = run.timed == null
+    ? '<span class="badge abandoned">COMPLETED</span>'
+    : run.timed
     ? '<span class="badge timed">TIMED</span>'
     : '<span class="badge over">OVER TIMER</span>';
 

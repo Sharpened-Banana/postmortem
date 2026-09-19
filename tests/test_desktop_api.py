@@ -92,8 +92,11 @@ class TestListRuns:
         assert [r["zone"] for r in runs] == ["Cave One", "Cave Two", "Cave Three"]
         assert [r["keystone_level"] for r in runs] == [5, 10, 15]
         assert runs[0]["completed"] is False  # abandoned, no CHALLENGE_MODE_END
-        assert runs[1]["completed"] is True and runs[1]["timed"] is True
-        assert runs[2]["completed"] is True and runs[2]["timed"] is False
+        # The caves are not real dungeons, so no timer is known and there
+        # is no verdict -- the log's success flag (1 then 0 here) must not
+        # stand in for one: real logs say 1 on every completed key.
+        assert runs[1]["completed"] is True and runs[1]["timed"] is None
+        assert runs[2]["completed"] is True and runs[2]["timed"] is None
 
     def test_missing_log_returns_error_not_exception(self, api, tmp_path):
         result = api.list_runs(str(tmp_path / "does-not-exist.txt"))
