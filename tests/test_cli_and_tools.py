@@ -328,8 +328,9 @@ class TestCLI:
         lines = [ln for ln in out.splitlines() if ln.strip()]
         assert len(lines) == 3
         assert "Cave One +5" in lines[0] and "incomplete" in lines[0]
-        assert "Cave Two +10" in lines[1] and "timed" in lines[1]
-        assert "Cave Three +15" in lines[2] and "over timer" in lines[2]
+        # no timer is known for these made-up dungeons: completed, no verdict
+        assert "Cave Two +10" in lines[1] and "completed" in lines[1]
+        assert "Cave Three +15" in lines[2] and "completed" in lines[2]
 
     def test_analyze_run_2_picks_middle_run(self, three_run_log_file, capsys):
         assert main(["analyze", str(three_run_log_file), "--run", "2"]) == 0

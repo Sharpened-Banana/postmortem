@@ -143,6 +143,12 @@ _RUNS_ADDED_COLUMNS = (
     # which is the safe direction -- catch-up may re-upload one old run,
     # where the ingest side de-duplicates.
     ("uploaded_at", "REAL"),
+    # 1 once ``timed`` has been decided from the dungeon's timer rather
+    # than CHALLENGE_MODE_END's success field, which is 1 on every
+    # completed key -- so until 2026-09-19 every over-time run was stored
+    # as timed. NULL marks a row that still holds that old value; see
+    # _backfill_timed_verdict.
+    ("timed_checked", "INTEGER"),
 )
 
 
@@ -210,6 +216,54 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.rollback()
         raise
     _backfill_leaderboard_columns(conn)
+    _backfill_timed_verdict(conn)
+
+
+def _backfill_timed_verdict(conn: sqlite3.Connection) -> None:
+    """Re-decide ``timed`` (and the chest ``threshold``/``margin_ms``) for
+    rows stored before the verdict came from the dungeon timer. Same
+    batched, lock-bounded shape as the leaderboard backfill below, for the
+    same reasons. The stored report_json is left alone -- it is large, and
+    ``get_report`` corrects it on the way out."""
+    from ..analysis.run_analyzer import apply_timed_verdict
+
+    while True:
+        ids = [r[0] for r in conn.execute(
+            "SELECT id FROM runs WHERE timed_checked IS NULL LIMIT ?", (_BACKFILL_BATCH,),
+        )]
+        if not ids:
+            return
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError:
+            return  # another opener is working through the same rows
+        try:
+            for run_id in ids:
+                row = conn.execute(
+                    "SELECT report_json FROM runs WHERE id = ? AND timed_checked IS NULL",
+                    (run_id,),
+                ).fetchone()
+                if row is None:
+                    continue
+                try:
+                    report = json.loads(row[0])
+                except (TypeError, ValueError):
+                    report = None
+                if not isinstance(report, dict) or not isinstance(report.get("run"), dict):
+                    conn.execute("UPDATE runs SET timed_checked = 1 WHERE id = ?", (run_id,))
+                    continue
+                apply_timed_verdict(report)
+                timer = report.get("timer") or {}
+                conn.execute(
+                    "UPDATE runs SET timed = ?, threshold = ?, margin_ms = ?, "
+                    "timed_checked = 1 WHERE id = ?",
+                    (report["run"].get("timed"), timer.get("threshold"),
+                     timer.get("margin_ms"), run_id),
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
 
 def _backfill_leaderboard_columns(conn: sqlite3.Connection) -> None:
@@ -457,7 +511,13 @@ class Store:
         """Return the full stored report JSON for one run, if it exists."""
         cur = self._conn.execute("SELECT report_json FROM runs WHERE id = ?", (run_id,))
         row = cur.fetchone()
-        return json.loads(row["report_json"]) if row else None
+        if not row:
+            return None
+        report = json.loads(row["report_json"])
+        if isinstance(report, dict):
+            from ..analysis.run_analyzer import apply_timed_verdict
+            apply_timed_verdict(report)  # rows stored before 2026-09-19
+        return report
 
 
 def _row_values(
@@ -465,6 +525,10 @@ def _row_values(
     source_path: Optional[str | Path],
     html_path: Optional[str | Path],
 ) -> dict[str, Any]:
+    # A report analyzed by an older app still says timed=True for any
+    # completed key; decide it here so no ingest path can store that.
+    from ..analysis.run_analyzer import apply_timed_verdict
+    apply_timed_verdict(report)
     run = report.get("run") or {}
     forces = report.get("forces") or {}
     comparison = report.get("comparison") or {}
@@ -516,6 +580,7 @@ def _row_values(
         "source_path": str(source_path) if source_path is not None else None,
         "report_json": json.dumps(report),
         "ingested_at": time.time(),
+        "timed_checked": 1,
         **_leaderboard_fields(report),
     }
 

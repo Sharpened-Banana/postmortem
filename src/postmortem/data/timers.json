@@ -1,0 +1,26 @@
+{
+  "_comment": "Mythic+ dungeon timers (par time, ms) by challenge_map_id -- what decides TIMED vs OVER TIMER (analysis/run_analyzer.py: apply_timed_verdict). CHALLENGE_MODE_END's 'success' field is NOT that: it is 1 on every completed key, timed or not (108 of 108 real ENDs, 2026-09-19). Refresh each season with scripts/derive_timers.py, which reads the timers back out of real combat logs (the END line's score field is a function of par) and refuses any dungeon whose runs disagree. A dungeon missing here gets no verdict rather than a wrong one.",
+  "season": "Midnight Season 2",
+  "generated_at": "2026-09-19",
+  "generated_by": "scripts/derive_timers.py over 108 completed keys; every dungeon's runs agreed to the millisecond",
+  "timers": {
+    "249": 1980000,
+    "250": 1920000,
+    "399": 1680000,
+    "584": 1800000,
+    "585": 1800000,
+    "586": 1920000,
+    "587": 2040000,
+    "588": 1800000
+  },
+  "names": {
+    "249": "Kings' Rest",
+    "250": "Temple of Sethraliss",
+    "399": "Ruby Life Pools",
+    "584": "The Blinding Vale",
+    "585": "Voidscar Arena",
+    "586": "Den of Nalorakk",
+    "587": "Murder Row",
+    "588": "Altar of Fangs"
+  }
+}

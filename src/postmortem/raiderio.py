@@ -317,16 +317,11 @@ def parse_static_timers(payload: Any) -> dict[int, int]:
 
 
 def _default_fallback_timers_path() -> Path:
-    """``data/timers.json`` at the repo root, resolved relative to this
-    module's own file. This works when running from a checkout or an
-    editable install (``pip install -e .`` -- this project's documented
-    dev workflow); a non-editable ``pip install .`` wheel that ends up
-    without the repo layout alongside the installed package just won't
-    find a file here. That's tolerated the same as any other missing
-    fallback (see load_fallback_timers) -- pass --timer-data explicitly
-    in that kind of install instead.
-    """
-    return Path(__file__).resolve().parents[2] / "data" / "timers.json"
+    """The packaged ``data/timers.json``. Inside the package (not the
+    repo root, where it lived until 2026-09-19) so the desktop build and
+    the site's pip install both actually ship it -- the timed/over-timer
+    verdict depends on it everywhere, not just in a checkout."""
+    return Path(__file__).resolve().parent / "data" / "timers.json"
 
 
 def load_fallback_timers(path: Optional[str | Path] = None) -> dict[int, int]:

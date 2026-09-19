@@ -27,6 +27,7 @@ is still stale.
 | **Avoidable-damage list** | Every season (new dungeons = new avoidable spells). Grows with every key you play; a refresh just merges what the addon captured. | `extract-avoidable` — reads the addon's SavedVariables (auto-found under `WTF/`) |
 | **Spell damage** | Occasionally. Only the kick-value *fallback* when a spell never landed in your own run. | `build-spell-damage` — samples Warcraft Logs |
 | **Stealable buffs, kick proof, dispel evidence** | Every season. Which enemy buffs get spellstolen/purged/soothed (the only source of a stealable list), which casts have provably been kicked, which debuffs get dispelled and by what. Merges into the interrupt and dispel databases. | `build-event-data` — samples Warcraft Logs events |
+| **Dungeon timers** | Every season (new pool, and Blizzard retunes timers). They decide **TIMED vs OVER TIMER** — the log's own `success` flag cannot (it is 1 on every completed key). A dungeon missing from the table gets no verdict. | `python3 scripts/derive_timers.py "<WoW>/_retail_/Logs" --write` — reads them back out of your own logs once you have ~3 completed keys per dungeon; refuses any dungeon whose runs disagree |
 | **Addon `## Interface:`** | Every patch, or WoW marks the addon out of date. | `--toc-interface` |
 
 Not on this list, deliberately:

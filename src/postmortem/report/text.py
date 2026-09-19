@@ -95,7 +95,8 @@ def render_text(report: dict[str, Any]) -> str:
     add("=" * 72)
     result = "IN PROGRESS / ABANDONED"
     if run.get("completed"):
-        result = "TIMED" if run.get("timed") else "COMPLETED (over timer)"
+        result = ("COMPLETED (timer unknown)" if run.get("timed") is None
+                  else "TIMED" if run.get("timed") else "COMPLETED (over timer)")
     elif run.get("truncated"):
         # Cut off by the ingest event cap, not abandoned: everything below
         # is computed from the part of the key that was read.

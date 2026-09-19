@@ -438,6 +438,53 @@ def player_entries(stats) -> list[dict[str, Any]]:
     ]
 
 
+_BUNDLED_TIMERS: Optional[dict[int, int]] = None
+
+
+def bundled_par_ms(challenge_map_id: Any) -> Optional[int]:
+    """This dungeon's timer from the packaged season table, or None."""
+    global _BUNDLED_TIMERS
+    if _BUNDLED_TIMERS is None:
+        from ..raiderio import load_fallback_timers
+        _BUNDLED_TIMERS = load_fallback_timers()
+    try:
+        return _BUNDLED_TIMERS.get(int(challenge_map_id))
+    except (TypeError, ValueError):
+        return None
+
+
+def apply_timed_verdict(report: dict[str, Any], par_ms: Optional[int] = None) -> dict[str, Any]:
+    """Set ``run.timed`` from the dungeon's timer, in place.
+
+    The segmenter used to take it from CHALLENGE_MODE_END's ``success``
+    field, which is 1 for every key that was *completed*: a 30:14 run of
+    a 30:00 dungeon was reported TIMED (2026-09-19; all 108 real ENDs on
+    hand had success=1, over-time ones included). The only honest source
+    is final time against par. With no par known for the dungeon the
+    verdict is None -- "completed, can't say" -- never a guess.
+
+    Idempotent, and safe on a stored report: the site and the history
+    store call it on reports analyzed before this existed, whose
+    ``timed`` is the old wrong value. Adds the ``timer`` block when the
+    report has none.
+    """
+    run = report.get("run")
+    if not isinstance(run, dict) or not run.get("completed"):
+        return report
+    duration_ms = run.get("duration_ms")
+    if not isinstance(duration_ms, (int, float)) or duration_ms <= 0:
+        return report
+    timer = report.get("timer") if isinstance(report.get("timer"), dict) else None
+    par = par_ms or (timer or {}).get("par_ms") or bundled_par_ms(run.get("challenge_map_id"))
+    if not isinstance(par, (int, float)) or par <= 0:
+        run["timed"] = None
+        return report
+    run["timed"] = duration_ms <= par
+    if timer is None:
+        report["timer"] = _timer_summary(int(par), int(duration_ms))
+    return report
+
+
 def _timer_summary(par_ms: int, duration_ms: Optional[int]) -> dict[str, Any]:
     """+2/+3 keystone-upgrade thresholds at 80%/60% of par time -- a fixed
     WoW Mythic+ formula since the system's introduction, not season- or
@@ -620,6 +667,7 @@ def analyze_run(
 
     if par_ms is not None:
         report["timer"] = _timer_summary(par_ms, segment.duration_ms)
+    apply_timed_verdict(report, par_ms)
 
     if route is not None:
         report["route"] = route.summary(data)
