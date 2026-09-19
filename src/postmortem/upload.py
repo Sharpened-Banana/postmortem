@@ -294,6 +294,48 @@ def start_device_link(
         return {"ok": False, "error": str(exc)}
 
 
+#: Where app feedback goes: always the project's own site, never the
+#: tracker configured in Settings -- that may be somebody's self-hosted
+#: copy, and feedback about the app belongs with whoever builds it.
+FEEDBACK_SITE_URL = "https://postmortem-mplus.fly.dev"
+
+
+def send_feedback(
+    message: str, *, kind: str = "other", contact: str = "", source: str = "app",
+    version: str = "", url: str = FEEDBACK_SITE_URL, timeout: float = 20.0,
+) -> dict[str, Any]:
+    """Send one piece of feedback to the site's ``/api/feedback``.
+    ``{"ok": True}`` on success, else ``{"ok": False, "error": "..."}``.
+    Never raises. Carries no upload token: feedback is anonymous unless
+    the writer fills in ``contact`` themselves."""
+    endpoint = f"{site_base_url(url)}/api/feedback"
+    payload = json.dumps({
+        "message": message, "kind": kind, "contact": contact,
+        "source": source, "version": version,
+    }).encode("utf-8")
+    try:
+        request = urllib.request.Request(
+            endpoint, data=payload, method="POST",
+            headers={"Content-Type": "application/json", "User-Agent": USER_AGENT},
+        )
+        with urllib.request.urlopen(request, timeout=timeout, context=https_context()) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        try:
+            result = json.loads(exc.read().decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            result = None
+        error = result.get("error") if isinstance(result, dict) else None
+        return {"ok": False, "error": str(error or f"HTTP {exc.code}: {exc.reason}")}
+    except urllib.error.URLError as exc:
+        return {"ok": False, "error": str(exc.reason)}
+    except (ValueError, OSError) as exc:
+        return {"ok": False, "error": str(exc)}
+    if isinstance(result, dict) and result.get("ok"):
+        return {"ok": True}
+    return {"ok": False, "error": "the site did not confirm it received the feedback"}
+
+
 def poll_device_link(url: str, poll_token: str, timeout: float = 15.0) -> dict[str, Any]:
     """Check the status of a code started with ``start_device_link``.
     Returns ``{"status": "pending"}``, ``{"status": "approved",

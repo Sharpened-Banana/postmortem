@@ -168,12 +168,13 @@ local function CreateInfoFrame()
   copyButton:SetPoint("RIGHT", closeButton, "LEFT", -8, 0)
   copyButton:SetScript("OnClick", function() MA:Info_ShowLinkPopup() end)
 
-  local urlFS = buttonRow:CreateFontString(nil, "OVERLAY")
-  urlFS:SetFontObject(GameFontDisableSmall)
-  urlFS:SetPoint("LEFT", buttonRow, "LEFT", 0, 0)
-  urlFS:SetPoint("RIGHT", copyButton, "LEFT", -12, 0)
-  urlFS:SetJustifyH("LEFT")
-  urlFS:SetText(MA.INFO.url)
+  -- Left side of the row. This used to be the download URL as text, which
+  -- never fit beside the buttons (it is in the copy popup anyway).
+  local feedbackButton = CreateFrame("Button", nil, buttonRow, "UIPanelButtonTemplate")
+  feedbackButton:SetSize(120, BUTTON_HEIGHT)
+  feedbackButton:SetText("Send feedback")
+  feedbackButton:SetPoint("LEFT", buttonRow, "LEFT", 0, 0)
+  feedbackButton:SetScript("OnClick", function() MA:Info_ShowFeedbackPopup() end)
 
   -- Height computed from the actual rendered content, not a guessed
   -- constant: every FontString above already has its final SetText AND its
@@ -229,6 +230,8 @@ SlashCmdList["POSTMORTEM"] = function(msg)
     if MA.Results_Show then MA:Results_Show() end
   elseif msg == "link" or msg == "url" then
     MA:Info_ShowLinkPopup()
+  elseif msg == "feedback" or msg == "bug" then
+    MA:Info_ShowFeedbackPopup()
   elseif msg == "minimap" then
     if MA.MinimapButton_Toggle then MA.MinimapButton_Toggle(MA) end
   elseif msg == "history" then
@@ -243,7 +246,7 @@ SlashCmdList["POSTMORTEM"] = function(msg)
     print("|cffd7a94cPostmortem|r: /pm (info window), /pm results (in-game run stats), "
       .. "/pm history (last 5 runs), /pm options (settings), "
       .. "/pm snapshot (mark a snapshot -- same as the keybind), "
-      .. "/pm link (copy download link), /pm minimap (toggle minimap icon), "
+      .. "/pm link (copy download link), /pm feedback (report a bug or idea), /pm minimap (toggle minimap icon), "
       .. "/pm debug (run every module now, as if a key started)")
   end
 end

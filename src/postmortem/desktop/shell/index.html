@@ -22,6 +22,7 @@
       <button type="button" class="navbtn" data-screen="watch">Watch Live</button>
       <button type="button" class="navbtn" data-screen="history">History</button>
       <button type="button" class="navbtn" data-screen="settings">Settings</button>
+      <button type="button" class="navbtn" data-screen="feedback">Feedback</button>
     </nav>
   </header>
 
@@ -290,6 +291,46 @@
           <button type="button" class="btn btn-secondary btn-sm" id="hist-back-btn">← New search</button>
         </div>
         <iframe id="hist-frame" class="report-frame" title="Run history" sandbox="allow-scripts"></iframe>
+      </div>
+    </section>
+
+    <!-- ============================== FEEDBACK ============================ -->
+    <section id="screen-feedback" class="screen" hidden>
+      <div class="page-head">
+        <h1>Feedback</h1>
+        <p class="sub">Found a bug, want a feature, something confusing? This goes straight to the person who builds Postmortem.</p>
+      </div>
+
+      <div class="content-max busy-wrap">
+        <div class="busy-overlay" id="fb-busy-overlay" hidden>
+          <div class="spinner sm"></div>
+          <span>Sending…</span>
+        </div>
+
+        <div class="banner banner-error" id="fb-error-banner" hidden></div>
+        <div class="banner banner-success" id="fb-success-banner" hidden>Thank you — your feedback was sent.</div>
+
+        <div class="field">
+          <label for="fb-kind">What kind of feedback?</label>
+          <select id="fb-kind">
+            <option value="bug">Bug</option>
+            <option value="idea">Idea</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="fb-message">Your feedback</label>
+          <textarea id="fb-message" rows="8" maxlength="5000" placeholder="What happened, and what did you expect? For a bug, which dungeon and key level helps a lot."></textarea>
+        </div>
+
+        <div class="field">
+          <label for="fb-contact">How to reach you (optional)</label>
+          <input type="text" id="fb-contact" maxlength="200" placeholder="Discord name or email">
+          <div class="help">Only used to ask a follow-up question. Your app version is attached automatically; nothing else about you or your runs is sent.</div>
+        </div>
+
+        <button type="button" class="btn btn-primary" id="fb-send-btn">Send feedback</button>
       </div>
     </section>
 
