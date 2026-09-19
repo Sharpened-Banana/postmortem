@@ -1757,6 +1757,26 @@ class DesktopAPI:
         return {"ok": True, "linked": bool(result.get("linked")),
                 "display_name": result.get("display_name")}
 
+    def send_feedback(self, params: dict) -> dict:
+        """Send feedback from the Feedback screen. ``params``:
+        ``message`` (str, required), ``kind`` ("bug"/"idea"/"other"),
+        ``contact`` (str, optional). The app's version is attached here
+        rather than trusted from the page.
+
+        Returns ``{"ok": True}`` or ``{"ok": False, "error": "..."}``.
+        Never raises.
+        """
+        params = params if isinstance(params, dict) else {}
+        message = str(params.get("message") or "").strip()
+        if not message:
+            return {"ok": False, "error": "Write your feedback first."}
+        from .. import upload as _upload
+        from ._version import VERSION
+        return _upload.send_feedback(
+            message, kind=str(params.get("kind") or "other"),
+            contact=str(params.get("contact") or ""), source="app", version=VERSION,
+        )
+
     def get_settings(self) -> dict:
         """Return persisted desktop settings (see ``desktop/config.py``),
         merged with defaults for any field never saved. Always succeeds

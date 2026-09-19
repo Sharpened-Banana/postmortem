@@ -22,6 +22,10 @@ local ADDON_NAME, MA = ...
 -- none of them should ever have this text typed a second time.
 MA.INFO = {
   url = "https://github.com/Sharpened-Banana/Postmortem/releases",
+  -- The site's feedback form. An addon can neither open a browser nor
+  -- send anything itself, so "Send feedback" hands over this link (with
+  -- the addon's version attached) to copy -- see Info_FeedbackURL().
+  feedbackUrl = "https://postmortem-mplus.fly.dev/feedback",
 
   headline = "Postmortem -- live in-game half",
   subhead = "The deep post-mortem runs in the free companion desktop app.",
@@ -87,6 +91,34 @@ StaticPopupDialogs["POSTMORTEM_COPY_URL"] = {
 
 function MA:Info_ShowLinkPopup()
   StaticPopup_Show("POSTMORTEM_COPY_URL", nil, nil, MA.INFO.url)
+end
+
+-- Same popup, different wording: the link is the feedback form, and the
+-- person has to be told to paste it into a browser (nothing in the game
+-- suggests that on its own).
+local feedbackDialog = {}
+for key, value in pairs(StaticPopupDialogs["POSTMORTEM_COPY_URL"]) do
+  feedbackDialog[key] = value
+end
+feedbackDialog.text = "Feedback, bugs and ideas are welcome.\nPress Ctrl+C to copy this link, then paste it into your browser."
+StaticPopupDialogs["POSTMORTEM_COPY_FEEDBACK_URL"] = feedbackDialog
+
+-- Version goes in the query string so the form can say which build the
+-- feedback is about. Only [%w%.%-] survives: the value comes from the
+-- .toc, but it ends up in a URL someone pastes into a browser.
+function MA:Info_FeedbackURL()
+  local version = C_AddOns and C_AddOns.GetAddOnMetadata
+    and C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version") or ""
+  version = tostring(version or ""):gsub("[^%w%.%-]", "")
+  local url = MA.INFO.feedbackUrl .. "?source=addon"
+  if version ~= "" then
+    url = url .. "&version=" .. version
+  end
+  return url
+end
+
+function MA:Info_ShowFeedbackPopup()
+  StaticPopup_Show("POSTMORTEM_COPY_FEEDBACK_URL", nil, nil, MA:Info_FeedbackURL())
 end
 
 -- Shown exactly once per WoW account, ever (gated by db.infoPopupSeen; see
