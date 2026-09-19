@@ -439,3 +439,57 @@ class TestWhoami:
         result = upload.whoami("https://example.com", token="tok")
         assert result["linked"] is False
         assert "nope" in result["error"]
+
+
+class TestSendFeedback:
+    """send_feedback: the desktop app's Feedback screen. Anonymous (no
+    upload token), always to the project's own site, never raises."""
+
+    def test_posts_to_the_projects_site_without_a_token(self, monkeypatch):
+        def fake_urlopen(request, timeout=None, context=None):
+            assert request.full_url == "https://postmortem-mplus.fly.dev/api/feedback"
+            assert request.get_header("X-upload-token") is None
+            assert json.loads(request.data.decode("utf-8")) == {
+                "message": "kicks table is empty", "kind": "bug", "contact": "zebra",
+                "source": "app", "version": "alpha-desktop-50",
+            }
+            return _FakeHTTPResponse(json.dumps({"ok": True}).encode())
+
+        monkeypatch.setattr(upload.urllib.request, "urlopen", fake_urlopen)
+        result = upload.send_feedback(
+            "kicks table is empty", kind="bug", contact="zebra", version="alpha-desktop-50",
+        )
+        assert result == {"ok": True}
+
+    def test_the_sites_own_error_message_is_what_the_user_sees(self, monkeypatch):
+        def fake_urlopen(request, timeout=None, context=None):
+            raise urllib.error.HTTPError(
+                request.full_url, 429, "Too Many Requests", hdrs=None,
+                fp=io.BytesIO(json.dumps({"error": "try again later"}).encode()),
+            )
+
+        monkeypatch.setattr(upload.urllib.request, "urlopen", fake_urlopen)
+        assert upload.send_feedback("hello there") == {"ok": False, "error": "try again later"}
+
+    def test_a_non_json_error_page_and_a_dead_network_never_raise(self, monkeypatch):
+        def html_502(request, timeout=None, context=None):
+            raise urllib.error.HTTPError(
+                request.full_url, 502, "Bad Gateway", hdrs=None, fp=io.BytesIO(b"<html>"),
+            )
+
+        monkeypatch.setattr(upload.urllib.request, "urlopen", html_502)
+        assert upload.send_feedback("hello there") == {
+            "ok": False, "error": "HTTP 502: Bad Gateway"}
+
+        def offline(request, timeout=None, context=None):
+            raise urllib.error.URLError("no route to host")
+
+        monkeypatch.setattr(upload.urllib.request, "urlopen", offline)
+        assert upload.send_feedback("hello there") == {"ok": False, "error": "no route to host"}
+
+    def test_a_200_that_is_not_a_confirmation_is_not_success(self, monkeypatch):
+        monkeypatch.setattr(
+            upload.urllib.request, "urlopen",
+            lambda request, timeout=None, context=None: _FakeHTTPResponse(b"{}"),
+        )
+        assert upload.send_feedback("hello there")["ok"] is False

@@ -79,7 +79,7 @@ function setBusy(overlayEl, busy, message) {
 
 // -- screen routing -----------------------------------------------------
 
-const SCREEN_IDS = ["home", "new", "watch", "history", "settings", "report"];
+const SCREEN_IDS = ["home", "new", "watch", "history", "settings", "feedback", "report"];
 
 // Ephemeral (error/success) banners a prior screen visit may have left
 // showing -- cleared on every navigation so a stale message from a
@@ -91,6 +91,7 @@ const SCREEN_IDS = ["home", "new", "watch", "history", "settings", "report"];
 const EPHEMERAL_BANNER_IDS = [
   "na-error-banner", "hist-error-banner",
   "set-error-banner", "set-success-banner", "extract-error-banner",
+  "fb-error-banner", "fb-success-banner",
   "watch-error-banner",
 ];
 
@@ -1028,6 +1029,47 @@ async function onLoadHistory() {
 // Settings
 // ===========================================================================
 
+// -- feedback screen ------------------------------------------------------
+
+function initFeedback() {
+  const btn = document.getElementById("fb-send-btn");
+  const message = document.getElementById("fb-message");
+  const contact = document.getElementById("fb-contact");
+  const kind = document.getElementById("fb-kind");
+  const errorBanner = document.getElementById("fb-error-banner");
+  const successBanner = document.getElementById("fb-success-banner");
+  const overlay = document.getElementById("fb-busy-overlay");
+  btn.addEventListener("click", async () => {
+    hideBanner(errorBanner);
+    hideBanner(successBanner);
+    if (!message.value.trim()) {
+      showBanner(errorBanner, "Write your feedback first.");
+      return;
+    }
+    btn.disabled = true;
+    setBusy(overlay, true);
+    let result;
+    try {
+      result = await api().send_feedback({
+        kind: kind.value, message: message.value, contact: contact.value,
+      });
+    } catch (e) {
+      result = { ok: false, error: String(e) };
+    }
+    setBusy(overlay, false);
+    btn.disabled = false;
+    if (result && result.ok) {
+      // The contact line stays: someone sending a second note should
+      // not have to retype it.
+      message.value = "";
+      successBanner.hidden = false;
+    } else {
+      // The text stays too, so a failed send loses nothing.
+      showBanner(errorBanner, `Could not send: ${(result && result.error) || "unknown error"}`);
+    }
+  });
+}
+
 const set = {};
 
 function initSettings() {
@@ -1664,6 +1706,7 @@ async function boot() {
   initWatch();
   initHistory();
   initSettings();
+  initFeedback();
   initReportScreen();
   initUpdate();
   wireNav();

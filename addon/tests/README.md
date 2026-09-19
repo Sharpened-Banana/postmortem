@@ -36,6 +36,11 @@ every one of those has to produce no panel rather than a broken one.
 (including overtime and the no-time-limit fallback), and the order the rows
 actually reflow into, both during a key and in the post-key recap window.
 
+`feedback_link.lua` covers `Info.lua`'s "Send feedback" link: an addon
+cannot open a browser, so the button hands over a link to the site's form
+to copy, and that link must carry the addon's version and nothing that
+breaks a pasted URL.
+
 `snapshot_mark.lua` covers `Snapshot.lua` (docs/SNAPSHOT.md): a keybind
 press must toggle combat logging off/on exactly N times for the presser's
 role (2 healer / 3 tank / 4 other), 0.25 s apart, ending ON, record one

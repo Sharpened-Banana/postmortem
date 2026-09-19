@@ -1917,3 +1917,34 @@ class TestReportSnapshots:
         db_path = tmp_path / "runs.db"
         history_ingest(result["report"], db_path)
         assert api.list_history(db_path=str(db_path))["rows"][0]["snapshots"] == 0
+
+
+class TestSendFeedback:
+    def test_attaches_the_apps_own_version_and_source(self, api, monkeypatch):
+        from postmortem import upload as upload_module
+        from postmortem.desktop import _version
+        seen = {}
+
+        def fake_send(message, **kwargs):
+            seen.update(kwargs, message=message)
+            return {"ok": True}
+
+        monkeypatch.setattr(upload_module, "send_feedback", fake_send)
+        monkeypatch.setattr(_version, "VERSION", "alpha-desktop-50")
+        result = api.send_feedback({
+            "message": "  love it  ", "kind": "idea", "contact": "zebra",
+            "version": "spoofed", "source": "spoofed",
+        })
+        assert result == {"ok": True}
+        assert seen == {"message": "love it", "kind": "idea", "contact": "zebra",
+                        "source": "app", "version": "alpha-desktop-50"}
+
+    def test_empty_or_malformed_params_never_reach_the_network(self, api, monkeypatch):
+        from postmortem import upload as upload_module
+
+        def boom(*args, **kwargs):
+            raise AssertionError("should not send")
+
+        monkeypatch.setattr(upload_module, "send_feedback", boom)
+        assert api.send_feedback({"message": "   "})["ok"] is False
+        assert api.send_feedback(None)["ok"] is False
