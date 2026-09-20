@@ -46,6 +46,37 @@ In priority order -- each builds on the ones above it:
       app's History. A reason to come back beyond one bad key. Extends
       the trend-chart item under *Historical lookup webpage*.
 
+Also agreed 2026-09-19, after the six above (not yet ordered among
+themselves):
+
+- [ ] **Role scorecards that are not damage meters** -- grade the job,
+      not the number. Tank: how smooth the damage intake was, share of
+      each pull spent with a defensive up. Healer: time the group spent
+      dangerously low. Damage dealers: kicks, avoidable damage taken,
+      uptime on priority targets.
+- [ ] **Applicant insight** -- look a player up before inviting and see
+      behaviour rather than score: kick rate, avoidable damage and deaths
+      per key. Builds on the site's player lookup. It judges individuals,
+      so it ships with a way for a player to opt out.
+- [ ] **Log health check** -- before a key the addon and app confirm
+      advanced logging is on, there is disk space, the app is watching
+      the log and a route is loaded; afterwards, that the run was
+      captured. "Did it record?" is the worry every logging tool leaves
+      its users with, and answering it is what keeps the app installed.
+- [ ] **Private by default for a group** -- a team can keep its runs
+      unlisted and share by link only (key-pushing groups do not want
+      their routes public). Extends the per-run visibility the site
+      already has to a group-wide default.
+- [ ] **Route tools**
+  - [ ] Route library with outcomes: every uploaded route ranked by how
+        it actually performs -- timed rate, average time, where groups
+        leave it. MDT shares the plan; this shows the result. Companion
+        to the Keystone.guru sync.
+  - [ ] Deviation heatmap per route: where groups following a route most
+        often go off it, which tells its author what is unrealistic.
+- [ ] **Season wrap-up** -- at season's end, a shareable summary of the
+      player's season: keys run, best moments, most improved stat.
+
 Deliberately not on this list: rankings, percentiles and talent-build
 advice. Raider.io, Warcraft Logs and Archon do those well, and competing
 there means fighting on their ground.
