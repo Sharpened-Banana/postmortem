@@ -215,8 +215,90 @@ def _migrate(conn: sqlite3.Connection) -> None:
     except Exception:
         conn.rollback()
         raise
+    _keep_report_json_last(conn)
     _backfill_leaderboard_columns(conn)
     _backfill_timed_verdict(conn)
+
+
+def _keep_report_json_last(conn: sqlite3.Connection) -> None:
+    """Rebuild ``runs`` so ``report_json`` is its last column, if it is not.
+
+    A row's columns are stored in order, and ``report_json`` (~1.4MB on a
+    real run) spills into a chain of overflow pages. Reading any column
+    stored AFTER it means walking that whole chain, so every column added
+    by ALTER TABLE (party, threshold, margin_ms, deaths_json, uploaded_at,
+    timed_checked...) cost a read of every report in the table. The site's
+    run list selects four of them: on a cold disk it read the entire 175MB
+    database, ~9.5s, measured 2026-09-22 (the same query without them took
+    10ms). With the blob last, every other column sits in the row's first
+    page.
+
+    Re-checked on every open (one PRAGMA) because ALTER TABLE ADD COLUMN
+    always appends, so any future added column lands after the blob again
+    and this moves it back once. The rebuild is SQLite's documented
+    "make other kinds of table schema changes" procedure: foreign keys off,
+    new table, copy, drop, rename, check, on. Row ids and the AUTOINCREMENT
+    high-water mark are kept -- run ids are public URLs, and a deleted run's
+    id must never come back as a different run.
+    """
+    cols = list(conn.execute("PRAGMA table_info(runs)"))
+    if not cols or cols[-1][1] == "report_json":
+        return
+    fk_on = conn.execute("PRAGMA foreign_keys").fetchone()[0]
+    # A no-op inside a transaction, so set before BEGIN.
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError:
+            return  # another opener holds the lock and is doing this
+        try:
+            cols = list(conn.execute("PRAGMA table_info(runs)"))
+            if cols[-1][1] == "report_json":
+                conn.rollback()
+                return
+            ordered = [c for c in cols if c[1] != "report_json"] + \
+                [c for c in cols if c[1] == "report_json"]
+            defs = []
+            for _cid, name, ctype, notnull, default, pk in ordered:
+                if pk:
+                    defs.append(f'"{name}" INTEGER PRIMARY KEY AUTOINCREMENT')
+                    continue
+                d = f'"{name}" {ctype}'.rstrip()
+                if notnull:
+                    d += " NOT NULL"
+                if default is not None:
+                    d += f" DEFAULT {default}"
+                defs.append(d)
+            defs.append("UNIQUE(zone, start_ts)")
+            indexes = [r[0] for r in conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'index' "
+                "AND tbl_name = 'runs' AND sql IS NOT NULL")]
+            seq = conn.execute(
+                "SELECT seq FROM sqlite_sequence WHERE name = 'runs'").fetchone()
+            names = ", ".join(f'"{c[1]}"' for c in ordered)
+            conn.execute("DROP TABLE IF EXISTS runs_reordered")
+            conn.execute(f"CREATE TABLE runs_reordered ({', '.join(defs)})")
+            conn.execute(f"INSERT INTO runs_reordered ({names}) SELECT {names} FROM runs")
+            conn.execute("DROP TABLE runs")
+            conn.execute("ALTER TABLE runs_reordered RENAME TO runs")
+            for sql in indexes:
+                conn.execute(sql)
+            if seq is not None:
+                conn.execute("DELETE FROM sqlite_sequence WHERE name = 'runs'")
+                conn.execute(
+                    "INSERT INTO sqlite_sequence (name, seq) VALUES ('runs', "
+                    "MAX(?, COALESCE((SELECT MAX(id) FROM runs), 0)))", (seq[0],))
+            bad = conn.execute("PRAGMA foreign_key_check").fetchall()
+            if bad:
+                raise sqlite3.IntegrityError(f"foreign key check failed: {bad[:3]}")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+    finally:
+        if fk_on:
+            conn.execute("PRAGMA foreign_keys = ON")
 
 
 def _backfill_timed_verdict(conn: sqlite3.Connection) -> None:
