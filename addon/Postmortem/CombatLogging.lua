@@ -70,6 +70,16 @@ local STOP_GRACE_S = 5
 -- next one and silently kill that key's log.
 local pendingStop = nil
 
+-- pendingStop is a file-local timer, so a /reload inside the grace window
+-- used to lose it and leave logging on indefinitely. The due time is
+-- therefore also persisted, as a time() wall-clock stamp, in
+-- PostmortemDB.global.stopLoggingAt, and CombatLogging_OnInitialize()
+-- (run from Bootstrap's ADDON_LOADED) re-arms or carries out the stop.
+-- A stamp older than this is from a session that ended long ago (a crash,
+-- say) and says nothing about the logging state now, so it is just
+-- cleared rather than acted on.
+local STOP_STALE_S = 300
+
 -- Other installed addons known to independently manage LoggingCombat --
 -- confirmed present on this machine, real folder names (the name
 -- IsAddOnLoaded actually checks, not the display title): MythicDungeonTools
@@ -110,6 +120,8 @@ local function cancelPendingStop()
     pendingStop:Cancel()
     pendingStop = nil
   end
+  local db = MA.GetDB and MA:GetDB()
+  if db then db.stopLoggingAt = nil end
 end
 
 local function cancelReassertTicker()
@@ -207,10 +219,42 @@ function MA:CombatLogging_OnChallengeModeEnd()
   -- in that same window -- and stop both together once it's over.
   cancelPendingStop()
   MA:Debug("Combat logging: was %s at key end; turning off in %ds", MA.state.combatLogWasOn and "ON" or "OFF", STOP_GRACE_S)
+  self:GetDB().stopLoggingAt = time() + STOP_GRACE_S
   pendingStop = C_Timer.NewTimer(STOP_GRACE_S, function()
     pendingStop = nil
+    MA:GetDB().stopLoggingAt = nil
     -- Ticker first: a tick landing between here and LoggingCombat(false)
     -- would turn logging straight back on behind our own back.
+    cancelReassertTicker()
+    MA:CombatLogging_SetState(false, false)
+  end)
+end
+
+-- Called once SavedVariables are loaded (Bootstrap.lua's OnInitialize).
+-- Finishes a post-key stop that a /reload interrupted -- see STOP_STALE_S.
+-- A new key starting before it fires cancels it like any pending stop.
+function MA:CombatLogging_OnInitialize()
+  local db = self:GetDB()
+  if not db then return end
+  local at = db.stopLoggingAt
+  if type(at) ~= "number" then
+    db.stopLoggingAt = nil
+    return
+  end
+  local wait = at - time()
+  if wait < -STOP_STALE_S then
+    db.stopLoggingAt = nil
+    return
+  end
+  if wait < 0 then wait = 0 end
+  if pendingStop then pendingStop:Cancel() end
+  MA:Debug("Combat logging: finishing the post-key stop a /reload interrupted, in %ds", wait)
+  pendingStop = C_Timer.NewTimer(wait, function()
+    pendingStop = nil
+    db.stopLoggingAt = nil
+    -- Defensive: a key recovered or started meanwhile owns logging now
+    -- (its start would normally have cancelled this timer already).
+    if MA.state and MA.state.active then return end
     cancelReassertTicker()
     MA:CombatLogging_SetState(false, false)
   end)

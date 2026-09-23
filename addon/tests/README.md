@@ -91,3 +91,9 @@ key even when COMPLETED and RESET both arrive, no harvest ticker left
 running afterwards, and only the amount a key added on top of the Overall
 session's key-start snapshot is recorded (a meter reset in between makes
 the whole session this key's).
+
+`logging_stop_reload.lua` covers `CombatLogging.lua`'s post-key stop
+across a `/reload`: the 5 s grace timer is file-local, so its due time is
+persisted in `PostmortemDB.global.stopLoggingAt` and finished on load
+(overdue: at once; stale by more than 5 min: cleared, not acted on; a new
+key: cancelled). Each session reloads the files into a fresh addon table.

@@ -174,6 +174,9 @@ end
 -- Empty init stub for later work packages to extend. Called once, after
 -- SavedVariables are ready, from the ADDON_LOADED handler below.
 function MA:OnInitialize()
+  -- First: a post-key logging stop interrupted by a /reload must be
+  -- finished whatever else happens during init.
+  if MA.CombatLogging_OnInitialize then MA.CombatLogging_OnInitialize(MA) end
   if MA.MinimapButton_Initialize then MA.MinimapButton_Initialize(MA) end
   if MA.Options_Initialize then MA.Options_Initialize(MA) end
 end
