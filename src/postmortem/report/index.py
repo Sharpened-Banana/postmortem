@@ -400,7 +400,7 @@ function loadAbilityTooltips() {
 // this rather than being interpolated raw.
 const num = (v, fallback = "—") => Number.isFinite(Number(v)) && v !== null && v !== ""
   ? String(Number(v)) : fallback;
-// Sign in front of the magnitude (Math.floor made -65s "-2:-5"), and a
+// The minus goes before the magnitude (Math.floor made -65s "-2:-5"), and a
 // non-number is "?" rather than "NaN:NaN".
 const mmss = s => { if (s == null || s === "") return "?"; s = Math.round(Number(s));
   if (!Number.isFinite(s)) return "?";
