@@ -236,12 +236,14 @@ details.sec:not([open]) > summary .sec-toggle::before { content: "\\25B8"; }
 // So the angle brackets are neutralised once, here, for every string in
 // the report, before a single template runs. Nothing downstream can then
 // open a tag, whatever context it lands in. Escaping (rather than
-// stripping) keeps the characters readable, and it is deliberately ONLY
-// < and > -- quotes are left for esc() at the attribute sites, because
-// pre-escaping them here would double-escape the many legitimate
-// apostrophes in WoW names.
+// stripping) keeps the characters readable. & is escaped too, so every
+// string is exactly the HTML text of the original value and esc() below
+// can tell deTag's entities from a literal "&lt;" in a name. Quotes are
+// left for esc() at the attribute sites, because pre-escaping them here
+// would double-escape the many legitimate apostrophes in WoW names.
 function deTag(value) {
-  if (typeof value === "string") return value.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  if (typeof value === "string")
+    return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   if (Array.isArray(value)) return value.map(deTag);
   if (value && typeof value === "object") {
     const out = {};
@@ -256,7 +258,14 @@ const R = deTag(JSON.parse(document.getElementById("report-data").textContent));
 // an escaped value is safe in a single-quoted attribute and in a
 // template literal, not only in the double-quoted attributes this file
 // happens to use today.
-const esc = s => String(s ?? "").replace(/[&<>"'`]/g,
+//
+// An & that already starts one of deTag's entities is left alone: every
+// report string has been through deTag, and escaping its &lt; again made
+// a name with a bracket display as "A&lt;b&gt;". The output is just as
+// inert -- no raw < > " ' ` survives, and & appears only as an entity.
+// (Nothing on this page reads a report value back out of an attribute;
+// the feed in report/index.py does, and has attr() for that.)
+const esc = s => String(s ?? "").replace(/&(?!(?:amp|lt|gt);)|[<>"'`]/g,
   c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;","`":"&#96;"}[c]));
 
 // Ability names link to the ability on Wowhead: a click opens its page,

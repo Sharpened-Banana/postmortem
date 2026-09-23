@@ -89,6 +89,64 @@ class TestSectionTitles:
         assert "sec-dispel-efficiency-85" not in out
 
 
+def _attr_values(html: str, tag: str, name: str) -> list[str]:
+    """Attribute values as the browser would read them back (entities
+    decoded), which is what the pages' listeners compare against."""
+    from html.parser import HTMLParser
+
+    found: list[str] = []
+
+    class P(HTMLParser):
+        def handle_starttag(self, t, attrs):
+            if t == tag:
+                found.extend(v for k, v in attrs if k == name and v is not None)
+
+    P(convert_charrefs=True).feed(html)
+    return found
+
+
+@needs_node
+class TestBracketsDisplayOnce:
+    """deTag() escapes < and > up front, and esc() then escaped the & of
+    that entity again, so "A<b>" displayed as "A&lt;b&gt;"."""
+
+    ZONE = "Rise <&> Fall"
+
+    def _feed(self, extra="render();"):
+        rows = [_feed_row(zone=self.ZONE,
+                          party=[{"name": "A<b>", "class": "WARRIOR", "role": "tank"}])]
+        return rows, _run(_extract_script(render_index(rows)), "runs-data",
+                          json.dumps(rows), extra=extra)
+
+    def test_feed_shows_the_original_characters(self):
+        import re
+        _rows, out = self._feed()
+        assert 'title="A&lt;b&gt;' in out
+        assert 'title="Rise &lt;&amp;&gt; Fall"' in out
+        assert ">Rise &lt;&amp;&gt; Fall</option>" in out
+        # The read-back attributes are escaped in full on purpose (attr());
+        # everything the visitor actually sees is escaped exactly once.
+        shown = re.sub(r'(value|data-key)="[^"]*"', "", out)
+        assert "&amp;lt;" not in shown and "&amp;amp;" not in shown
+
+    def test_feed_filter_and_row_toggle_still_round_trip(self):
+        _rows, out = self._feed()
+        (value,) = [v for v in _attr_values(out, "option", "value") if v]
+        (key,) = _attr_values(out, "div", "data-key")
+        _rows, out = self._feed(
+            extra=f"dungeon = {json.dumps(value)}; openKey = {json.dumps(key)}; render();")
+        assert "open full report" in out, "the row did not open from its own data-key"
+        assert "no runs yet" not in out, "the dungeon filter matched nothing"
+
+    def test_run_report_shows_the_original_characters(self, real_report):
+        report = json.loads(json.dumps(real_report))
+        report["players"][0]["name"] = "A<b>&c"
+        out = _run(_extract_script(render_html(report)), "report-data",
+                   json.dumps(report), extra="render();")
+        assert "A&lt;b&gt;&amp;c" in out
+        assert "&amp;lt;" not in out
+
+
 def _strict(payload: str):
     def reject(constant):
         raise AssertionError(f"non-standard JSON constant {constant!r} in the page")

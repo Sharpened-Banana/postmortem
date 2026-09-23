@@ -339,12 +339,14 @@ a.ability:hover { color:var(--accent); border-bottom-color:var(--accent); }
 // So the angle brackets are neutralised once, here, for every string in
 // the report, before a single template runs. Nothing downstream can then
 // open a tag, whatever context it lands in. Escaping (rather than
-// stripping) keeps the characters readable, and it is deliberately ONLY
-// < and > -- quotes are left for esc() at the attribute sites, because
-// pre-escaping them here would double-escape the many legitimate
-// apostrophes in WoW names.
+// stripping) keeps the characters readable. & is escaped too, so every
+// string is exactly the HTML text of the original value and esc() below
+// can tell deTag's entities from a literal "&lt;" in a name. Quotes are
+// left for esc() at the attribute sites, because pre-escaping them here
+// would double-escape the many legitimate apostrophes in WoW names.
 function deTag(value) {
-  if (typeof value === "string") return value.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  if (typeof value === "string")
+    return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   if (Array.isArray(value)) return value.map(deTag);
   if (value && typeof value === "object") {
     const out = {};
@@ -362,8 +364,17 @@ const RUNS = deTag(JSON.parse(document.getElementById("runs-data").textContent))
 // and everything after it ran (2026-09-11). The inline handlers are gone
 // (see the delegated listeners at the bottom of this script), but the
 // escape stays complete so the next author cannot reintroduce it.
-const esc = s => String(s ?? "").replace(/[&<>"'`]/g,
-  c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;","`":"&#96;"}[c]));
+//
+// An & that already starts one of deTag's entities is left alone: every
+// report string has been through deTag, and escaping its &lt; again made
+// a name with a bracket display as "A&lt;b&gt;". The output is just as
+// inert -- no raw < > " ' ` survives, and & appears only as an entity.
+const ESCAPES = {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;","`":"&#96;"};
+const esc = s => String(s ?? "").replace(/&(?!(?:amp|lt|gt);)|[<>"'`]/g, c => ESCAPES[c]);
+// For a value the page reads back out of the DOM and compares with RUNS
+// (a row's data-key, the dungeon filter's option value): escape every
+// &, so the browser's decoded attribute equals the deTag'd string again.
+const attr = s => String(s ?? "").replace(/[&<>"'`]/g, c => ESCAPES[c]);
 
 // Killing-blow names link to the ability on Wowhead (see report/html.py's
 // ability() -- same contract: a positive integer id or plain text).
@@ -581,7 +592,7 @@ function runRow(r) {
     <div class="party">${partyCell(dpsList)}</div>`;
   // The whole row toggles its detail (the caret is just the indicator) --
   // a 22px glyph is too small a click target on its own.
-  return `<div class="run-row${isOpen ? " open" : ""}" data-key="${esc(key)}">
+  return `<div class="run-row${isOpen ? " open" : ""}" data-key="${attr(key)}">
     <div class="caret">${isOpen ? "▾" : "▸"}</div>
     <div class="rank${r._rank ? "" : " none"}">${num(r._rank, "—")}</div>
     <div class="dungeon" title="${esc(r.zone)}">${esc(abbrev(r.zone))}${snapTag(r)}</div>
@@ -698,7 +709,7 @@ function render() {
   </div>
   <select id="dungeon-filter">
     <option value="">All dungeons</option>
-    ${dungeons.map(d => `<option ${d === dungeon ? "selected" : ""} value="${esc(d)}">${esc(d)}</option>`).join("")}
+    ${dungeons.map(d => `<option ${d === dungeon ? "selected" : ""} value="${attr(d)}">${esc(d)}</option>`).join("")}
   </select>
   ${chartsSection(chartRows)}
   <div class="wrap"><div class="board">
