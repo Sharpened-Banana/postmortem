@@ -62,6 +62,14 @@ local lastPressAt = nil
 -- landing after CombatLogging.lua's own post-key stop.
 local generation = 0
 
+-- Logging state from just before the burst still in flight, or nil when no
+-- burst is running. Bumping `generation` at key end drops the pending ON
+-- toggles but cannot undo an OFF that has already been applied, so a press
+-- in the last ~0.85 s of a key used to leave logging OFF when the client
+-- wrote the CHALLENGE_MODE_END line -- losing the one line that says the
+-- key finished. Snapshot_OnKeyEnd() puts this state back.
+local preBurstState = nil
+
 local function FormatMSS(seconds)
   seconds = math.floor(tonumber(seconds) or 0)
   return string.format("%d:%02d", math.floor(seconds / 60), seconds % 60)
@@ -102,6 +110,7 @@ end
 local function ScheduleToggles(count)
   generation = generation + 1
   local gen = generation
+  preBurstState = MA:CombatLogging_GetCurrentState()
   for i = 1, count do
     local offAt = (i - 1) * TOGGLE_SPACING_S
     C_Timer.After(offAt, function()
@@ -111,6 +120,7 @@ local function ScheduleToggles(count)
     C_Timer.After(offAt + TOGGLE_OFF_S, function()
       if gen ~= generation then return end
       MA:CombatLogging_SetState(true, false)
+      if i == count then preBurstState = nil end -- burst complete
     end)
   end
 end
@@ -182,6 +192,21 @@ function MA:Snapshot_Mark()
   end
 end
 
+-- Key end: drop any toggles still pending and, if a burst was mid-flight,
+-- put logging straight back the way it was before the press. Called by
+-- this file's own event frame AND first thing in CombatLogging.lua's end
+-- handler, so the restore lands before that handler records whether the
+-- key was logged; the second call finds nothing to do.
+function MA:Snapshot_OnKeyEnd()
+  generation = generation + 1
+  if preBurstState ~= nil then
+    local restore = preBurstState
+    preBurstState = nil
+    MA:Debug("Snapshot: key ended mid-burst -- restoring logging %s", restore and "ON" or "OFF")
+    MA:CombatLogging_SetState(restore, false)
+  end
+end
+
 -- What Bindings.xml actually calls. A plain global, since XML bindings
 -- can't reach the addon-private MA table.
 function Postmortem_SnapshotMark()
@@ -197,6 +222,6 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
   if event == "CHALLENGE_MODE_START" then
     lastPressAt = nil
   else -- CHALLENGE_MODE_COMPLETED or CHALLENGE_MODE_RESET
-    generation = generation + 1
+    MA:Snapshot_OnKeyEnd()
   end
 end)

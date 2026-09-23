@@ -182,6 +182,11 @@ function MA:CombatLogging_OnChallengeModeStart()
 end
 
 function MA:CombatLogging_OnChallengeModeEnd()
+  -- A snapshot keybind burst (Snapshot.lua) still toggling logging off/on
+  -- must be undone first, or logging could be caught OFF right as the
+  -- CHALLENGE_MODE_END line is written -- and recorded as "not logged".
+  if MA.Snapshot_OnKeyEnd then MA:Snapshot_OnKeyEnd() end
+
   -- Record the REAL logging state before touching anything -- this is what
   -- Overlay.lua's post-key recap panel reports as "log saved" or not.
   -- Captured unconditionally (even if combatLoggingEnabled is off), since

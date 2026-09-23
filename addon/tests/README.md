@@ -56,7 +56,9 @@ breaks a pasted URL.
 press must toggle combat logging off/on exactly N times for the presser's
 role (2 healer / 3 tank / 4 other), 0.25 s apart, ending ON, record one
 capped `snapshotMarks` entry, honour the 5 s cooldown, and do nothing but
-print when no key is active or logging is off. `LoggingCombat` is stubbed
+print when no key is active or logging is off. A key ending mid-burst must put
+logging straight back ON (an OFF already applied would otherwise swallow
+the CHALLENGE_MODE_END line). `LoggingCombat` is stubbed
 as a call recorder and `C_Timer.After` as a hand-advanced scheduler; the
 real `CombatLogging.lua` is loaded underneath so its state rules apply.
 
