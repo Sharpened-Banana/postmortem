@@ -293,3 +293,33 @@ class TestLoadBundled:
         from postmortem import bundled
         monkeypatch.setattr(bundled, "bundled_dispel_data_path", lambda: tmp_path / "nope.json")
         assert DispelData.load_bundled() is None
+
+
+class TestQuickReapplication:
+    """A removal is held for _DISPEL_GRACE_S to see whether a dispel claims
+    it. A debuff that ran out, landed again and came off again inside that
+    second overwrote the held removal, so the first one's "expired" was
+    never counted: applied 2, accounted for 1."""
+
+    def test_both_removals_are_accounted_for(self, dispel_data):
+        b = LogBuilder()
+        mob = b.npc_guid(SHADELING, "00E3")
+        npc = (mob, "Shadeling", HOSTILE, 0)
+        b.start(0)
+        for p in PLAYERS:
+            b.combatant(0.5, p)
+        b.player_damage(5, DPS1, mob, "Shadeling", 133, "Fireball", 50000)
+        b.npc_debuff(10.0, mob, "Shadeling", TANK, MAGIC_ID, "Glacial Torment")
+        b.aura_removed(20.0, npc, TANK, MAGIC_ID, "Glacial Torment", kind="DEBUFF")  # ran out
+        b.npc_debuff(20.2, mob, "Shadeling", TANK, MAGIC_ID, "Glacial Torment")
+        # dispelled 0.4s after landing -- inside the first removal's grace
+        b.aura_removed(20.6, npc, TANK, MAGIC_ID, "Glacial Torment", kind="DEBUFF")
+        b.dispel(20.6, HEALER, TANK[0], TANK[1], TANK[2], 77130, "Purify Spirit",
+                 MAGIC_ID, "Glacial Torment", kind="DEBUFF")
+        b.end(60)
+        seg = _segment(b)
+        stats = compute_stats(seg.events, detect_pulls(seg.events), None,
+                              dispel_data=dispel_data)
+        out = stats.dispel_outcomes[MAGIC_ID]
+        assert (out["applied"], out["dispelled"], out["expired"]) == (2, 1, 1)
+        assert out["time_to_dispel_s"] == [0.4]

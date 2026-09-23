@@ -1019,6 +1019,14 @@ def compute_stats(
                 if applied_ts is not None:
                     # held until it's clear whether a SPELL_DISPEL follows
                     # (see pending_removals)
+                    if key in pending_removals:
+                        # An earlier removal of this debuff is still held:
+                        # it ran out, re-landed and came off again inside
+                        # the grace window. No dispel claimed the earlier
+                        # one before this, so it ran out -- overwriting it
+                        # silently lost that "expired" count.
+                        pending_removals.pop(key)
+                        stats.dispel_outcomes[key[1]]["expired"] += 1
                     pending_removals[key] = (event.ts, applied_ts)
                 start = open_buffs.pop(key, None)
                 if start is not None:
