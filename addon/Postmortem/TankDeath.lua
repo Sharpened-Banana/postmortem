@@ -22,12 +22,22 @@
 -- and the log is the more precise about what killed you. The overlay shows
 -- this one immediately; the uploaded report carries the other.
 --
--- Nothing here reads a combat value. Cooldown and spellbook state are the
--- player's own, are not secret, and are explicitly sanctioned -- see the
--- Blizzard API notes in InterruptDatabase.lua's header for the same
--- distinction drawn from the other side. Every read is still wrapped and
--- tolerant of a nil/secret return, per this addon's standing rule that a
--- read may simply fail.
+-- What is and is not readable (verified 2026-09-23 against Blizzard's
+-- generated API documentation, build 12.1.0.69933 -- an earlier version of
+-- this header claimed cooldowns were never secret, which was wrong):
+--
+--   * Spellbook: C_SpellBook.IsSpellKnown carries no secret annotation.
+--     This is the part the analyzer cannot get anywhere else.
+--   * Cooldowns: SecretWhenCooldownsRestricted, and the restriction types
+--     include an active keystone. TankUtil_Readiness asks a duration object
+--     whether it is readable first and falls back to our own cast times.
+--   * Casts: UNIT_SPELLCAST_SUCCEEDED is SecretWhenUnitSpellCastRestricted,
+--     so a cast may arrive unreadable and go unrecorded.
+--
+-- So during a key the on-screen "ready and unused" line may have nothing it
+-- can honestly say. The spellbook snapshot is unaffected, and it is what
+-- the uploaded report needs -- which is why no single failed read below is
+-- allowed to cost it.
 
 local ADDON_NAME, MA = ...
 
@@ -93,14 +103,19 @@ local function BuildPostMortem()
         -- cooldown == 0 means resource-gated (rage, Holy Power, runes):
         -- the cooldown API says it's "ready" even when the player had no
         -- resource to press it with, so claiming it would be a guess.
-        local remaining = MA:TankUtil_CooldownRemaining(entry.id)
-        if remaining ~= nil and remaining <= 0 then
+        local ok, state, source = pcall(MA.TankUtil_Readiness, MA, entry, castAt, now, READY_MARGIN_S)
+        if not ok then state = nil end  -- this entry says nothing; the snapshot survives
+        if state == "ready" then
           local readyFor
           if castAt then readyFor = now - (castAt + entry.cooldown) end
+          -- Client-sourced readiness still honours the margin when we know
+          -- when it came back: a spell that returned 0.2s before the
+          -- killing blow was not realistically pressable.
           if readyFor == nil or readyFor >= READY_MARGIN_S then
             readyUnused[#readyUnused + 1] = {
               id = entry.id, name = entry.name,
               category = entry.category, readyFor = readyFor,
+              source = source,
             }
           end
         end
@@ -191,6 +206,13 @@ function MA:TankDeath_Capture()
   return result
 end
 
+-- When the player last cast spellID this key, by GetTime(), or nil. Shared
+-- with Incoming.lua so both modules fall back to the same evidence when the
+-- client's own cooldown state is unreadable (see TankUtil_Readiness).
+function MA:TankDeath_LastCast(spellID)
+  return lastCastAt[spellID]
+end
+
 -- Every tank post-mortem recorded so far this key, oldest first.
 function MA:TankDeath_All()
   return MA.state.tankDeaths or {}
@@ -218,7 +240,15 @@ eventFrame:RegisterEvent("CHALLENGE_MODE_RESET")
 eventFrame:SetScript("OnEvent", function(self, event, ...)
   if event == "UNIT_SPELLCAST_SUCCEEDED" then
     local _, _, spellID = ...
-    if type(spellID) == "number" then
+    -- UNIT_SPELLCAST_SUCCEEDED is SecretWhenUnitSpellCastRestricted, and a
+    -- secret throws when used as a table key. This handler runs on EVERY
+    -- cast with no pcall between it and the player, so an unguarded key
+    -- would be a Lua error per button press mid-key. A secret cast is
+    -- simply not recorded -- which is why TankUtil_Readiness never reasons
+    -- from the absence of a recorded cast.
+    -- Secrecy first, before anything else touches the value: even "~= nil"
+    -- is a comparison. type() then rules out nil on its own.
+    if not MA:TankUtil_IsSecret(spellID) and type(spellID) == "number" then
       lastCastAt[spellID] = GetTime()
     end
   elseif event == "PLAYER_DEAD" then

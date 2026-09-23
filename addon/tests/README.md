@@ -28,6 +28,17 @@ on cooldown, and a resource-gated one the cooldown API calls "ready"
 regardless of resource), plus the spellbook snapshot it persists for the
 analyzer.
 
+Both of those, and `overlay_layout.lua`'s incoming-panel scenario, run
+under simulated Secret Values: `issecretvalue()` answers from a set the
+harness controls, a secret throws on arithmetic, ordering, concatenation
+and `string.format`, and -- the part that matters -- it reports its
+*underlying* type to `type()`, the way a live secret does. A plain-table
+stand-in answers `"table"`, which lets a `type(x) ~= "number"` guard bail
+out quietly in the harness while the same code throws in a key; that is
+exactly how the first version of these modules passed here. The stubs
+follow the API names and secret annotations in Blizzard's generated
+documentation (checked 2026-09-23, build 12.1.0.69933).
+
 `incoming.lua` covers `Incoming.lua`: the encounter timeline may be
 absent, quiet, or hand back fields the client will not answer for, and
 every one of those has to produce no panel rather than a broken one.

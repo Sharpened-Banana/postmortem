@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Verified against Blizzard's API documentation before release, which
+  turned up three ways the tank features would have failed during a key:
+  cooldown reads, cast events and encounter spell names all come back as
+  Secret Values there. The overlay now asks before it reads, never lets a
+  secret touch anything but the text it is displayed in, and — when a
+  cooldown genuinely cannot be read — says only what it knows, rather
+  than claiming "No major defensive up" on a guess.
+- Defensive table cross-checked against LibOpenRaid. Fortifying Brew's
+  cooldown corrected to 420s, and Shield Block, Rune Tap and Frenzied
+  Regeneration are now tracked but never scored, because each costs a
+  resource the cooldown API cannot see.
 - New incoming panel: during a boss encounter, the overlay shows what is
   about to be cast and which of your major defensives are off cooldown to
   meet it — including, when it matters most, "No major defensive up". It

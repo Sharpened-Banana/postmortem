@@ -276,9 +276,33 @@ local function CreateOverlayFrame()
   -- which majors are off cooldown to meet it. Two rows so the "what's
   -- coming" and "what you have" halves can be coloured separately -- they
   -- are different kinds of fact and shouldn't read as one sentence.
-  local incomingFS = f:CreateFontString(nil, "OVERLAY")
-  incomingFS:SetFontObject(GameFontHighlightSmall)
-  incomingFS:SetJustifyH("CENTER")
+  --
+  -- One row per event, each a fixed-height frame holding the spell name on
+  -- the left and its countdown on the right. It cannot be one string: the
+  -- name is a secret during an encounter (see Incoming.lua), and a secret
+  -- cannot be concatenated -- it can only be handed to SetText as-is. The
+  -- rows use a fixed height rather than GetStringHeight() so the layout
+  -- never depends on measuring text that holds a secret.
+  local INCOMING_ROWS = 3
+  local incomingRows = {}
+  for i = 1, INCOMING_ROWS do
+    local row = CreateFrame("Frame", nil, f)
+    row:SetHeight(14)
+    local nameFS = row:CreateFontString(nil, "OVERLAY")
+    nameFS:SetFontObject(GameFontHighlightSmall)
+    nameFS:SetJustifyH("LEFT")
+    nameFS:SetPoint("LEFT", row, "LEFT", 0, 0)
+    nameFS:SetPoint("RIGHT", row, "RIGHT", -44, 0)
+    nameFS:SetTextColor(1.0, 0.82, 0.4)
+    local timeFS = row:CreateFontString(nil, "OVERLAY")
+    timeFS:SetFontObject(GameFontHighlightSmall)
+    timeFS:SetJustifyH("RIGHT")
+    timeFS:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+    timeFS:SetTextColor(1.0, 0.82, 0.4)
+    row.nameFS, row.timeFS = nameFS, timeFS
+    row:Hide()
+    incomingRows[i] = row
+  end
 
   local readyFS = f:CreateFontString(nil, "OVERLAY")
   readyFS:SetFontObject(GameFontHighlightSmall)
@@ -316,7 +340,7 @@ local function CreateOverlayFrame()
   f.statusFS = statusFS
   f.deathCauseFS = deathCauseFS
   f.tankDeathFS = tankDeathFS
-  f.incomingFS = incomingFS
+  f.incomingRows = incomingRows
   f.readyFS = readyFS
   f.companionFS = companionFS
 
@@ -490,7 +514,7 @@ function MA:Overlay_Refresh()
   -- that happens in a separate process this addon can't observe.
   local showStatus, showDeathCause, showCompanion = false, false, false
   local showTankDeath = false
-  local showIncoming, showReady = false, false
+  local showReady = false
   if inRecap then
     showStatus = true
     if state.combatLogWasOn then
@@ -539,24 +563,30 @@ function MA:Overlay_Refresh()
   -- Incoming panel. Live only: Incoming.lua clears its own state when a
   -- key ends, so this simply follows whatever it last computed.
   local incoming = state.incoming
+  local shownIncoming = 0
   if incoming and #incoming.events > 0 then
-    showIncoming = true
-    local rows = {}
-    for _, event in ipairs(incoming.events) do
-      rows[#rows + 1] = MA:Incoming_FormatEvent(event)
+    for i, row in ipairs(frame.incomingRows) do
+      local event = incoming.events[i]
+      if event then
+        -- event.name may be a secret: straight into SetText, nothing else.
+        row.nameFS:SetText(event.name)
+        row.timeFS:SetText(MA:Incoming_FormatTime(event.remaining))
+        shownIncoming = i
+      end
     end
-    frame.incomingFS:SetTextColor(1.0, 0.82, 0.4)
-    frame.incomingFS:SetText(table.concat(rows, "\n"))
 
     if #incoming.ready > 0 then
+      -- True whenever it is shown: every name listed was assessed ready.
       showReady = true
       local names = {}
       for _, entry in ipairs(incoming.ready) do names[#names + 1] = entry.name end
       frame.readyFS:SetTextColor(0.4, 0.9, 0.5)
       frame.readyFS:SetText("Up: " .. table.concat(names, ", "))
-    else
-      -- Explicitly saying "nothing up" is the more useful half of the
-      -- panel in the moment it matters most.
+    elseif incoming.readyComplete then
+      -- The most useful thing the panel can say -- and only said when the
+      -- state of every known major was actually readable. Under cooldown
+      -- restriction some may not be, and then an empty list means "can't
+      -- tell", which is not the same claim.
       showReady = true
       frame.readyFS:SetTextColor(1.0, 0.65, 0.2)
       frame.readyFS:SetText("No major defensive up")
@@ -591,7 +621,9 @@ function MA:Overlay_Refresh()
     { widget = frame.chestTimerFS, gap = 8, visible = showChestTimer },
     { widget = frame.forcesBar, gap = 10, visible = true, fixedHeight = 20, wide = true },
     { widget = frame.statsRow, gap = 10, visible = true, fixedHeight = 14, wide = true },
-    { widget = frame.incomingFS, gap = 8, visible = showIncoming },
+    { widget = frame.incomingRows[1], gap = 8, visible = shownIncoming >= 1, fixedHeight = 14, wide = true },
+    { widget = frame.incomingRows[2], gap = 2, visible = shownIncoming >= 2, fixedHeight = 14, wide = true },
+    { widget = frame.incomingRows[3], gap = 2, visible = shownIncoming >= 3, fixedHeight = 14, wide = true },
     { widget = frame.readyFS, gap = 4, visible = showReady },
     { widget = frame.splitFS, gap = 6, visible = showSplit },
     { widget = frame.pullFS, gap = 10, visible = showPull },

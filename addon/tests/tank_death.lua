@@ -40,22 +40,87 @@ time = os.time
 local PROT_PALADIN = 66
 local knownSpells, cooldowns, specID
 
+-- Secret Values, simulated the way interrupts_secret.lua does it:
+-- issecretvalue() answers from a set the harness controls, and a secret is
+-- a poisoned object that throws on arithmetic, ordering, concatenation or
+-- length -- the operations the live client refuses. (The live client also
+-- refuses a secret as a table key; plain Lua cannot intercept that, so the
+-- cast-handler scenario below checks that the guard was consulted instead.)
+--
+-- `restricted` models an active keystone: every cooldown the client hands
+-- back is secret. The API names and flags these stubs follow were verified
+-- 2026-09-23 against Blizzard's generated documentation, build 12.1.0.69933.
+local restricted = false
+local secretSet, consulted = {}, {}
+local function Secret(label, underlying)
+  local poison = function() error("attempt to use a secret value (" .. label .. ")", 2) end
+  local v = setmetatable({}, {
+    __add = poison, __sub = poison, __mul = poison, __div = poison,
+    __lt = poison, __le = poison, __concat = poison, __len = poison,
+    __tostring = function() return "<secret " .. label .. ">" end,
+  })
+  secretSet[v] = underlying or "number"
+  return v
+end
+-- A live secret reports its underlying type -- interrupts_secret.lua's
+-- incident was a value "accepted by the checks" that then threw. Without
+-- this, a plain-table stand-in answers type() with "table", and a
+-- `type(x) ~= "number"` guard quietly bails out in the harness while the
+-- same code throws in a key. That is exactly how the first version of this
+-- module passed here.
+local real_type = type
+function type(v)
+  if secretSet[v] then return secretSet[v] end
+  return real_type(v)
+end
+function issecretvalue(v)
+  consulted[#consulted + 1] = v
+  return secretSet[v] ~= nil
+end
+
 C_SpecializationInfo = {
   GetSpecialization = function() return specID and 1 or nil end,
   GetSpecializationInfo = function() return specID end,
 }
+-- The live call. (C_SpellBook.IsSpellKnownOrOverridesKnown, which an earlier
+-- version of this harness stubbed, does not exist on the live client.)
 C_SpellBook = {
-  IsSpellKnownOrOverridesKnown = function(id) return knownSpells[id] == true end,
+  IsSpellKnown = function(id) return knownSpells[id] == true end,
 }
+
+local lastIgnoreGCD
+-- GetSpellCooldownDuration's LuaDurationObject. Under restriction it
+-- reports HasSecretValues() and REFUSES the reads -- so a module that reads
+-- before asking fails here, the way it would in a key.
+local function Duration(remaining, secret)
+  local d = {}
+  function d:HasSecretValues() return secret end
+  function d:IsZero()
+    if secret then error("read a secret duration without asking HasSecretValues first", 2) end
+    return remaining <= 0
+  end
+  function d:GetRemainingDuration()
+    if secret then error("read a secret duration without asking HasSecretValues first", 2) end
+    return remaining
+  end
+  return d
+end
 C_Spell = {
-  -- No charges in these scenarios; the module falls through to cooldowns.
-  GetSpellCharges = function() return nil end,
+  GetSpellCooldownDuration = function(id, ignoreGCD)
+    lastIgnoreGCD = ignoreGCD
+    return Duration(cooldowns[id] or 0, restricted)
+  end,
+  -- SecretWhenCooldownsRestricted on the live client. Poisoned when
+  -- restricted, so any path that still reads it fails loudly.
   GetSpellCooldown = function(id)
+    if restricted then return { startTime = Secret("startTime"), duration = Secret("duration") } end
     local remaining = cooldowns[id]
-    if remaining == nil or remaining <= 0 then
-      return { startTime = 0, duration = 0 }
-    end
+    if remaining == nil or remaining <= 0 then return { startTime = 0, duration = 0 } end
     return { startTime = NOW - 1, duration = remaining + 1 }
+  end,
+  GetSpellCharges = function()
+    if restricted then return { currentCharges = Secret("currentCharges") } end
+    return nil
   end,
 }
 
@@ -297,6 +362,98 @@ do
   check("no findings", #result.readyUnused == 0 and #result.held == 0)
   check("but the spellbook went with it", #result.known > 0)
   check("and it was persisted", #MA.tankDb.deaths == 1)
+end
+
+-- ---------------------------------------------------------------------
+-- Under restriction -- the state an active keystone puts the client in.
+-- Everything above ran with readable cooldowns, which is why the first
+-- version passed every check here and would still have failed in a key.
+-- ---------------------------------------------------------------------
+
+-- Scenario 11: the capture must survive unreadable cooldowns. The spellbook
+-- snapshot is what the analyzer needs, and it depends only on IsSpellKnown,
+-- which is never secret -- losing it to an unrelated cooldown read is what
+-- the first version would have done.
+do
+  print("restricted: the spellbook snapshot survives unreadable cooldowns")
+  restricted = true
+  specID = PROT_PALADIN
+  knownSpells = { [ARDENT_DEFENDER] = true, [GOAK] = true }
+  cooldowns = { [ARDENT_DEFENDER] = 0, [GOAK] = 0 }
+  local MA, frame = LoadModule()
+
+  local ok = pcall(frame.handler, frame, "PLAYER_DEAD")
+  local result = MA.state.lastTankDeath
+  check("no error escapes", ok)
+  check("a record was still made", result ~= nil)
+  check("with the spellbook in it", result and #result.known == 2)
+  check("and it was persisted", #MA.tankDb.deaths == 1)
+  -- No cast was seen, so there is no evidence either way; saying "ready"
+  -- from an unreadable cooldown would be a guess.
+  check("nothing claimed without evidence", result and #result.readyUnused == 0)
+  restricted = false
+end
+
+-- Scenario 12: with cooldowns unreadable, a cast we DID see is evidence.
+-- Ardent Defender (120s) pressed 300s ago is back by any reckoning.
+do
+  print("restricted: our own cast times stand in for the cooldown API")
+  restricted = true
+  specID = PROT_PALADIN
+  knownSpells = { [ARDENT_DEFENDER] = true, [GOAK] = true }
+  cooldowns = {}
+  local MA, frame = LoadModule()
+
+  frame.handler(frame, "UNIT_SPELLCAST_SUCCEEDED", "player", "cast-1", ARDENT_DEFENDER)
+  frame.handler(frame, "UNIT_SPELLCAST_SUCCEEDED", "player", "cast-2", GOAK)
+  NOW = NOW + 300   -- AD (120s) is long back; GoAK (300s) is inside its margin
+  frame.handler(frame, "PLAYER_DEAD")
+  local result = MA.state.lastTankDeath
+
+  local ad
+  for _, e in ipairs(result.readyUnused) do if e.id == ARDENT_DEFENDER then ad = e end end
+  check("Ardent Defender estimated ready", ad ~= nil)
+  check("and labelled as an estimate", ad and ad.source == "estimate")
+  check("GoAK not claimed inside the margin", not names(result.readyUnused)["Guardian of Ancient Kings"])
+  NOW = 1000.0
+  restricted = false
+end
+
+-- Scenario 13: the cast event itself arriving secret. The live client
+-- refuses a secret as a table key -- the 2026-09-15 incident in
+-- interrupts_secret.lua was 15,976 errors from one key -- and this handler
+-- runs on every cast with no pcall in front of it.
+do
+  print("a secret cast event is skipped, never used as a key")
+  specID = PROT_PALADIN
+  knownSpells = { [ARDENT_DEFENDER] = true }
+  cooldowns = { [ARDENT_DEFENDER] = 0 }
+  local MA, frame = LoadModule()
+
+  local secretID = Secret("spellID")
+  consulted = {}
+  local ok = pcall(frame.handler, frame, "UNIT_SPELLCAST_SUCCEEDED", "player", "cast-3", secretID)
+  local asked = false
+  for _, v in ipairs(consulted) do if v == secretID then asked = true end end
+  check("no error escapes the handler", ok)
+  check("issecretvalue was consulted before the key was used", asked)
+
+  frame.handler(frame, "PLAYER_DEAD")
+  check("an unreadable cast is not counted as held",
+    not names(MA.state.lastTankDeath.held)["Ardent Defender"])
+end
+
+-- Scenario 14: readiness must ignore the global cooldown, or every spell
+-- reads "on cooldown" for a second and a half after any button press.
+do
+  print("cooldown reads ignore the GCD")
+  specID = PROT_PALADIN
+  knownSpells = { [ARDENT_DEFENDER] = true }
+  cooldowns = { [ARDENT_DEFENDER] = 0 }
+  local MA, frame = LoadModule()
+  lastIgnoreGCD = nil
+  frame.handler(frame, "PLAYER_DEAD")
+  check("ignoreGCD passed as true", lastIgnoreGCD == true)
 end
 
 if failures > 0 then
