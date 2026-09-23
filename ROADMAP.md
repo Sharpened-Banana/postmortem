@@ -6,6 +6,81 @@ a historical `index.html` over all saved reports, optional Raider.io
 score enrichment, and shell hooks on run start/end (enough to drive OBS
 for per-run video). This file tracks where it can go next.
 
+## What sets Postmortem apart
+
+Decided 2026-09-19. Warcraft Logs, Raider.io and Details already cover
+numbers and rankings; none of them says **why a key went over**.
+Postmortem is the only tool that knows the planned route, the timer,
+every death and every kick at once, so that is the ground to build on.
+In priority order -- each builds on the ones above it:
+
+- [ ] **1. "Where the key was lost"** -- a plain-language verdict at the
+      top of every report: "Over by 14s. Deaths cost 41s (28s of it on
+      pull 7); a missed kick on Cosmic Ascension killed two; downtime
+      was normal." A new summary over data the analyzer already produces
+      (timer margin, death cost per pull, kick outcomes before deaths,
+      downtime, route deviations), ranked by seconds lost. First to
+      build: it is what makes a report worth sharing.
+- [ ] **2. Time budget per pull** -- a pace line through the run: ahead
+      of or behind the timer after each pull, against the player's own
+      best timed run of that dungeon (or the +2/+3 thresholds when there
+      is none). Shows where the time went; leans on route matching,
+      which nobody else has. Feeds the verdict in 1.
+- [ ] **3. Group review links** -- one link for the party where each
+      player opens their own page: their deaths, the kicks they missed,
+      the avoidable damage they took, worded as advice, with other
+      players' numbers left out. Less confrontational than a meter in
+      chat, and how the site spreads by word of mouth.
+- [ ] **4. Video chapters** -- a chapter per pull and death on the run's
+      recording, and "jump to 10s before this death" from the report.
+      Builds on the OBS work under *Video recording of runs* below (the
+      timestamp sidecar item is this feature's first half).
+- [ ] **5. Pre-key briefing in the addon** -- before the key starts, a
+      panel from the player's own history and the site's data: "Last 3
+      times here you died to X on pull 9; the most-missed kick in this
+      dungeon is Y." Turns the post-mortem into preparation. Needs the
+      desktop app to write a per-dungeon briefing the addon can read
+      (addons cannot fetch anything themselves).
+- [ ] **6. Trends per player** -- "kick rate 48% -> 61% over three
+      weeks; avoidable damage flat" on the character page and in the
+      app's History. A reason to come back beyond one bad key. Extends
+      the trend-chart item under *Historical lookup webpage*.
+
+Also agreed 2026-09-19, after the six above (not yet ordered among
+themselves):
+
+- [ ] **Role scorecards that are not damage meters** -- grade the job,
+      not the number. Tank: how smooth the damage intake was, share of
+      each pull spent with a defensive up. Healer: time the group spent
+      dangerously low. Damage dealers: kicks, avoidable damage taken,
+      uptime on priority targets.
+- [ ] **Applicant insight** -- look a player up before inviting and see
+      behaviour rather than score: kick rate, avoidable damage and deaths
+      per key. Builds on the site's player lookup. It judges individuals,
+      so it ships with a way for a player to opt out.
+- [ ] **Log health check** -- before a key the addon and app confirm
+      advanced logging is on, there is disk space, the app is watching
+      the log and a route is loaded; afterwards, that the run was
+      captured. "Did it record?" is the worry every logging tool leaves
+      its users with, and answering it is what keeps the app installed.
+- [ ] **Private by default for a group** -- a team can keep its runs
+      unlisted and share by link only (key-pushing groups do not want
+      their routes public). Extends the per-run visibility the site
+      already has to a group-wide default.
+- [ ] **Route tools**
+  - [ ] Route library with outcomes: every uploaded route ranked by how
+        it actually performs -- timed rate, average time, where groups
+        leave it. MDT shares the plan; this shows the result. Companion
+        to the Keystone.guru sync.
+  - [ ] Deviation heatmap per route: where groups following a route most
+        often go off it, which tells its author what is unrealistic.
+- [ ] **Season wrap-up** -- at season's end, a shareable summary of the
+      player's season: keys run, best moments, most improved stat.
+
+Deliberately not on this list: rankings, percentiles and talent-build
+advice. Raider.io, Warcraft Logs and Archon do those well, and competing
+there means fighting on their ground.
+
 ## Historical lookup webpage → hosted service
 
 Today: `postmortem index reports/` builds a static, self-contained
