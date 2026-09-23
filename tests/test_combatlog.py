@@ -203,6 +203,35 @@ class TestSegmenter:
         assert runs[0].truncated and not runs[0].completed
         assert runs[1].completed and not runs[1].truncated
 
+    def test_a_reload_after_truncation_is_not_a_second_completed_run(self):
+        """After the cap drops a run, a mid-key /reload re-logs the same
+        key's START and the real END then closed that stub as a fake
+        second "completed, timed" run."""
+        b = LogBuilder()
+        b.start(0)
+        for i in range(20):
+            b.player_damage(i + 1, DPS1, b.npc_guid(1, "1"), "X", 1, "S", 10)
+        b.start(50)  # /reload: same key
+        b.player_damage(51, DPS1, b.npc_guid(1, "1"), "X", 1, "S", 10)
+        b.end(100)
+        runs = list(segment_runs(iter_events(b.lines), max_run_events=5))
+        assert len(runs) == 1
+        assert runs[0].truncated and not runs[0].completed
+
+    def test_same_key_after_a_real_key_transition_is_a_new_run(self):
+        """The phantom END WoW writes before every real new key means the
+        next same-key START is a genuine rerun, not a /reload."""
+        b = LogBuilder()
+        b.start(0)
+        for i in range(20):
+            b.player_damage(i + 1, DPS1, b.npc_guid(1, "1"), "X", 1, "S", 10)
+        b.raw(199, "CHALLENGE_MODE_END,2830,0,0,0,0.000000,0.000000")
+        b.start(200)
+        b.end(250)
+        runs = list(segment_runs(iter_events(b.lines), max_run_events=5))
+        assert len(runs) == 2
+        assert runs[1].completed and not runs[1].truncated
+
     def test_the_truncated_flag_leaves_the_segmenter(self):
         """Nothing outside segmenter.py could see this flag until
         2026-09-11, so a size-capped run reached the user labelled
