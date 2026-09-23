@@ -217,3 +217,73 @@ class TestNestingBound:
     def test_the_limit_itself_is_a_cbor_error(self):
         with pytest.raises(cbor.CBORError):
             cbor.loads(bytes([0x81] * (cbor.MAX_DEPTH + 2)) + b"\x00")
+
+
+def _legacy(ace_stream: str) -> str:
+    """A "!" paste carrying exactly this AceSerializer stream."""
+    import zlib
+    compressor = zlib.compressobj(9, zlib.DEFLATED, -15)
+    blob = compressor.compress(ace_stream.encode("utf-8")) + compressor.flush()
+    return "!" + encode_for_print(blob)
+
+
+class TestMalformedPastes:
+    """Every malformed paste must surface as MDTDecodeError -- the one error
+    the CLI and the desktop app catch -- never a TypeError/OverflowError
+    traceback (2026-09-23 audit)."""
+
+    def test_a_table_used_as_a_table_key(self):
+        # {[{}] = 1}: legal Lua, but a dict cannot be a Python dict key.
+        with pytest.raises(MDTDecodeError):
+            decode_mdt_string(_legacy("^1^T^T^t^N1^t^^"))
+
+    @pytest.mark.parametrize("where", ["dungeon", "week", "difficulty", "clone", "enemy"])
+    def test_infinite_numbers_in_a_route(self, where):
+        inf = float("inf")
+        preset = {"text": "r", "week": 1, "difficulty": 10,
+                  "value": {"currentDungeonIdx": 1, "pulls": {1: {1: {1: 1}}}}}
+        if where == "dungeon":
+            preset["value"]["currentDungeonIdx"] = inf
+        elif where in ("week", "difficulty"):
+            preset[where] = -inf
+        elif where == "clone":
+            preset["value"]["pulls"][1][1][1] = inf
+        else:
+            preset["value"]["pulls"][1] = {inf: {1: 1}}
+        with pytest.raises(MDTDecodeError):
+            Route.from_preset(preset)
+        # and end to end, through a real legacy paste (ace carries 1.#INF)
+        with pytest.raises(MDTDecodeError):
+            Route.from_preset(decode_mdt_string(encode_mdt_string(preset, "legacy")))
+
+    def test_nan_in_a_route(self):
+        preset = {"text": "r", "value": {"currentDungeonIdx": float("nan"), "pulls": {}}}
+        with pytest.raises(MDTDecodeError):
+            Route.from_preset(preset)
+
+    def test_truncated_legacy_paste_is_not_called_oversized(self):
+        from conftest import ROUTE_PRESET
+        enc = encode_mdt_string(ROUTE_PRESET, "legacy")
+        with pytest.raises(MDTDecodeError) as info:
+            decode_mdt_string(enc[: len(enc) // 2])
+        assert "limit" not in str(info.value)
+        assert "truncated" in str(info.value) or "incomplete" in str(info.value)
+
+    def test_oversized_stream_still_reports_the_limit(self, monkeypatch):
+        from postmortem.mdt import decode as decode_mod
+        monkeypatch.setattr(decode_mod, "MAX_ROUTE_BYTES", 64)
+        enc = encode_mdt_string({"text": "x" * 500, "value": {}}, "legacy")
+        with pytest.raises(MDTDecodeError, match="limit"):
+            decode_mdt_string(enc)
+
+    def test_soft_wrapped_legacy_paste_decodes(self):
+        from conftest import ROUTE_PRESET
+        enc = encode_mdt_string(ROUTE_PRESET, "legacy")
+        wrapped = "\n".join(enc[i:i + 60] for i in range(0, len(enc), 60))
+        route = Route.from_preset(decode_mdt_string(wrapped))
+        assert route.name == "Test MR Route"
+
+    def test_cbor_encodes_infinity_without_overflow(self):
+        for v in (float("inf"), float("-inf")):
+            assert cbor.loads(cbor.dumps(v)) == v
+        assert math.isnan(cbor.loads(cbor.dumps(float("nan"))))

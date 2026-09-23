@@ -49,6 +49,12 @@ def _inflate(data: bytes) -> bytes:
     Bounded at MAX_ROUTE_BYTES: a decompressobj stops at the limit and
     leaves the rest in unconsumed_tail, so an over-large stream is a clean
     MDTDecodeError rather than an allocation the process cannot survive.
+
+    The two ways a stream can stop short are told apart: input left over
+    in unconsumed_tail means the output hit the limit; no tail but no end
+    of stream either means the input ran out -- a paste cut off by a chat
+    client or a partial copy. Both used to say "expands past the limit",
+    which sent people looking for a size problem that wasn't there.
     """
     for wbits in (-15, 15, 31):
         decompressor = zlib.decompressobj(wbits)
@@ -56,9 +62,16 @@ def _inflate(data: bytes) -> bytes:
             out = decompressor.decompress(data, MAX_ROUTE_BYTES)
         except zlib.error:
             continue
-        if decompressor.unconsumed_tail or not decompressor.eof:
+        # len(out) as well as the tail: when the limit lands with all input
+        # read, the rest is buffered inside zlib and the tail is empty.
+        if decompressor.unconsumed_tail or (
+                not decompressor.eof and len(out) >= MAX_ROUTE_BYTES):
             raise MDTDecodeError(
                 f"route data expands past the {MAX_ROUTE_BYTES // (1024 * 1024)}MB limit"
+            )
+        if not decompressor.eof:
+            raise MDTDecodeError(
+                "route data is truncated (incomplete paste?) -- copy the whole export string"
             )
         return out
     raise MDTDecodeError("could not decompress route data (not a deflate stream)")
@@ -98,7 +111,9 @@ def decode_mdt_string(text: str) -> Any:
         raise
     except RecursionError:
         raise MDTDecodeError("route data is nested too deeply to decode") from None
-    except (ValueError, OverflowError) as exc:
+    except (ValueError, OverflowError, TypeError) as exc:
+        # TypeError: AceSerializer allows a table as a table key (legal
+        # Lua), which lands as an unhashable dict key in Python.
         raise MDTDecodeError(f"could not decode MDT string: {exc}") from None
 
 
@@ -122,7 +137,10 @@ def _decode_mdt_body(text: str) -> Any:
             raise MDTDecodeError(f"invalid CBOR in MDT2 string: {exc}") from None
 
     if text.startswith("!"):
-        decoded = decode_for_print(text[1:])
+        # Same soft-wrap tolerance as the MDT2 path: whitespace is never in
+        # the print alphabet, so a paste wrapped by an email or chat client
+        # was rejected as "character outside the alphabet".
+        decoded = decode_for_print(re.sub(r"\s+", "", text[1:]))
         decompressed = _inflate(decoded)
         values = _load_ace(decompressed)
         return values
