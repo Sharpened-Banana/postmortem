@@ -67,3 +67,39 @@ class TestChestThresholdClamp:
                    json.dumps(report), extra="render();")
         assert "beat timer by" in out
         assert "+-1" not in out
+
+
+def _strict(payload: str):
+    def reject(constant):
+        raise AssertionError(f"non-standard JSON constant {constant!r} in the page")
+    return json.loads(payload, parse_constant=reject)
+
+
+class TestNonFiniteNumbers:
+    """Python's json.dumps writes Infinity/NaN, which JSON.parse rejects,
+    so one non-finite float anywhere in a report blanked the whole page."""
+
+    def test_feed_payload_is_strict_json(self):
+        rows = [_feed_row(forces_pct=float("inf"), wall_s=float("nan"),
+                          party=[{"name": "x", "dps": float("-inf")}])]
+        parsed = _strict(_embedded_json(render_index(rows), "runs-data"))
+        assert parsed[0]["forces_pct"] is None
+        assert parsed[0]["wall_s"] is None
+        assert parsed[0]["party"][0]["dps"] is None
+
+    def test_report_payload_is_strict_json_and_keeps_the_script_guard(self):
+        report = {"run": {"zone": "</script>", "wall_duration_s": float("inf")},
+                  "pulls": [(1, float("nan"))]}
+        payload = _embedded_json(render_html(report), "report-data")
+        parsed = _strict(payload.replace("<\\/", "</"))
+        assert parsed["run"]["wall_duration_s"] is None
+        assert parsed["pulls"] == [[1, None]]
+        assert "</script>" not in payload
+
+    @needs_node
+    def test_feed_renders_in_node_with_a_non_finite_value(self):
+        rows = [_feed_row(forces_pct=float("inf"))]
+        page = render_index(rows)
+        out = _run(_extract_script(page), "runs-data",
+                   _embedded_json(page, "runs-data"), extra="render();")
+        assert "Ara-Kara" in out

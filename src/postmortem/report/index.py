@@ -23,6 +23,8 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
+from .html import script_json
+
 
 def party_summary(report: dict[str, Any]) -> list[dict[str, Any]]:
     """The run's players as ``[{name, class, role}]`` for the index row.
@@ -725,7 +727,10 @@ loadAbilityTooltips();
 
 
 def render_index(rows: list[dict[str, Any]]) -> str:
-    payload = json.dumps(rows).replace("</", "<\\/")
+    # script_json, not json.dumps: a non-finite float in any row used to
+    # reach the page as Infinity/NaN, which JSON.parse rejects -- and the
+    # whole feed rendered blank (see report/html.py).
+    payload = script_json(rows)
     return _INDEX_TEMPLATE.replace("__RUNS_JSON__", payload)
 
 

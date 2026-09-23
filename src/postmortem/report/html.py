@@ -8,7 +8,36 @@ from __future__ import annotations
 
 import html
 import json
+import math
 from typing import Any
+
+
+def _finite_only(value: Any) -> Any:
+    """``value`` with every non-finite float (inf, -inf, nan) replaced by
+    None, recursively through dicts, lists and tuples."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {k: _finite_only(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_finite_only(v) for v in value]
+    return value
+
+
+def script_json(value: Any) -> str:
+    """``value`` as JSON that is safe to embed in a ``<script>`` data block
+    and that the browser's ``JSON.parse`` accepts.
+
+    Python's ``json.dumps`` writes ``Infinity``/``NaN`` for non-finite
+    floats, which is not JSON: ``JSON.parse`` throws on it and the page
+    renders nothing at all. A ratio over a zero-length pull or a rate from
+    an anonymous upload is enough to produce one, so they become null (the
+    renderers already show null as "?"/"—"), and ``allow_nan=False`` makes
+    any path that slips past the sanitiser fail here, loudly, rather than
+    in every visitor's browser. "</" is split so a value cannot close the
+    surrounding script element.
+    """
+    return json.dumps(_finite_only(value), allow_nan=False).replace("</", "<\\/")
 
 _TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
@@ -979,7 +1008,7 @@ def render_html(report: dict[str, Any]) -> str:
     # JSON below is separately guarded by the </-splitting on the next
     # line, and every log-derived field the client-side JS renders goes
     # through its own esc(); this <title> was the one server-side gap.
-    payload = json.dumps(report).replace("</", "<\\/")
+    payload = script_json(report)
     return _TEMPLATE.replace("__TITLE__", html.escape(title)).replace(
         "__REPORT_JSON__", payload
     )
