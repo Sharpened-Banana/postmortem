@@ -312,10 +312,14 @@ const plain = (n, fallback = "?") => {
   return n == null || n === "" || !Number.isFinite(v) ? fallback : String(v);
 };
 const pct = n => plain(n, "?") + "%";
-const mmss = s => { if (s == null) return "?"; s = Math.round(s);
+// The magnitude is formatted and the sign put in front: Math.floor on a
+// negative made -65s "-2:-5". A non-number is "?", not "NaN:NaN".
+const mmss = s => { if (s == null || s === "") return "?"; s = Math.round(Number(s));
+  if (!Number.isFinite(s)) return "?";
+  const sign = s < 0 ? "-" : ""; s = Math.abs(s);
   const m = Math.floor(s/60), sec = s%60;
-  return m >= 60 ? `${Math.floor(m/60)}:${String(m%60).padStart(2,"0")}:${String(sec).padStart(2,"0")}`
-                 : `${m}:${String(sec).padStart(2,"0")}`; };
+  return sign + (m >= 60 ? `${Math.floor(m/60)}:${String(m%60).padStart(2,"0")}:${String(sec).padStart(2,"0")}`
+                         : `${m}:${String(sec).padStart(2,"0")}`); };
 const npcs = list => (list||[]).map(e =>
   `${e.n}x ${esc(e.name || ("npc:"+e.npc_id))}`).join(", ");
 

@@ -147,6 +147,36 @@ class TestBracketsDisplayOnce:
         assert "&amp;lt;" not in out
 
 
+class TestNegativeTimes:
+    """Floor division put the sign in the wrong place: -65s printed as
+    "-2:55" (text report) and "-2:-5" (both pages)."""
+
+    CASES = {-65: "-1:05", -5: "-0:05", 65: "1:05", 3725: "1:02:05", -3725: "-1:02:05"}
+
+    def test_text_report(self):
+        from postmortem.report.text import _fmt_time
+        for seconds, want in self.CASES.items():
+            assert _fmt_time(seconds) == want
+        assert _fmt_time(float("inf")) == "?"
+
+    @needs_node
+    @pytest.mark.parametrize("page", ["report", "index"])
+    def test_pages(self, page, real_report):
+        values = list(self.CASES) + ["Infinity", "'abc'"]
+        probe = ('document.getElementById("app").innerHTML = ['
+                 + ", ".join(str(v) for v in values) + '].map(mmss).join("|");')
+        if page == "report":
+            out = _run(_extract_script(render_html(real_report)), "report-data",
+                       json.dumps(real_report), extra=probe)
+        else:
+            out = _run(_extract_script(render_index([])), "runs-data", "[]", extra=probe)
+        got = out.strip().split("|")
+        want = list(self.CASES.values())
+        if page == "index":  # the feed's mmss has no hours column
+            want = ["-1:05", "-0:05", "1:05", "62:05", "-62:05"]
+        assert got == want + ["?", "?"]
+
+
 def _strict(payload: str):
     def reject(constant):
         raise AssertionError(f"non-standard JSON constant {constant!r} in the page")

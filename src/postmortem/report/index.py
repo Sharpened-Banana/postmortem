@@ -400,9 +400,12 @@ function loadAbilityTooltips() {
 // this rather than being interpolated raw.
 const num = (v, fallback = "—") => Number.isFinite(Number(v)) && v !== null && v !== ""
   ? String(Number(v)) : fallback;
-const mmss = s => { if (s == null) return "?"; s = Math.round(s);
-  const m = Math.floor(s/60);
-  return `${m}:${String(s%60).padStart(2,"0")}`; };
+// Sign in front of the magnitude (Math.floor made -65s "-2:-5"), and a
+// non-number is "?" rather than "NaN:NaN".
+const mmss = s => { if (s == null || s === "") return "?"; s = Math.round(Number(s));
+  if (!Number.isFinite(s)) return "?";
+  const sign = s < 0 ? "-" : ""; s = Math.abs(s);
+  return `${sign}${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`; };
 let dungeon = "";
 let sortKey = "start_ts", sortDir = -1;
 // Which row's detail block is open, keyed by the run's (start_ts|zone)
