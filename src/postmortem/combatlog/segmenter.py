@@ -105,6 +105,11 @@ def _parse_bracket_ints(value: str) -> list[int]:
     return out
 
 
+def _zone_instance(event: Event) -> Optional[int]:
+    raw = event.params[0].strip() if event.params else ""
+    return int(raw) if raw.lstrip("-").isdigit() else None
+
+
 def segment_runs(
     events: Iterable[Event], max_run_events: Optional[int] = None,
 ) -> Iterator[RunSegment]:
@@ -142,6 +147,19 @@ def segment_runs(
     for event in events:
         if event.name == "MAP_CHANGE" and event.params:
             latest_map_change[event.params[0].strip()] = event
+        if event.name == "ZONE_CHANGE" and current is not None \
+                and _zone_instance(event) not in (None, current.instance_id):
+            # The group left the dungeon with the key still open: an
+            # abandon (vote, walk-out, hearth). Close the run here. It used
+            # to stay open until the next CHALLENGE_MODE_START, so an
+            # abandoned key that was the last one in the log swallowed
+            # everything after it -- a whole evening of world content, or a
+            # raid, analysed as one "abandoned" key. The ZONE_CHANGE itself
+            # is kept, so likely_abandoned still reads it.
+            current.events.append(event)
+            yield current
+            current = None
+            continue
         if (
             max_run_events is not None
             and current is not None

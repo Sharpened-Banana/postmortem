@@ -262,6 +262,27 @@ class TestLikelyAbandoned:
         assert not run.completed
         assert not run.likely_abandoned
 
+    def test_leaving_the_instance_closes_the_run(self):
+        """An abandoned key with no later CHALLENGE_MODE_START used to stay
+        open to the end of the log and swallow everything after it."""
+        b = LogBuilder()
+        b.start(0)  # default instance=2830
+        b.player_damage(5, DPS1, b.npc_guid(1, "1"), "X", 1, "S", 10)
+        b.raw(20, 'ZONE_CHANGE,1519,"Stormwind City",1')
+        for i in range(50):  # an evening of open-world combat afterwards
+            b.player_damage(30 + i, DPS1, b.npc_guid(2, "2"), "Boar", 1, "S", 10)
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        assert not run.completed and run.likely_abandoned
+        assert run.events[-1].name == "ZONE_CHANGE"
+        assert run.wall_duration == 20
+
+    def test_a_completed_key_is_untouched_by_leaving_afterwards(self):
+        b = build_run_log()
+        b.raw(1000, 'ZONE_CHANGE,1519,"Stormwind City",1')
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        assert run.completed and not run.truncated
+        assert all(ev.name != "ZONE_CHANGE" for ev in run.events)
+
     def test_zone_change_to_the_same_instance_is_not_flagged(self):
         # e.g. a multi-floor dungeon's own internal transition that still
         # carries the instance's own zone id -- not a real departure, and
