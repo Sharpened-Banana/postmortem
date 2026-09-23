@@ -690,15 +690,27 @@ async function onStartWatch() {
   }
 }
 
+// A watch busy on a key (catch-up analysis and upload can take minutes)
+// does not stop at once: stop_watch() then answers {stopping: true} and
+// the backend emits "stopped" when the thread has really exited. Until
+// then the screen stays in its watching state -- flipping to idle here
+// made it look stopped while keys were still being uploaded, and let
+// Start be pressed against a watch that was still running.
 async function onStopWatch() {
   wt.stopBtn.disabled = true;
+  let stillStopping = false;
   try {
-    await api().stop_watch();
+    const result = await api().stop_watch();
+    stillStopping = !!(result && result.stopping);
   } catch (e) {
     showBanner(wt.errorBanner, "Unexpected error while stopping: " + describeError(e));
   } finally {
     wt.stopBtn.disabled = false;
-    setWatchingUI(false);
+    if (stillStopping) {
+      setWatchStatus(true, "Stopping… finishing the run it is on");
+    } else {
+      setWatchingUI(false);
+    }
   }
 }
 
@@ -885,8 +897,13 @@ window.onWatchEvent = function (event) {
       setWatchingUI(false);
       setWatchStatus(false, "Stopped (unexpectedly)");
       break;
+    case "stopping":
+      addWatchLogEntry("info", `Stopping… ${esc(event.detail || "")}`);
+      setWatchStatus(true, "Stopping… finishing the run it is on");
+      break;
     case "stopped":
       addWatchLogEntry("info", "Stopped.");
+      setWatchingUI(false);
       setWatchStatus(false, "Stopped.");
       break;
   }

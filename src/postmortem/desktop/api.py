@@ -288,6 +288,9 @@ class DesktopAPI:
         self._watch_worker: Optional[threading.Thread] = None
         self._watch_stop_sentinel: Optional[object] = None
         self._watch_thread: Optional[threading.Thread] = None
+        # A deferred stop (see stop_watch) and a second Stop press can both
+        # try to clear the same watch; this makes "stopped" fire once.
+        self._watch_state_lock = threading.Lock()
         # Pending snapshot builds, one timer per keybind marker seen while
         # watching (docs/SNAPSHOT.md §3); cancelled by stop_watch.
         self._snapshot_timers: dict[tuple[str, float], threading.Timer] = {}
@@ -1103,19 +1106,42 @@ class DesktopAPI:
             # so a SECOND recorder could tail the same log and duplicate
             # every slice, analysis and upload (2026-09-11).
             #
-            # Keep the handles, report honestly, and let the next Stop
-            # finish the job once the thread notices.
+            # Keep the handles, report honestly, and finish the job once
+            # the thread notices. That used to wait for a SECOND Stop
+            # press, so "stopped" never arrived on its own and the
+            # interface (which ignored "stopping" and flipped to idle at
+            # once) looked stopped while keys were still being uploaded.
             self._emit_watch_event({
                 "type": "stopping",
                 "detail": "finishing the run it is on -- this can take a few minutes",
             })
+            thread = self._watch_thread
+            threading.Thread(
+                target=self._finish_stop_when_exited, args=(thread,),
+                name="postmortem-watch-stopper", daemon=True,
+            ).start()
             return {"ok": True, "stopping": True}
-        self._watch_recorder = None
-        self._watch_thread = None
-        self._watch_queue = None
-        self._watch_worker = None
-        self._emit_watch_event({"type": "stopped"})
+        self._clear_watch_state(self._watch_thread)
         return {"ok": True}
+
+    def _finish_stop_when_exited(self, thread: threading.Thread) -> None:
+        """Wait out a watch thread that was still busy when Stop was
+        pressed, then clear its state and emit "stopped"."""
+        thread.join()
+        self._clear_watch_state(thread)
+
+    def _clear_watch_state(self, thread: Optional[threading.Thread]) -> None:
+        """Drop the watch handles and emit "stopped" -- once, and only
+        while ``thread`` is still the current watch (a later Stop press
+        or a new watch may have got there first)."""
+        with self._watch_state_lock:
+            if self._watch_thread is not thread:
+                return
+            self._watch_recorder = None
+            self._watch_thread = None
+            self._watch_queue = None
+            self._watch_worker = None
+        self._emit_watch_event({"type": "stopped"})
 
     # -- default routes ---------------------------------------------------------
 

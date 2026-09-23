@@ -969,6 +969,47 @@ class TestWatchMode:
     def test_stop_watch_with_nothing_running_is_a_noop_ok(self, api, events):
         assert api.stop_watch() == {"ok": True}
 
+    def test_a_deferred_stop_emits_stopped_once_the_thread_exits(self, api, events):
+        # Stop while the watch thread is mid catch-up used to emit only
+        # "stopping" -- "stopped" waited for a second Stop press, and the
+        # interface showed idle while keys were still being uploaded.
+        release = threading.Event()
+
+        class SlowThread(threading.Thread):
+            def join(self, timeout=None):  # stop_watch's bounded wait: don't sit 5s
+                return super().join(0.05 if timeout is not None else None)
+
+        class Rec:
+            def request_stop(self):
+                pass
+
+        busy = SlowThread(target=lambda: release.wait(10), daemon=True)
+        busy.start()
+        api._watch_recorder = Rec()
+        api._watch_thread = busy
+
+        assert api.stop_watch() == {"ok": True, "stopping": True}
+        assert [e["type"] for e in events] == ["stopping"]
+        assert api._watch_thread is busy  # a new watch still can't start
+
+        release.set()
+        self._wait_for(events, "stopped")
+        assert [e["type"] for e in events] == ["stopping", "stopped"]
+        assert api._watch_thread is None and api._watch_recorder is None
+
+    def test_the_shell_keeps_watching_until_stopped(self):
+        # app.js ignored "stopping" and flipped to idle as soon as
+        # stop_watch() returned.
+        from pathlib import Path
+        js = (Path(api_module.__file__).parent / "shell" / "app.js").read_text(encoding="utf-8")
+        handler = js[js.index("window.onWatchEvent = "):]
+        assert 'case "stopping":' in handler
+        stopped = handler[handler.index('case "stopped":'):]
+        assert "setWatchingUI(false)" in stopped[:stopped.index("break;")]
+        on_stop = js[js.index("async function onStopWatch"):]
+        on_stop = on_stop[:on_stop.index("\n}\n")]
+        assert "result.stopping" in on_stop
+
     def test_starting_watch_before_the_log_file_exists_waits_and_recovers(
         self, api, events, tmp_path,
     ):
