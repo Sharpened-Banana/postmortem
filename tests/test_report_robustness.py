@@ -69,6 +69,26 @@ class TestChestThresholdClamp:
         assert "+-1" not in out
 
 
+@needs_node
+class TestSectionTitles:
+    def test_score_in_a_heading_stays_out_of_the_id_and_index(self, real_report):
+        """The dispel heading carries its score in a trailing <span>, and
+        it used to end up in the section id (so the id, and the remembered
+        collapsed state, changed per report) and in the phone index chip."""
+        report = json.loads(json.dumps(real_report))
+        report["dispel_efficiency"] = {
+            "overall_efficiency_pct": 85,
+            "schools": [{"school": "magic", "dispellers": [], "efficiency_pct": None,
+                         "spells": [], "dispelled": 0, "expired": 0}],
+        }
+        out = _run(_extract_script(render_html(report)), "report-data",
+                   json.dumps(report), extra="render();")
+        assert '<a href="#sec-dispel-efficiency">Dispel efficiency</a>' in out
+        assert 'id="sec-dispel-efficiency"' in out
+        assert "85% overall" in out  # still shown in the heading itself
+        assert "sec-dispel-efficiency-85" not in out
+
+
 def _strict(payload: str):
     def reject(constant):
         raise AssertionError(f"non-standard JSON constant {constant!r} in the page")

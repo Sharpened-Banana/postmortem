@@ -445,7 +445,12 @@ let sectionIds = {};  // reset per render()
 function section(html) {
   const m = /^<h2>([\\s\\S]*?)<\\/h2>/.exec(html);
   if (!m) return { id: "", title: "", html };
-  const title = m[1].replace(/<[^>]*>/g, "").replace(/\\s*\\(.*$/, "").trim();
+  // A trailing <span> is a per-report annotation (the dispel score, the
+  // kick total), not part of the name: left in, "85% overall" landed in
+  // the id -- so the id and its remembered collapsed state changed from
+  // one report to the next -- and in the phone index chip.
+  const title = m[1].replace(/\\s*<span\\b[^>]*>[\\s\\S]*?<\\/span>\\s*$/, "")
+    .replace(/<[^>]*>/g, "").replace(/\\s*\\(.*$/, "").trim();
   const base = "sec-" + (title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "section");
   const n = (sectionIds[base] || 0) + 1;
   sectionIds[base] = n;
