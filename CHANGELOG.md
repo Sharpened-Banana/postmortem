@@ -1,47 +1,33 @@
 # Postmortem addon
 
-## Unreleased
+## 0.3.5 (2026-09-23)
 
-- Verified against Blizzard's API documentation before release, which
-  turned up three ways the tank features would have failed during a key:
-  cooldown reads, cast events and encounter spell names all come back as
-  Secret Values there. The overlay now asks before it reads, never lets a
-  secret touch anything but the text it is displayed in, and — when a
-  cooldown genuinely cannot be read — says only what it knows, rather
-  than claiming "No major defensive up" on a guess.
-- Defensive table cross-checked against LibOpenRaid. Fortifying Brew's
-  cooldown corrected to 420s, and Shield Block, Rune Tap and Frenzied
-  Regeneration are now tracked but never scored, because each costs a
-  resource the cooldown API cannot see.
-- New incoming panel: during a boss encounter, the overlay shows what is
-  about to be cast and which of your major defensives are off cooldown to
-  meet it — including, when it matters most, "No major defensive up". It
-  reads Blizzard's own encounter timeline and your own cooldowns, shows
-  majors only (a resource-gated button the cooldown API calls "ready" is
-  not actually available), and never tells you what to press.
-- The tank post-mortem now has an Options toggle of its own, keeps every
-  death in a key rather than only the most recent, and records what it
-  found into a new `PostmortemTankDB` saved-variables table.
-- The desktop app and Watch Live now find that capture themselves, from
-  the WoW folder you already pointed them at — no path to configure, and
-  nothing to know about. The CLI keeps `--tank-db` for explicit use.
-- That capture includes which defensives the client confirms you have
-  talented — the one thing a combat log can never carry. Point the
-  analyzer at it with `postmortem analyze --tank-db <SavedVariables>` and
-  the report stops hedging: spells you never talented disappear from it
-  entirely, and ones you had but never pressed all run become real
-  findings instead of a "may not be talented" note.
-- Tank death post-mortem: when you die, the overlay now names the
-  defensives that were off cooldown and unpressed at that moment. It only
-  ever reports spells the client confirms you actually know, so an
-  untalented button is never held against you, and resource-gated buttons
-  (Ignore Pain, Shield of the Righteous, Ironfur) are tracked but never
-  scored -- the cooldown API calls those "ready" whether or not you had
-  the rage for them.
-- The same analysis runs over the combat log afterwards, so the report and
-  the site now show, per death, what was ready and unused, what you were
-  holding, how long since your last active-mitigation press, and which
-  group externals were back up.
+For tanks.
+
+- **Tank death post-mortem.** When you die, the post-key recap names the
+  defensives you had off cooldown and unpressed at that moment. It only
+  counts spells the game confirms you have talented, so a button you never
+  took is never held against you. Buttons gated on rage, Holy Power or
+  runes (Shield Block, Ignore Pain, Ironfur, Shield of the Righteous and
+  the like) are never scored: being off cooldown says nothing about
+  whether you could afford them.
+- **Incoming panel.** During a boss, the overlay lists what is about to be
+  cast and which of your major defensives are ready to meet it. It shows
+  what is coming and what you have, and never tells you what to press.
+  "No major defensive up" appears only when every one of them could be
+  read; during a key the game may keep some cooldowns from addons, and
+  then the panel says only what it knows.
+- **A sharper report from the companion app.** Each death also records
+  which defensives you have talented, which the combat log cannot carry.
+  The desktop app and Watch Live pick that up on their own, and the full
+  post-mortem stops hedging: spells you never talented drop out, and ones
+  you had but never pressed all run become real findings. From the
+  command line, pass `postmortem analyze --tank-db <SavedVariables file>`.
+- In the report and on the site, each death now shows what was ready and
+  unused, what you were holding, how long since your last active
+  mitigation, and which group externals were back up.
+- Both features can be turned off in the addon's settings ("Tank death
+  post-mortem", "Incoming panel").
 
 ## 0.3.4 (2026-09-16)
 
