@@ -77,3 +77,9 @@ all WoW globals and expected).
 the client refuses as table keys (simulated by overriding `rawset`/`rawget`),
 `canaccessvalue()` as a secrecy signal, and the "keep last good values"
 behaviour on a bad tick.
+
+`key_abandoned.lua` covers leaving a key without finishing it (leave
+group, hearth, kicked): no COMPLETED/RESET arrives, so `Tracker.lua` must
+notice the challenge is gone and dispatch a synthetic
+`CHALLENGE_MODE_RESET`, which is what stops `CombatLogging.lua` forcing
+logging back on. A loading screen back into the same key must not end it.
