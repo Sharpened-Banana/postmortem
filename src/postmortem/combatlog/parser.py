@@ -123,6 +123,21 @@ def _hour_epoch(year: int, month: int, day: int, hour: int) -> float:
     return cached
 
 
+def _offset_seconds(offset: str) -> Optional[int]:
+    """"-4" / "+13" / "-04:30" -> signed seconds east of UTC; None if the
+    suffix is not a recognisable offset (then the local-clock path is
+    used, as before offsets were read at all)."""
+    sign = -1 if offset[0] == "-" else 1
+    body = offset[1:]
+    hours, _, minutes = body.partition(":")
+    if not hours.isdigit() or (minutes and not minutes.isdigit()):
+        return None
+    total = int(hours) * 3600 + (int(minutes) * 60 if minutes else 0)
+    if total > 14 * 3600:
+        return None
+    return sign * total
+
+
 def parse_line(
     line: str,
     line_no: int = 0,
@@ -161,7 +176,18 @@ def parse_line(
                 time_part = time_part[:i]
                 break
         hh, mm, ss = time_part.split(":")
-        ts = _hour_epoch(year, month, day, int(hh)) + int(mm) * 60 + float(ss)
+        offset_s = _offset_seconds(offset) if offset else None
+        if offset_s is not None:
+            # The client says which side of a DST change this wall clock is
+            # on; use it. mktime() cannot know: on the autumn fall-back the
+            # hour 01:00-01:59 happens twice, and isdst=-1 maps both copies
+            # to the same epoch -- 01:59:59-4 then 01:00:01-5 ran time
+            # backwards by an hour, which everything downstream (pull
+            # windows, durations, recaps) assumes never happens.
+            ts = (calendar.timegm((year, month, day, int(hh), 0, 0, 0, 1, 0))
+                  - offset_s + int(mm) * 60 + float(ss))
+        else:
+            ts = _hour_epoch(year, month, day, int(hh)) + int(mm) * 60 + float(ss)
     except (ValueError, IndexError):
         return None
 

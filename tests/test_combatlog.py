@@ -461,6 +461,30 @@ class TestDaylightSaving:
     def test_an_ordinary_day_is_unchanged(self):
         import calendar
 
-        event = self._parse_at("America/New_York", "8/30/2026 22:06:30.452-7  ZONE_CHANGE,1,\"x\",1")
+        event = self._parse_at("America/New_York", "8/30/2026 22:06:30.452-4  ZONE_CHANGE,1,\"x\",1")
         assert event is not None
         assert event.ts == calendar.timegm((2026, 8, 31, 2, 6, 30, 0, 1, 0)) + 0.452
+
+    def test_the_fall_back_hour_does_not_run_time_backwards(self):
+        """01:00-01:59 happens twice on 2026-11-01 in New York. The offset
+        suffix says which copy a line is in; it used to be parsed and
+        thrown away, and mktime(isdst=-1) put both copies on one clock, so
+        01:59:59-4 followed by 01:00:01-5 went back ~an hour."""
+        before = self._parse_at("America/New_York", "11/1/2026 01:59:59.000-4  ZONE_CHANGE,1,\"x\",1")
+        after = self._parse_at("America/New_York", "11/1/2026 01:00:01.000-5  ZONE_CHANGE,1,\"x\",1")
+        assert before is not None and after is not None
+        assert after.ts - before.ts == 2.0
+
+    def test_the_offset_wins_over_the_machines_zone(self):
+        """A log parsed somewhere else (the site's server runs in UTC) still
+        lands on the real instant the line was written."""
+        import calendar
+
+        event = self._parse_at("UTC", "8/30/2026 22:06:30.000-7  ZONE_CHANGE,1,\"x\",1")
+        assert event.ts == calendar.timegm((2026, 8, 31, 5, 6, 30, 0, 1, 0))
+
+    def test_a_line_without_an_offset_still_uses_the_local_clock(self):
+        import calendar
+
+        event = self._parse_at("America/New_York", "8/30/2026 22:06:30.000  ZONE_CHANGE,1,\"x\",1")
+        assert event.ts == calendar.timegm((2026, 8, 31, 2, 6, 30, 0, 1, 0))
