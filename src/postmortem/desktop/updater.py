@@ -172,7 +172,7 @@ def check_for_update(fetcher: Fetcher = _default_fetcher,
     payload = fetcher(_RELEASES_URL)
     if not payload:
         return None
-    payload = _newest_desktop_release(payload, channel=channel)
+    payload = _newest_desktop_release(payload, channel=channel, asset_name=asset_name)
     if payload is None:
         return None
     tag = payload.get("tag_name", "")
@@ -205,13 +205,21 @@ def check_for_update(fetcher: Fetcher = _default_fetcher,
     }
 
 
-def _newest_desktop_release(payload, channel: str = "stable") -> Optional[dict]:
+def _newest_desktop_release(payload, channel: str = "stable",
+                            asset_name: Optional[str] = None) -> Optional[dict]:
     """The published (non-draft) desktop release with the highest
     build_key out of a GitHub release listing: ``alpha-desktop-N`` only
     on the stable channel, ``beta-desktop-N.M`` too on the beta one. A
     single release dict is accepted too, so a caller holding one
     ``/releases/<x>`` payload gets the same treatment. None when
-    nothing in it qualifies."""
+    nothing in it qualifies.
+
+    With ``asset_name``, only releases that actually carry that asset
+    count. The release workflow creates the release first and attaches
+    each platform's build as its job finishes, so a newer release whose
+    Windows (or macOS) job failed or is still running used to win here
+    and then be dropped for lacking the asset -- hiding an older release
+    that WAS a valid upgrade for this platform."""
     releases = payload if isinstance(payload, list) else [payload]
     best: Optional[dict] = None
     best_key: tuple[int, int] = (-1, -1)
@@ -222,8 +230,15 @@ def _newest_desktop_release(payload, channel: str = "stable") -> Optional[dict]:
         if channel != "beta" and tag_channel(tag) != "stable":
             continue
         key = build_key(tag)
-        if key is not None and key > best_key:
-            best, best_key = release, key
+        if key is None or key <= best_key:
+            continue
+        if asset_name is not None and not any(
+            isinstance(a, dict) and a.get("name") == asset_name
+            and a.get("browser_download_url")
+            for a in release.get("assets") or []
+        ):
+            continue
+        best, best_key = release, key
     return best
 
 

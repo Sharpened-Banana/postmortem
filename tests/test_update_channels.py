@@ -71,6 +71,19 @@ class TestChannelSelection:
         assert check_for_update(lambda url: with_49, channel="beta")["tag"] == "alpha-desktop-49"
         assert check_for_update(lambda url: with_49, channel="stable")["tag"] == "alpha-desktop-49"
 
+    def test_a_newer_release_missing_this_platforms_build_does_not_hide_an_older_one(
+        self, monkeypatch,
+    ):
+        # alpha-desktop-49's macOS job failed (or hasn't finished): the
+        # release exists with only the Windows zip. A mac on 47 must still
+        # be offered 48 rather than nothing at all.
+        monkeypatch.setattr(updater, "VERSION", "alpha-desktop-47")
+        half_built = _release("alpha-desktop-49")
+        half_built["assets"] = [a for a in half_built["assets"]
+                                if a["name"] != "Postmortem-macos.zip"]
+        r = check_for_update(lambda url: [half_built] + LISTING, channel="stable")
+        assert r is not None and r["tag"] == "alpha-desktop-48"
+
     def test_unknown_channel_behaves_as_stable(self, monkeypatch):
         monkeypatch.setattr(updater, "VERSION", "alpha-desktop-48")
         assert check_for_update(lambda url: LISTING, channel="nightly") is None
