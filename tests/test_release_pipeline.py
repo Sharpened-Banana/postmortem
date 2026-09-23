@@ -120,3 +120,40 @@ class TestReleaseTagValidation:
 
     def test_the_tests_job_runs_the_suite(self):
         assert "python -m pytest tests" in _jobs()["tests"]
+
+
+def _step(job_text: str, name: str) -> str:
+    """One step's text: from its ``- name:`` line to the next step."""
+    start = job_text.index(f"- name: {name}")
+    nxt = job_text.find("\n      - ", start + 1)
+    return job_text[start:] if nxt == -1 else job_text[start:nxt]
+
+
+class TestCanonicalRepoNeverShipsUnsigned:
+    """Missing signing secrets used to downgrade to an unsigned build with
+    a notice -- fine for a fork, but in the real repository that build is
+    what every installed app auto-updates to."""
+
+    CANONICAL = '[ "$GITHUB_REPOSITORY" = "Sharpened-Banana/postmortem" ]'
+
+    def _guarded(self, step: str, missing_marker: str) -> None:
+        # Inside the "secret missing" branch, the canonical-repo check
+        # must fail the job before any path that carries on unsigned.
+        branch = step[step.index(missing_marker):]
+        guard = branch.index(self.CANONICAL)
+        assert "exit 1" in branch[guard:guard + 300]
+        carry_on = min(i for i in (branch.find("exit 0"), branch.find("::notice::"),
+                                   branch.find("::warning::")) if i != -1)
+        assert guard < carry_on
+
+    def test_macos_signing_certificate(self):
+        step = _step(_jobs()["build"], "Import the Developer ID certificate")
+        self._guarded(step, 'if [ -z "$MACOS_CERT_P12" ]')
+
+    def test_macos_notarization(self):
+        step = _step(_jobs()["build"], "Notarize and staple")
+        self._guarded(step, 'if [ -z "$APPLE_ID" ]')
+
+    def test_windows_signing(self):
+        step = _step(_jobs()["build"], "Decide whether Windows signing is configured")
+        self._guarded(step, 'echo "WINDOWS_SIGNING=1"')

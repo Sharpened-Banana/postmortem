@@ -24,9 +24,13 @@
 #              .app is notarized with notarytool and stapled.
 #   Windows -- Azure Trusted Signing signs the app exe (before it is
 #              zipped and packed into the installer) and the installer.
-# Every signing step is skipped, with a notice, when its secrets are not
-# configured, so a fork or a scratch tag still builds -- unsigned, with
-# the Gatekeeper / SmartScreen warnings that implies.
+# In a fork, every signing step is skipped, with a notice, when its
+# secrets are not configured, so the fork still builds -- unsigned, with
+# the Gatekeeper / SmartScreen warnings that implies. In the canonical
+# repository (Sharpened-Banana/postmortem) a missing signing or
+# notarization secret FAILS the job instead: every installed app
+# auto-updates to what this workflow publishes, so a lapsed secret would
+# otherwise quietly ship an unsigned build to all of them.
 
 name: Release desktop app
 
@@ -204,6 +208,12 @@ jobs:
           MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
         run: |
           if [ -z "$MACOS_CERT_P12" ]; then
+            # See "canonical repository" in the header: never ship an
+            # unsigned build from the real repo because a secret lapsed.
+            if [ "$GITHUB_REPOSITORY" = "Sharpened-Banana/postmortem" ]; then
+              echo "::error::MACOS_CERT_P12 is not set -- refusing to publish an unsigned macOS build from $GITHUB_REPOSITORY"
+              exit 1
+            fi
             echo "::notice::MACOS_CERT_P12 not set -- building an unsigned macOS app"
             exit 0
           fi
@@ -246,6 +256,10 @@ jobs:
         run: |
           codesign --verify --deep --strict --verbose=2 dist/Postmortem.app
           if [ -z "$APPLE_ID" ] || [ -z "$APPLE_APP_PASSWORD" ] || [ -z "$APPLE_TEAM_ID" ]; then
+            if [ "$GITHUB_REPOSITORY" = "Sharpened-Banana/postmortem" ]; then
+              echo "::error::APPLE_ID / APPLE_APP_PASSWORD / APPLE_TEAM_ID not all set -- refusing to publish an un-notarized macOS build from $GITHUB_REPOSITORY"
+              exit 1
+            fi
             echo "::warning::signed but NOT notarized: APPLE_ID / APPLE_APP_PASSWORD / APPLE_TEAM_ID not all set"
             exit 0
           fi
@@ -338,6 +352,9 @@ jobs:
         run: |
           if [ -n "$AZURE_CLIENT_ID" ]; then
             echo "WINDOWS_SIGNING=1" >> "$GITHUB_ENV"
+          elif [ "$GITHUB_REPOSITORY" = "Sharpened-Banana/postmortem" ]; then
+            echo "::error::AZURE_CLIENT_ID is not set -- refusing to publish unsigned Windows assets from $GITHUB_REPOSITORY"
+            exit 1
           else
             echo "::notice::AZURE_CLIENT_ID not set -- building unsigned Windows assets"
           fi
