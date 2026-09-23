@@ -119,9 +119,11 @@ td.txt .pk b { color: var(--dim); font-weight: 600; margin-right: 4px; }
 /* Spellsteal-worthy casts (user-tagged, see --stealable-data): a left
    accent bar on the row rather than recoloring the kick-rate text, so it
    never collides with the ok/dev-early/dev-off kick-rate coloring
-   already on that same row. */
+   already on that same row. The star's CSS escape is doubled because
+   this template is a plain Python string: a single backslash made it the
+   octal escape \\260 and the page showed a degree sign and a 5. */
 tr.stealable { box-shadow: inset 3px 0 0 var(--steal); }
-tr.stealable td:first-child::after { content: " \2605"; color: var(--steal); }
+tr.stealable td:first-child::after { content: " \\2605"; color: var(--steal); }
 details { margin: 4px 0; }
 summary { cursor: pointer; }
 .legend { font-size: 12px; color: var(--dim); margin-top: 6px; }

@@ -75,6 +75,39 @@ def _strict(payload: str):
     return json.loads(payload, parse_constant=reject)
 
 
+def _templates() -> dict[str, str]:
+    from postmortem.report.html import _TEMPLATE
+    from postmortem.report.index import _INDEX_TEMPLATE
+    from postmortem.report.snapshot import _TEMPLATE as _SNAPSHOT_TEMPLATE
+    return {"report": _TEMPLATE, "index": _INDEX_TEMPLATE, "snapshot": _SNAPSHOT_TEMPLATE}
+
+
+class TestTemplateEscapes:
+    """The templates are ordinary (non-raw) Python strings holding CSS and
+    JS, so a single backslash is a Python escape: CSS's " \\2605" became
+    the octal escape \\260 -- a degree sign -- followed by "5"."""
+
+    def test_stealable_star_survives_as_a_css_escape(self):
+        page = render_html({"run": {"zone": "Z"}})
+        assert 'content: " \\2605"' in page
+        assert "°5" not in page
+
+    @pytest.mark.parametrize("name", ["report", "index", "snapshot"])
+    def test_no_control_characters_in_the_template(self, name):
+        text = _templates()[name]
+        bad = sorted({hex(ord(c)) for c in text if ord(c) < 0x20 and c not in "\n\t"})
+        assert not bad, f"{name} template has escape-damaged control chars: {bad}"
+
+    @pytest.mark.parametrize("name", ["report", "index", "snapshot"])
+    def test_css_content_escapes_are_intact(self, name):
+        """A mangled \\NNN escape lands as a Latin-1 character (\\260 -> the
+        degree sign), which no generated-content string here means to use."""
+        import re
+        for value in re.findall(r'content:\s*"([^"]*)"', _templates()[name]):
+            assert not any(0x80 <= ord(c) <= 0xFF for c in value), \
+                f"{name}: CSS content {value!r} looks like a swallowed escape"
+
+
 class TestNonFiniteNumbers:
     """Python's json.dumps writes Infinity/NaN, which JSON.parse rejects,
     so one non-finite float anywhere in a report blanked the whole page."""
