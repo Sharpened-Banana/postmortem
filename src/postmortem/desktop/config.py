@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
@@ -573,9 +574,17 @@ def save_settings(settings: dict[str, Any]) -> None:
     merged.update(settings or {})
     path = settings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    # A temp file of its own per save, in the same folder (so the rename
+    # stays atomic). One fixed "<name>.tmp" was shared by every save, and
+    # saves do overlap -- the Settings screen, Watch Live and account
+    # linking all write settings from their own threads: one save's
+    # cleanup deleted the other's temp file mid-flight (its rename then
+    # failed) or two writers interleaved into one file.
+    fd, tmp_name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp",
+                                    dir=str(path.parent))
+    tmp = Path(tmp_name)
     try:
-        with open(tmp, "w", encoding="utf-8") as fh:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(merged, fh, indent=1)
             fh.flush()
             os.fsync(fh.fileno())

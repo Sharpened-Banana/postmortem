@@ -50,6 +50,26 @@ class TestLoadSaveRoundTrip:
         # every other key keeps its default
         assert loaded == {**config.DEFAULT_SETTINGS, **settings}
 
+    def test_overlapping_saves_do_not_share_a_temp_file(self, isolated_config_dir, monkeypatch):
+        # Every save wrote "<name>.tmp", so a save landing while another
+        # was between writing and renaming deleted that file out from
+        # under it. Replay exactly that interleaving: a second save runs
+        # just before the first one's rename.
+        real_replace = config.os.replace
+        nested = []
+
+        def replace_after_another_save(src, dst):
+            if not nested:
+                nested.append(src)
+                config.save_settings({"snapshot_focus": "tank"})
+            return real_replace(src, dst)
+
+        monkeypatch.setattr(config.os, "replace", replace_after_another_save)
+        config.save_settings({"raiderio_region": "eu"})
+        loaded = config.load_settings()
+        assert loaded["raiderio_region"] == "eu"
+        assert list(isolated_config_dir.glob("*.tmp")) == []
+
     def test_partial_save_is_merged_onto_defaults(self, isolated_config_dir):
         config.save_settings({"raiderio_region": "eu"})
         loaded = config.load_settings()
