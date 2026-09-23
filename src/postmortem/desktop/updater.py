@@ -185,15 +185,23 @@ def check_for_update(fetcher: Fetcher = _default_fetcher,
     download_url = asset.get("browser_download_url") if asset else None
     if not download_url:
         return None
+    # The SHA256SUMS-<os>.txt published beside the assets, if this
+    # release has one. None means "this release predates digests", which
+    # is not the same as "the digest did not match" -- see verify_digest().
+    # A sums file that IS listed but could not be read is a third case: it
+    # is reported in sha256_error, never folded into None, so the update
+    # fails closed (desktop/api.py refuses to install it).
+    digest_error: Optional[str] = None
+    try:
+        sha256 = _expected_digest(payload, asset_name)
+    except DigestUnavailable as exc:
+        sha256, digest_error = None, str(exc)
     return {
         "tag": tag,
         "download_url": download_url,
         "notes": payload.get("body") or "",
-        # The SHA256SUMS-<os>.txt published beside the assets, if this
-        # release has one. None means "this release predates digests",
-        # which is not the same as "the digest did not match" -- see
-        # verify_digest().
-        "sha256": _expected_digest(payload, asset_name),
+        "sha256": sha256,
+        "sha256_error": digest_error,
     }
 
 
@@ -219,25 +227,41 @@ def _newest_desktop_release(payload, channel: str = "stable") -> Optional[dict]:
     return best
 
 
+class DigestUnavailable(ValueError):
+    """The release lists a sums file, but no usable digest for this
+    platform's asset could be read from it (network error, a URL off this
+    project's releases, no well-formed line). Kept apart from "no sums
+    file at all" on purpose -- see _expected_digest."""
+
+
 def _expected_digest(payload: dict, asset_name: str) -> Optional[str]:
     """The published SHA-256 for ``asset_name``, or None if this release
     has no sums file. Reads the same GitHub API payload the asset list
     came from, so it is as trustworthy as the URL itself -- which is the
     point: an attacker who can substitute the archive cannot also change
-    what the API says its digest should be."""
+    what the API says its digest should be.
+
+    Only an ABSENT sums asset means "no digest". This used to return None
+    as well for a sums file that was listed but could not be fetched or
+    parsed, and verify_digest(None) accepts -- so a flaky network, or
+    anyone able to break that one small download, switched the check off
+    (it failed open). Those cases raise ``DigestUnavailable`` now."""
     sums_name = f"SHA256SUMS-{'Windows' if sys.platform == 'win32' else 'macOS'}.txt"
     asset = next(
         (a for a in payload.get("assets", []) if a.get("name") == sums_name), None,
     )
-    url = asset.get("browser_download_url") if asset else None
-    if not url or not _is_trusted_download_url(url):
+    if asset is None:
         return None
+    url = asset.get("browser_download_url")
+    if not url or not _is_trusted_download_url(url):
+        raise DigestUnavailable(
+            f"{sums_name} is not hosted on this project's GitHub releases")
     req = urllib.request.Request(url, headers={"User-Agent": "postmortem-desktop"})
     try:
         with urllib.request.urlopen(req, timeout=10, context=_SSL_CONTEXT) as resp:
             body = resp.read(_MAX_SUMS_BYTES).decode("utf-8", "replace")
-    except (urllib.error.URLError, OSError, ValueError):
-        return None
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        raise DigestUnavailable(f"could not download {sums_name}: {exc}") from exc
     for line in body.splitlines():
         parts = line.split()
         # "<hex>  <name>", the shasum(1) format the workflow writes.
@@ -245,7 +269,7 @@ def _expected_digest(payload: dict, asset_name: str) -> Optional[str]:
             digest = parts[0].strip().lower()
             if len(digest) == 64 and all(c in "0123456789abcdef" for c in digest):
                 return digest
-    return None
+    raise DigestUnavailable(f"{sums_name} has no valid checksum for {asset_name}")
 
 
 def verify_digest(path: Path, expected: Optional[str]) -> None:

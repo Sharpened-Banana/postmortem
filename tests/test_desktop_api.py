@@ -1684,6 +1684,30 @@ class TestAutoUpdate:
         assert any(e["type"] == "downloading" and e["written"] == 50 for e in events)
         assert any(e["type"] == "applying" for e in events)
 
+    def test_an_unreadable_published_checksum_fails_the_update(
+        self, api, events, monkeypatch,
+    ):
+        # The release lists a SHA256SUMS file that could not be read. That
+        # used to degrade to "no digest" and install unverified.
+        monkeypatch.setattr(api_module.sys, "frozen", True, raising=False)
+        url = "https://github.com/Sharpened-Banana/postmortem/releases/download/alpha-desktop-9/Postmortem-macos.zip"
+        called = []
+        monkeypatch.setattr(updater_module, "perform_update",
+                            lambda *a, **k: called.append(a))
+        # Stubbed so a regression here can never hand the real swap helper
+        # this test process's own interpreter as "the install".
+        monkeypatch.setattr(updater_module, "apply_update_and_relaunch",
+                            lambda *a, **k: called.append(a))
+        monkeypatch.setattr(
+            updater_module, "check_for_update",
+            lambda *a, **k: {"tag": "alpha-desktop-9", "download_url": url, "notes": "",
+                             "sha256": None, "sha256_error": "could not download SHA256SUMS-macOS.txt"},
+        )
+        assert api.start_update(url) == {"ok": True}
+        failed = self._wait_for(events, "failed")
+        assert "checksum" in failed["error"]
+        assert called == []
+
     def test_start_update_re_resolves_on_the_configured_channel(
         self, api, events, monkeypatch, tmp_path,
     ):

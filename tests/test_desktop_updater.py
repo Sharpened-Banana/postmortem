@@ -115,6 +115,7 @@ class TestCheckForUpdate:
         # verify_digest() still accepts so an old build can move forward.
         assert result == {
             "sha256": None,
+            "sha256_error": None,
             "tag": "alpha-desktop-8",
             "download_url": "https://github.com/Sharpened-Banana/postmortem/releases/download/alpha-desktop-8/Postmortem-macos.zip",
             "notes": "some release notes",
@@ -587,8 +588,11 @@ class TestUpdateDigestVerification:
         payload = {"assets": [
             {"name": "SHA256SUMS-macOS.txt", "browser_download_url": f"{base}/SHA256SUMS-macOS.txt"},
         ]}
-        # Not a valid 64-char hex digest, so it is refused rather than used.
-        assert updater._expected_digest(payload, "Postmortem-macos.zip") is None
+        # Not a valid 64-char hex digest, so it is refused rather than used
+        # -- and refused loudly: a listed-but-unusable sums file must not
+        # read as "this release has no digest" (that failed open).
+        with pytest.raises(updater.DigestUnavailable):
+            updater._expected_digest(payload, "Postmortem-macos.zip")
 
     def test_a_wellformed_digest_is_returned(self, monkeypatch):
         import io
@@ -612,10 +616,36 @@ class TestUpdateDigestVerification:
         ]}
         assert updater._expected_digest(payload, "Postmortem-macos.zip") == digest
 
-    def test_a_sums_file_hosted_somewhere_else_is_ignored(self, monkeypatch):
+    def test_a_sums_file_hosted_somewhere_else_is_refused(self, monkeypatch):
         monkeypatch.setattr(sys, "platform", "darwin")
         payload = {"assets": [
             {"name": "SHA256SUMS-macOS.txt",
              "browser_download_url": "https://evil.example/SHA256SUMS-macOS.txt"},
         ]}
-        assert updater._expected_digest(payload, "Postmortem-macos.zip") is None
+        with pytest.raises(updater.DigestUnavailable):
+            updater._expected_digest(payload, "Postmortem-macos.zip")
+
+    def test_no_sums_asset_at_all_is_the_only_no_digest_case(self, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "darwin")
+        assert updater._expected_digest({"assets": []}, "Postmortem-macos.zip") is None
+
+    def test_a_listed_sums_file_that_cannot_be_fetched_fails_closed(self, monkeypatch):
+        # Before: a network error on the sums download returned None, which
+        # verify_digest() accepts -- the update installed unverified.
+        monkeypatch.setattr(sys, "platform", "darwin")
+        monkeypatch.setattr(updater, "VERSION", "alpha-desktop-5")
+
+        def refuse(*a, **k):
+            raise updater.urllib.error.URLError("connection reset")
+
+        monkeypatch.setattr(updater.urllib.request, "urlopen", refuse)
+        base = "https://github.com/Sharpened-Banana/postmortem/releases/download/alpha-desktop-8"
+        release = {"tag_name": "alpha-desktop-8", "assets": [
+            {"name": "Postmortem-macos.zip", "browser_download_url": f"{base}/Postmortem-macos.zip"},
+            {"name": "SHA256SUMS-macOS.txt", "browser_download_url": f"{base}/SHA256SUMS-macOS.txt"},
+        ]}
+        with pytest.raises(updater.DigestUnavailable):
+            updater._expected_digest(release, "Postmortem-macos.zip")
+        result = updater.check_for_update(fetcher=lambda url: [release])
+        assert result["sha256"] is None
+        assert "connection reset" in result["sha256_error"]

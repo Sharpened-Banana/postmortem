@@ -1607,6 +1607,16 @@ class DesktopAPI:
                         "error": "this update no longer matches the published release",
                     })
                     return
+                if available.get("sha256_error"):
+                    # The release publishes a checksum that could not be
+                    # read. Installing anyway would skip the one check
+                    # standing between a substituted archive and a relaunch.
+                    self._emit_update_event({
+                        "type": "failed",
+                        "error": ("could not verify this update's published checksum ("
+                                  f"{available['sha256_error']}) -- try again later"),
+                    })
+                    return
                 new_install = _updater.perform_update(
                     download_url, work_dir, on_progress=on_progress,
                     expected_sha256=available.get("sha256"),
