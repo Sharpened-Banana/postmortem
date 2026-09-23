@@ -603,6 +603,17 @@ if ! mv "$NEW_APP" "$OLD_APP" 2>>"$LOG"; then
 fi
 
 log "update applied"
+
+# Every update leaves a timestamped backup beside the app, and nothing
+# ever removed them -- a full app bundle per update, piling up for good.
+# Keep only the one just made (the rollback for THIS update); only after a
+# successful swap, so a failed one never deletes a working build.
+for old_backup in "$OLD_APP".backup-*; do
+  [ -e "$old_backup" ] || continue
+  [ "$old_backup" = "$BACKUP_APP" ] && continue
+  rm -rf "$old_backup" 2>>"$LOG" || log "could not remove old backup $old_backup"
+done
+
 open -n "$OLD_APP"
 """
 
@@ -711,6 +722,23 @@ try {
 } catch { Log "could not carry the uninstaller over: $_" }
 
 Log "update applied"
+
+# Every update leaves a timestamped backup beside the install, and nothing
+# ever removed them -- a full install per update, piling up for good. Keep
+# only the one just made (the rollback for THIS update); only after a
+# successful swap, so a failed one never deletes a working build.
+try {
+    $keep = [System.IO.Path]::GetFullPath($BackupDir)
+    $parent = Split-Path -Parent $OldDir
+    $leaf = Split-Path -Leaf $OldDir
+    Get-ChildItem -LiteralPath $parent -Directory -Filter "$leaf.backup-*" -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -ine $keep } |
+        ForEach-Object {
+            $stale = $_.FullName
+            try { Remove-Item -LiteralPath $stale -Recurse -Force } catch { Log "could not remove old backup $stale : $_" }
+        }
+} catch { Log "could not prune old backups: $_" }
+
 Launch $OldDir
 """
 

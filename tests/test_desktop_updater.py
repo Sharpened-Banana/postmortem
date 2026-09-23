@@ -493,6 +493,51 @@ class TestApplyUpdateAndRelaunch:
         # The Inno uninstaller must survive the swap.
         assert '-Filter "unins*"' in script
 
+    @pytest.mark.skipif(not Path("/bin/sh").exists(), reason="needs a POSIX shell")
+    def test_macos_helper_keeps_only_the_newest_backup(self, tmp_path):
+        # Every update left a Postmortem.app.backup-<ts> beside the app and
+        # nothing ever removed one. Run the real helper against scratch
+        # dirs (with a stub `open` so nothing is launched).
+        import os
+        import subprocess
+
+        apps = tmp_path / "Applications"
+        apps.mkdir()
+        old_app = apps / "Postmortem.app"
+        (old_app / "Contents").mkdir(parents=True)
+        (old_app / "Contents" / "v").write_text("old")
+        for ts in ("1000", "2000"):
+            (apps / f"Postmortem.app.backup-{ts}").mkdir()
+        new_app = tmp_path / "staged" / "Postmortem.app"
+        (new_app / "Contents").mkdir(parents=True)
+        (new_app / "Contents" / "v").write_text("new")
+        backup = apps / "Postmortem.app.backup-3000"
+
+        fakebin = tmp_path / "bin"
+        fakebin.mkdir()
+        (fakebin / "open").write_text("#!/bin/sh\nexit 0\n")
+        (fakebin / "open").chmod(0o755)
+        script = tmp_path / "relaunch.sh"
+        script.write_text(updater._MACOS_RELAUNCH_SCRIPT)
+        done = subprocess.Popen(["true"])
+        done.wait()  # an exited pid: the helper's wait loop ends at once
+
+        env = dict(os.environ, PATH=f"{fakebin}:/bin:/usr/bin", TMPDIR=str(tmp_path))
+        subprocess.run(["/bin/sh", str(script), str(done.pid), str(old_app),
+                        str(new_app), str(backup)], env=env, check=True, timeout=30)
+
+        assert (old_app / "Contents" / "v").read_text() == "new"
+        assert sorted(p.name for p in apps.iterdir()) == [
+            "Postmortem.app", "Postmortem.app.backup-3000"]
+        assert (backup / "Contents" / "v").read_text() == "old"
+
+    def test_windows_helper_prunes_older_backups_after_a_swap(self):
+        script = updater._WINDOWS_RELAUNCH_SCRIPT
+        prune = script.index('-Filter "$leaf.backup-*"')
+        # after the swap succeeded, never before it
+        assert script.index('Log "update applied"') < prune
+        assert "Where-Object { $_.FullName -ine $keep }" in script
+
     def test_windows_update_log_lives_in_the_config_dir(self, tmp_path, monkeypatch):
         import postmortem.appdirs as appdirs
         monkeypatch.setattr(appdirs, "config_dir", lambda: tmp_path / "cfg")
