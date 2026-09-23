@@ -546,6 +546,50 @@ class TestRecorderRotationAndCatchUp:
         text = completed[0].path.read_text(encoding="utf-8")
         assert text.count("CHALLENGE_MODE_START") == 1 and "CHALLENGE_MODE_END" in text
 
+    def test_catch_up_keeps_a_reloaded_key_whole(self, tmp_path):
+        # A mid-key /reload re-logs the same key's START. The resume scan
+        # used to let that second START overwrite the first, so catch-up
+        # replayed only the post-reload half and asked already_processed()
+        # with the reload's timestamp -- never the stored run's start_ts --
+        # re-uploading a truncated key on every Watch Live start.
+        log = tmp_path / "WoWCombatLog.txt"
+        b = LogBuilder()
+        b.start(0, zone="The Blinding Vale", instance=2859, cm=584, lvl=7)
+        self._filler(b, 5)
+        b.start(50, zone="The Blinding Vale", instance=2859, cm=584, lvl=7)
+        self._filler(b, 55)
+        b.end(100, success=1, lvl=7, ms=971306, instance=2859)
+        log.write_text(b.text(), encoding="utf-8")
+
+        from postmortem.recorder import _start_identity
+        first_start = next(ln for ln in b.text().splitlines(keepends=True)
+                           if "CHALLENGE_MODE_START" in ln)
+        _, first_ts = _start_identity(first_start)
+
+        asked, completed = [], []
+        rec = Recorder(
+            log_path=log, out_dir=tmp_path / "runs",
+            already_processed=lambda zone, ts: asked.append((zone, ts)) or False,
+            on_run_complete=completed.append, echo=lambda s: None,
+        )
+        rec.watch(stop_after_runs=1)
+        assert asked == [("The Blinding Vale", first_ts)]
+        text = completed[0].path.read_text(encoding="utf-8")
+        assert text.count("CHALLENGE_MODE_START") == 2
+
+    def test_resume_point_of_a_reloaded_in_progress_key_is_its_first_start(self, tmp_path):
+        log = tmp_path / "WoWCombatLog.txt"
+        b = LogBuilder()
+        b.start(0, zone="The Blinding Vale", instance=2859, cm=584, lvl=7)
+        self._filler(b, 5)
+        b.start(50, zone="The Blinding Vale", instance=2859, cm=584, lvl=7)
+        self._filler(b, 55)
+        log.write_text(b.text(), encoding="utf-8")
+        rec = Recorder(log_path=log, out_dir=tmp_path / "runs", echo=lambda s: None)
+        with open(log, "r", encoding="utf-8") as fh:
+            offset, in_progress, _ = rec._find_resume_point(fh)
+        assert in_progress and offset == 0
+
     def test_does_not_replay_a_key_the_history_already_has(self, tmp_path):
         import threading
         import time as _time
