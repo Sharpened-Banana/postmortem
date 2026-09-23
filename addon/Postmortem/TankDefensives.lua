@@ -38,14 +38,14 @@ T.bySpec = {
   },
   [73] = {
     { id = 190456, name = "Ignore Pain", category = "active_mitigation", cooldown = 0.0, duration = 12.0, charges = 1 },
-    { id = 2565, name = "Shield Block", category = "active_mitigation", cooldown = 16.0, duration = 6.0, charges = 2 },
+    { id = 2565, name = "Shield Block", category = "active_mitigation", cooldown = 0.0, duration = 6.0, charges = 2 },
     { id = 1160, name = "Demoralizing Shout", category = "major", cooldown = 45.0, duration = 8.0, charges = 1 },
     { id = 12975, name = "Last Stand", category = "major", cooldown = 180.0, duration = 15.0, charges = 1 },
     { id = 871, name = "Shield Wall", category = "major", cooldown = 240.0, duration = 8.0, charges = 1 },
     { id = 23920, name = "Spell Reflection", category = "major", cooldown = 25.0, duration = 5.0, charges = 1 },
   },
   [104] = {
-    { id = 22842, name = "Frenzied Regeneration", category = "active_mitigation", cooldown = 36.0, duration = 3.0, charges = 2 },
+    { id = 22842, name = "Frenzied Regeneration", category = "active_mitigation", cooldown = 0.0, duration = 3.0, charges = 2 },
     { id = 192081, name = "Ironfur", category = "active_mitigation", cooldown = 0.0, duration = 7.0, charges = 1 },
     { id = 22812, name = "Barkskin", category = "major", cooldown = 60.0, duration = 12.0, charges = 1 },
     { id = 102558, name = "Incarnation: Guardian of Ursoc", category = "major", cooldown = 180.0, duration = 30.0, charges = 1 },
@@ -54,8 +54,8 @@ T.bySpec = {
   },
   [250] = {
     { id = 49998, name = "Death Strike", category = "active_mitigation", cooldown = 0.0, duration = 0.0, charges = 1 },
-    { id = 194679, name = "Rune Tap", category = "active_mitigation", cooldown = 25.0, duration = 4.0, charges = 2 },
-    { id = 48707, name = "Anti-Magic Shell", category = "major", cooldown = 60.0, duration = 5.0, charges = 1 },
+    { id = 194679, name = "Rune Tap", category = "active_mitigation", cooldown = 0.0, duration = 4.0, charges = 2 },
+    { id = 48707, name = "Anti-Magic Shell", category = "major", cooldown = 60.0, duration = 10.0, charges = 1 },
     { id = 49028, name = "Dancing Rune Weapon", category = "major", cooldown = 120.0, duration = 8.0, charges = 1 },
     { id = 48792, name = "Icebound Fortitude", category = "major", cooldown = 180.0, duration = 8.0, charges = 1 },
     { id = 55233, name = "Vampiric Blood", category = "major", cooldown = 90.0, duration = 10.0, charges = 1 },
@@ -65,7 +65,7 @@ T.bySpec = {
     { id = 322507, name = "Celestial Brew", category = "major", cooldown = 60.0, duration = 8.0, charges = 1 },
     { id = 122278, name = "Dampen Harm", category = "major", cooldown = 120.0, duration = 10.0, charges = 1 },
     { id = 122783, name = "Diffuse Magic", category = "major", cooldown = 90.0, duration = 6.0, charges = 1 },
-    { id = 115203, name = "Fortifying Brew", category = "major", cooldown = 360.0, duration = 15.0, charges = 1 },
+    { id = 115203, name = "Fortifying Brew", category = "major", cooldown = 420.0, duration = 15.0, charges = 1 },
     { id = 115176, name = "Zen Meditation", category = "major", cooldown = 300.0, duration = 8.0, charges = 1 },
   },
   [581] = {

@@ -36,55 +36,111 @@ function MA:TankUtil_PlayerSpecID()
   return nil
 end
 
+-- True when the client handed us a secret value (patch 12.0's Secret Values):
+-- one that throws the moment it is compared, used in arithmetic, concatenated
+-- or used as a table key. Same guard as MeterUtil.lua's; nothing is ever
+-- secret on a client that predates the system.
+function MA:TankUtil_IsSecret(value)
+  return issecretvalue ~= nil and issecretvalue(value) or false
+end
+
 -- Is the spell actually in the player's spellbook right now? This is the
 -- question the combat log can never answer, and it is what keeps the live
 -- report from telling a tank they sat on a button they never talented.
 -- A nil/unknown answer is treated as "don't claim anything" by the caller.
+--
+-- C_SpellBook.IsSpellKnown is the documented call on the live client and
+-- carries no secret annotation (verified against Blizzard's generated API
+-- documentation, build 12.1.0.69933). It does not follow talent overrides,
+-- which can only produce a false "not known" -- the direction that
+-- suppresses a claim, never invents one. The globals are kept for clients
+-- without the namespaced call.
 function MA:TankUtil_IsKnown(spellID)
-  if C_SpellBook and C_SpellBook.IsSpellKnownOrOverridesKnown then
-    return C_SpellBook.IsSpellKnownOrOverridesKnown(spellID) and true or false
-  end
+  local known
   if C_SpellBook and C_SpellBook.IsSpellKnown then
-    return C_SpellBook.IsSpellKnown(spellID) and true or false
+    known = C_SpellBook.IsSpellKnown(spellID)
+  elseif IsSpellKnownOrOverridesKnown then
+    known = IsSpellKnownOrOverridesKnown(spellID)
+  elseif IsSpellKnown then
+    known = IsSpellKnown(spellID)
+  else
+    return nil
   end
-  if IsSpellKnownOrOverridesKnown then
-    return IsSpellKnownOrOverridesKnown(spellID) and true or false
+  if MA:TankUtil_IsSecret(known) then return nil end
+  return known and true or false
+end
+
+-- Seconds remaining on spellID's cooldown: 0 when ready, nil when the
+-- client will not say.
+--
+-- Why this asks a duration object instead of GetSpellCooldown
+-- ----------------------------------------------------------
+-- C_Spell.GetSpellCooldown and C_Spell.GetSpellCharges are both declared
+-- SecretWhenCooldownsRestricted, and the restriction types include
+-- ChallengeMode -- "an active and incomplete mythic keystone dungeon",
+-- i.e. exactly where this addon runs. Their fields come back secret, and
+-- comparing or subtracting them throws. The first version of this function
+-- did both, so under restriction it could not answer at all.
+--
+-- C_Spell.GetSpellCooldownDuration carries no such annotation. It returns a
+-- LuaDurationObject whose HasSecretValues() and IsZero() are unannotated
+-- too -- the intended pattern is to ask "can I read this?" before "is it on
+-- cooldown?". When the answer to the first is no, this returns nil and the
+-- caller falls back to its own evidence (see TankUtil_Readiness).
+--
+-- ignoreGCD, because otherwise every spell looks "on cooldown" for a second
+-- and a half after any cast.
+function MA:TankUtil_CooldownRemaining(spellID)
+  if C_Spell and C_Spell.GetSpellCooldownDuration then
+    local duration = C_Spell.GetSpellCooldownDuration(spellID, true)
+    if duration == nil or duration.HasSecretValues == nil then return nil end
+    if duration:HasSecretValues() then return nil end
+    if duration:IsZero() then return 0 end
+    local remaining = duration:GetRemainingDuration()
+    if type(remaining) ~= "number" or MA:TankUtil_IsSecret(remaining) then return nil end
+    return remaining > 0 and remaining or 0
   end
-  if IsSpellKnown then
-    return IsSpellKnown(spellID) and true or false
+
+  -- Clients without duration objects. Every field is checked for secrecy
+  -- before it is touched, rather than trusting that this path only runs on
+  -- clients where nothing is secret.
+  if C_Spell and C_Spell.GetSpellCooldown then
+    local info = C_Spell.GetSpellCooldown(spellID)
+    if type(info) ~= "table" then return nil end
+    local startTime, dur = info.startTime, info.duration
+    if MA:TankUtil_IsSecret(startTime) or MA:TankUtil_IsSecret(dur) then return nil end
+    if type(startTime) ~= "number" or type(dur) ~= "number" then return nil end
+    if startTime == 0 or dur == 0 then return 0 end
+    local remaining = (startTime + dur) - GetTime()
+    return remaining > 0 and remaining or 0
   end
   return nil
 end
 
--- Seconds remaining on spellID's cooldown: 0 when ready, nil when the
--- client wouldn't say. Handles the modern table-returning
--- C_Spell.GetSpellCooldown and the legacy multiple-return GetSpellCooldown,
--- and treats a charge-based spell with a charge banked as ready regardless
--- of the recharge timer (that is what having a charge means).
-function MA:TankUtil_CooldownRemaining(spellID)
-  if C_Spell and C_Spell.GetSpellCharges then
-    local charges = C_Spell.GetSpellCharges(spellID)
-    if type(charges) == "table" and type(charges.currentCharges) == "number" then
-      if charges.currentCharges > 0 then return 0 end
+-- Is `entry` (a TankDefensives row) ready right now? Returns two values:
+--
+--   "ready" | "cooling" | nil   -- nil means nobody can honestly say
+--   "client" | "estimate"       -- where the answer came from
+--
+-- The client's own cooldown state is used whenever it is readable. When it
+-- is not (see TankUtil_CooldownRemaining), the fallback is the analyzer's
+-- method: the player's own last cast plus the table's baseline cooldown,
+-- with a margin. That fallback only ever reasons from POSITIVE evidence --
+-- a cast we actually saw. Never having seen a cast is not evidence of
+-- anything here, because the cast event itself can be secret under
+-- restriction (UNIT_SPELLCAST_SUCCEEDED is SecretWhenUnitSpellCastRestricted),
+-- so "no cast recorded" may just mean "no cast readable". The analyzer, which
+-- sees the whole log, is the one place that can reason from absence.
+function MA:TankUtil_Readiness(entry, castAt, now, margin)
+  local remaining = MA:TankUtil_CooldownRemaining(entry.id)
+  if remaining ~= nil then
+    return remaining <= 0 and "ready" or "cooling", "client"
+  end
+  if type(castAt) == "number" then
+    if now - castAt >= entry.cooldown + (margin or 0) then
+      return "ready", "estimate"
     end
+    return "cooling", "estimate"
   end
-
-  local startTime, duration
-  if C_Spell and C_Spell.GetSpellCooldown then
-    local info = C_Spell.GetSpellCooldown(spellID)
-    if type(info) == "table" then
-      startTime, duration = info.startTime, info.duration
-    end
-  elseif GetSpellCooldown then
-    startTime, duration = GetSpellCooldown(spellID)
-  end
-
-  if type(startTime) ~= "number" or type(duration) ~= "number" then
-    return nil
-  end
-  if startTime == 0 or duration == 0 then
-    return 0  -- not on cooldown
-  end
-  local remaining = (startTime + duration) - GetTime()
-  return remaining > 0 and remaining or 0
+  return nil, nil
 end

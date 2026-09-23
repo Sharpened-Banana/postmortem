@@ -51,9 +51,23 @@ end
 
 -- The upcoming timeline events inside HORIZON_S, soonest first.
 --
--- Returns a plain array of { name, remaining, severity }. Anything the
--- client won't answer for is skipped rather than guessed at: a row we
--- cannot label or time is worse than no row.
+-- Returns a plain array of { name, remaining }. What is readable here was
+-- verified 2026-09-23 against Blizzard's generated API documentation (build
+-- 12.1.0.69933), after the first version got it wrong:
+--
+--   * GetEventTimeRemaining carries no secret annotation -> a real number,
+--     safe to filter and sort on.
+--   * GetEventInfo is SecretWhenEncounterEvent, and inside its struct only
+--     id/source/duration/maxQueueDuration are NeverSecret. spellName,
+--     spellID, severity and isApproximate are all secret during a boss --
+--     which is the only time there are events to show.
+--
+-- So the name is carried as an opaque value and handed straight to a
+-- FontString, whose SetText accepts secrets from addon code
+-- (SecretArguments = "AllowedWhenTainted"). It is never formatted, compared
+-- or concatenated here: any of those throws. The first version did all
+-- three, and also tested isApproximate for a "?" marker; that marker is gone
+-- because the flag cannot be read.
 local function UpcomingEvents()
   if not TimelineAvailable() then return {} end
 
@@ -61,55 +75,70 @@ local function UpcomingEvents()
   if type(list) ~= "table" then return {} end
 
   local out = {}
-  for _, handle in ipairs(list) do
-    local info = C_EncounterTimeline.GetEventInfo and C_EncounterTimeline.GetEventInfo(handle)
+  for _, eventID in ipairs(list) do
     local remaining = C_EncounterTimeline.GetEventTimeRemaining
-        and C_EncounterTimeline.GetEventTimeRemaining(handle)
-
-    -- A secret or missing field means this row is not ours to render.
-    if type(info) == "table" and type(remaining) == "number"
-        and type(info.spellName) == "string"
+        and C_EncounterTimeline.GetEventTimeRemaining(eventID)
+    -- Unannotated today; checked anyway, because it is the one value this
+    -- file does arithmetic on and an annotation can be added in any patch.
+    if type(remaining) == "number" and not MA:TankUtil_IsSecret(remaining)
         and remaining >= 0 and remaining <= HORIZON_S then
-      out[#out + 1] = {
-        name = info.spellName,
-        remaining = remaining,
-        severity = info.severity,
-        -- The timeline marks a cast that may not actually happen; saying
-        -- "maybe" is more honest than showing it as certain.
-        approximate = info.isApproximate and true or false,
-      }
-      if #out >= MAX_ROWS then break end
+      local info = C_EncounterTimeline.GetEventInfo and C_EncounterTimeline.GetEventInfo(eventID)
+      -- Not even a nil check on spellName: it is documented Nilable = false,
+      -- and "~= nil" is still a comparison on a value that may be secret.
+      if type(info) == "table" then
+        out[#out + 1] = { name = info.spellName, remaining = remaining }
+      end
     end
   end
+  -- Sorted here rather than trusted from the list: the documentation does
+  -- not say what GetSortedEventList sorts by, and truncating to MAX_ROWS in
+  -- the wrong order would drop the cast that lands first.
+  table.sort(out, function(a, b) return a.remaining < b.remaining end)
+  for i = #out, MAX_ROWS + 1, -1 do out[i] = nil end
   return out
 end
 
--- The player's own major defensives that are off cooldown right now.
+-- The player's own major defensives that are ready right now.
 --
 -- Deliberately majors only. Active mitigation (Shield Block, Ironfur,
 -- Shield of the Righteous) is resource-gated, so the cooldown API calls it
 -- ready whether or not the player can afford it -- the same reason
 -- TankDeath.lua never scores those. Listing them here would be a panel that
 -- lies during a rage drought.
+--
+-- Returns the ready list AND whether every known major could be assessed.
+-- The distinction matters for the most important thing the panel says:
+-- "No major defensive up" is only true when we know the state of all of
+-- them. Under cooldown restriction some may be unreadable, and an empty
+-- list then means "can't tell", not "nothing up".
 local function ReadyDefensives()
   local T = MA.TankDefensives
-  if not T or not T.bySpec then return {} end
+  if not T or not T.bySpec then return {}, false end
 
   local specID = MA:TankUtil_PlayerSpecID()
-  if not specID then return {} end
+  if not specID then return {}, false end
   local entries = T.bySpec[specID]
-  if not entries then return {} end
+  if not entries then return {}, false end
 
-  local ready = {}
+  local now = GetTime()
+  local ready, complete, assessed = {}, true, 0
   for _, entry in ipairs(entries) do
     if entry.cooldown > 0 and MA:TankUtil_IsKnown(entry.id) then
-      local remaining = MA:TankUtil_CooldownRemaining(entry.id)
-      if remaining ~= nil and remaining <= 0 then
-        ready[#ready + 1] = { id = entry.id, name = entry.name }
+      local castAt = MA.TankDeath_LastCast and MA:TankDeath_LastCast(entry.id)
+      local ok, state = pcall(MA.TankUtil_Readiness, MA, entry, castAt, now)
+      if not ok or state == nil then
+        complete = false
+      else
+        assessed = assessed + 1
+        if state == "ready" then
+          ready[#ready + 1] = { id = entry.id, name = entry.name }
+        end
       end
     end
   end
-  return ready
+  -- Knowing nothing is not knowing everything.
+  if assessed == 0 then complete = false end
+  return ready, complete
 end
 
 -- Recomputes the panel's state into MA.state.incoming, or nil when there is
@@ -130,14 +159,15 @@ function MA:Incoming_OnTick()
     return
   end
 
-  MA.state.incoming = { events = events, ready = ReadyDefensives() }
+  local ready, complete = ReadyDefensives()
+  MA.state.incoming = { events = events, ready = ready, readyComplete = complete }
 end
 
--- Formats one event row: "Rending Maw  4.2s". Kept here rather than in
--- Overlay.lua so the panel's wording lives with the data that shapes it.
-function MA:Incoming_FormatEvent(event)
-  return string.format("%s  %.1fs%s",
-    event.name, event.remaining, event.approximate and "?" or "")
+-- The countdown half of an event row. Only the number is formatted here;
+-- the spell name is a secret during encounters and goes to its own
+-- FontString untouched (see UpcomingEvents).
+function MA:Incoming_FormatTime(remaining)
+  return string.format("%.1fs", remaining)
 end
 
 local eventFrame = CreateFrame("Frame")

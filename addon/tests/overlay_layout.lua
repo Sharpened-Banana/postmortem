@@ -194,3 +194,73 @@ print("recap row order: " .. table.concat(order2, " -> "))
 local expected = "timerRow -> chestTimer -> forcesBar -> statsRow -> split -> pull -> status -> deathCause -> companion"
 assert(table.concat(order2, " -> ") == expected, "recap order wrong")
 print("ok: every optional row reflows in order below the header")
+
+-- ---------------------------------------------------------------------
+-- The incoming panel's render path, with the spell name secret.
+--
+-- GetEventInfo is SecretWhenEncounterEvent: during a boss -- the only time
+-- there is anything to show -- the spell name is a secret. The live client
+-- lets addon code hand a secret to FontString:SetText
+-- (SecretArguments = "AllowedWhenTainted") and refuses every other use.
+-- The first version of this panel string.format'ed the name into a row
+-- and would have thrown on every tick of every boss. Verified against
+-- Blizzard's generated API documentation, build 12.1.0.69933.
+-- ---------------------------------------------------------------------
+local secretSet = {}
+local function Secret(label)
+  local poison = function() error("attempt to use a secret value (" .. label .. ")", 2) end
+  local v = setmetatable({}, {
+    __concat = poison, __len = poison, __lt = poison, __le = poison,
+    __tostring = function() return "<secret " .. label .. ">" end,
+  })
+  secretSet[v] = true
+  return v
+end
+local real_format = string.format
+string.format = function(fmt, ...)
+  for i = 1, select("#", ...) do
+    if secretSet[(select(i, ...))] then error("string.format on a secret value", 2) end
+  end
+  return real_format(fmt, ...)
+end
+-- SetText is the one place a secret is allowed to go: record exactly what
+-- arrived, so the check below can tell the secret itself from a string
+-- built out of it.
+local rawSetText = {}
+for _, w in ipairs(widgets) do
+  if w.kind == "FontString" then
+    function w:SetText(t) rawSetText[self] = t; self.text = tostring(t) end
+  end
+end
+
+assert(loadfile("addon/Postmortem/Incoming.lua"))("Postmortem", MA)
+
+MA.state.active = true
+MA.state.recapUntil = nil
+MA.state.lastDeathCause = nil
+local secretName = Secret("spellName")
+MA.state.incoming = {
+  events = { { name = secretName, remaining = 4.2 } },
+  ready = {},
+  readyComplete = false,  -- cooldowns unreadable: "none up" would be a guess
+}
+local ok, err = pcall(MA.Overlay_Refresh, MA)
+assert(ok, "overlay threw rendering a secret spell name: " .. tostring(err))
+
+local row = f.incomingRows and f.incomingRows[1]
+assert(row and row.shown, "first incoming row should show")
+assert(rawSetText[row.nameFS] == secretName,
+  "the name FontString must receive the secret itself, not a string made from it")
+assert(row.timeFS:GetText() == "4.2s", "countdown wrong: " .. tostring(row.timeFS:GetText()))
+assert(not f.readyFS.shown,
+  "'No major defensive up' must not be claimed when readiness could not be read")
+print("ok: a secret spell name reaches SetText untouched, and 'none up' is not guessed")
+
+-- The same state with readiness fully known and nothing up: now the claim
+-- is true, and is made.
+MA.state.incoming.readyComplete = true
+MA:Overlay_Refresh()
+assert(f.readyFS.shown and f.readyFS:GetText() == "No major defensive up",
+  "'No major defensive up' should show when it is actually known")
+print("ok: 'No major defensive up' shows only when it is known")
+string.format = real_format
