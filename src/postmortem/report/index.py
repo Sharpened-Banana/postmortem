@@ -424,9 +424,21 @@ function abbrev(zone) {
 // Chest upgrade count for the stars: the report's timer.threshold (0-3)
 // when a par time was resolved; older reports without one fall back to
 // the plain timed flag. null = incomplete / unknown.
+//
+// The threshold is clamped to a whole number 0..3 because it comes
+// straight from the uploaded report: a -1 used to reach "★".repeat(),
+// which throws a RangeError, and that one row blanked the whole feed for
+// every visitor. Text or a non-finite number counts as no threshold, so
+// the row falls back to the timed flag like an older report.
+function chestCount(v) {
+  if (v == null || v === "") return null;
+  const n = Math.trunc(Number(v));
+  return Number.isFinite(n) ? Math.min(3, Math.max(0, n)) : null;
+}
 function stars(r) {
   if (!r.completed) return null;
-  if (r.threshold != null) return r.threshold;
+  const thr = chestCount(r.threshold);
+  if (thr != null) return thr;
   if (r.timed === true) return 1;
   if (r.timed === false) return 0;
   return null;

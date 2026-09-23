@@ -437,7 +437,11 @@ function timerInfo() {
   if (t.margin_ms == null) return `<div class="sub">${esc(parLabel)}</div>`;
   const cls = t.margin_ms >= 0 ? "ok" : "dev-off";
   const verb = t.margin_ms >= 0 ? "beat timer by" : "over timer by";
-  const thr = t.threshold ? ` (+${t.threshold})` : "";
+  // Clamped to a whole 1..3 like the feed's stars (chestCount in
+  // report/index.py): the value is whatever the uploaded report says, and
+  // a "+-1" or "+Infinity" upgrade reads as a bug in the page.
+  const thrN = Math.min(3, Math.trunc(Number(t.threshold)));
+  const thr = thrN >= 1 ? ` (+${thrN})` : "";
   return `<div class="sub"><span class="${cls}">${verb} ${mmss(Math.abs(t.margin_ms)/1000)}${thr}</span>`
     + ` · ${esc(parLabel)}</div>`;
 }
