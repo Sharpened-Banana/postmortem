@@ -739,6 +739,13 @@ class DesktopAPI:
             groupmate_url = _upload.duplicate_of(result, target)
             if groupmate_url:
                 result["url"] = groupmate_url
+            if result.get("ok") or groupmate_url:
+                # Record it exactly as Watch Live does. Only the watch path
+                # ever did, so a key uploaded from the report screen stayed
+                # "not uploaded" in History, and Watch Live's catch-up
+                # (already_processed) re-analyzed and re-uploaded it on the
+                # next start.
+                self._mark_report_uploaded(report)
             return result
         except Exception as exc:  # noqa: BLE001
             # upload_report() is documented never to raise, and now does
@@ -746,6 +753,17 @@ class DesktopAPI:
             # an exception is a raw traceback in the interface rather than
             # a message. Belt and braces at the boundary that has to hold.
             return {"ok": False, "error": str(exc)}
+
+    @staticmethod
+    def _mark_report_uploaded(report: dict) -> None:
+        """Best-effort ``mark_uploaded`` for a report in the configured
+        history database -- a failure to record never undoes an upload."""
+        try:
+            run = (report or {}).get("run") or {}
+            db_path = _config.resolve_history_db_path(_config.load_settings())
+            _mark_uploaded(db_path, run.get("zone"), run.get("start_ts"))
+        except Exception:  # noqa: BLE001
+            pass
 
     # -- live watch mode (auto-analyze + auto-upload every run) -------------
     #

@@ -744,6 +744,28 @@ class TestUploadReport:
         assert result["ok"] is False
         assert api.get_settings()["site_url"] is None
 
+    def test_an_upload_from_the_report_screen_is_recorded_in_history(self, api, monkeypatch):
+        # Only Watch Live used to call mark_uploaded, so History showed a
+        # report-screen upload as never uploaded and catch-up redid it.
+        marked = []
+        monkeypatch.setattr(api_module, "_mark_uploaded",
+                            lambda db, zone, ts: marked.append((zone, ts)))
+        api.save_settings({"site_url": "https://saved.example"})
+        report = {"run": {"zone": "Murder Row", "start_ts": 1234.5}}
+        outcomes = iter([
+            {"ok": True, "run_id": 1, "url": "/runs/1"},
+            {"ok": False, "duplicate": True, "url": "/runs/9", "error": "already submitted"},
+            {"ok": False, "error": "rate limited"},
+        ])
+        monkeypatch.setattr("postmortem.upload.upload_report", lambda r, u, **k: next(outcomes))
+
+        assert api.upload_report(report)["ok"] is True
+        assert marked == [("Murder Row", 1234.5)]
+        api.upload_report(report)  # a groupmate's copy is there: also done
+        assert marked == [("Murder Row", 1234.5)] * 2
+        api.upload_report(report)  # a real failure is not
+        assert len(marked) == 2
+
     def test_falls_back_to_saved_site_url_setting(self, api, monkeypatch):
         seen = {}
 
