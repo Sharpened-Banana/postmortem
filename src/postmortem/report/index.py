@@ -19,7 +19,9 @@ derive the nested fields identically.
 from __future__ import annotations
 
 import json
+import os
 import time
+import urllib.parse
 from pathlib import Path
 from typing import Any, Optional
 
@@ -64,12 +66,36 @@ def deaths_summary(report: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
-def collect_reports(directory: str | Path) -> list[dict[str, Any]]:
-    """Load every run-report JSON under ``directory`` into index rows."""
-    return [row for _path, row in collect_report_files(directory)]
+def collect_reports(
+    directory: str | Path, link_base: Optional[str | Path] = None,
+) -> list[dict[str, Any]]:
+    """Load every run-report JSON under ``directory`` into index rows.
+
+    ``link_base`` is the folder the index page will live in; each row's
+    ``html`` link is relative to it (default: ``directory`` itself)."""
+    return [row for _path, row in collect_report_files(directory, link_base)]
 
 
-def collect_report_files(directory: str | Path) -> list[tuple[Path, dict[str, Any]]]:
+def _relative_link(target: Path, base: Path) -> str:
+    """``target`` as a URL path relative to ``base``, posix separators.
+
+    The scan is recursive, so a report can sit in a subfolder, and ``-o``
+    can put the index somewhere else entirely -- the bare file name the
+    rows used to carry only resolved for a report beside the index. A
+    target on another Windows drive has no relative path at all, so it
+    falls back to an absolute file:// URL. Percent-encoded, because a
+    folder name with a "#" or "?" would otherwise end the path early.
+    """
+    try:
+        rel = os.path.relpath(target.resolve(), base.resolve())
+    except ValueError:
+        return target.resolve().as_uri()
+    return urllib.parse.quote(Path(rel).as_posix())
+
+
+def collect_report_files(
+    directory: str | Path, link_base: Optional[str | Path] = None,
+) -> list[tuple[Path, dict[str, Any]]]:
     """``collect_reports``, keeping each row's JSON path alongside it.
 
     The desktop app's History screen needs to open a run it listed, and
@@ -80,6 +106,7 @@ def collect_report_files(directory: str | Path) -> list[tuple[Path, dict[str, An
     """
     rows: list[tuple[Path, dict[str, Any]]] = []
     root = Path(directory)
+    base = Path(link_base) if link_base is not None else root
     for path in sorted(root.rglob("*.json")):
         try:
             with open(path, "r", encoding="utf-8") as fh:
@@ -106,7 +133,7 @@ def collect_report_files(directory: str | Path) -> list[tuple[Path, dict[str, An
         timer = report.get("timer") or {}
         rows.append((path, {
             "file": path.name,
-            "html": html_sibling.name if html_sibling.exists() else None,
+            "html": _relative_link(html_sibling, base) if html_sibling.exists() else None,
             "zone": run.get("zone"),
             "level": run.get("keystone_level"),
             "start_ts": run.get("start_ts"),
@@ -735,7 +762,7 @@ def render_index(rows: list[dict[str, Any]]) -> str:
 
 
 def build_index(directory: str | Path, out_path: Optional[str | Path] = None) -> Path:
-    rows = collect_reports(directory)
     out = Path(out_path) if out_path else Path(directory) / "index.html"
+    rows = collect_reports(directory, link_base=out.parent)
     out.write_text(render_index(rows), encoding="utf-8")
     return out
