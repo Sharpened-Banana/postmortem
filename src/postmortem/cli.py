@@ -42,7 +42,13 @@ def _load_route(route_arg: str) -> Route:
         preset = decode_mdt_string(text)
     except MDTDecodeError as exc:
         raise SystemExit(f"error: could not decode MDT string: {exc}")
-    return Route.from_preset(preset)
+    # A string that decodes but is not a usable route (RouteError, or a
+    # non-finite number MDTDecodeError catches in route.py) is the same
+    # user mistake as one that does not decode: a clean error, no traceback.
+    try:
+        return Route.from_preset(preset)
+    except ValueError as exc:
+        raise SystemExit(f"error: not a usable MDT route: {exc}")
 
 
 def _load_store(path: Optional[str]) -> Optional[DungeonDataStore]:

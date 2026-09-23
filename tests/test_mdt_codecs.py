@@ -287,3 +287,16 @@ class TestMalformedPastes:
         for v in (float("inf"), float("-inf")):
             assert cbor.loads(cbor.dumps(v)) == v
         assert math.isnan(cbor.loads(cbor.dumps(float("nan"))))
+
+
+def test_cli_reports_a_decodable_but_unusable_route_without_a_traceback():
+    """A paste that decodes but is not a route exits with a message, the
+    same as one that does not decode."""
+    import pytest as _pytest
+    from postmortem import cli
+    from postmortem.mdt.decode import encode_mdt_string
+
+    text = encode_mdt_string({"text": "not a route"})
+    with _pytest.raises(SystemExit) as exc:
+        cli._load_route(text)
+    assert "not a usable MDT route" in str(exc.value)
