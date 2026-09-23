@@ -2,7 +2,8 @@
 
 A hostile NPC "engagement" starts at its first combat interaction with the
 group and ends at its death (or its last activity, for mobs that reset or
-were left behind). Engagements whose combat windows overlap — or follow
+were left behind); a mob that resets and is engaged again later is a new
+engagement (ENGAGEMENT_RESET_GAP_S). Engagements whose combat windows overlap — or follow
 within a small gap while combat continues — are grouped into one pull.
 Boss pulls are labeled from ENCOUNTER_START/END.
 """
@@ -56,6 +57,22 @@ DEFAULT_MIN_ENGAGEMENT_S = 1.0
 AFFIX_NPC_IDS: dict[int, str] = {
     230937: "Xal'atath",  # Xal'atath's Bargain (Midnight Season 2)
 }
+
+
+# How long an enemy may go with no interaction at all with the group before
+# its next interaction counts as a NEW engagement. One engagement per GUID
+# used to span first touch to death, so a mob that evaded/reset (pulled,
+# kited out of leash, dropped) and was killed several pulls later stretched
+# one pull across everything in between -- the pull grouping merges any
+# engagement overlapping another, and this one overlapped them all. The gap
+# is long compared with anything inside one fight: DEFAULT_PULL_GAP_S says
+# a pack interacts within about a second of itself, and 30s of silence is a
+# mob that has left combat. A live mob that was merely CC'd that long comes
+# back inside the same pull and is re-joined there (see detect_pulls), so a
+# long sheep costs nothing. Boss encounters are exempt while the encounter
+# is open -- an untargetable intermission can be silent for longer -- and
+# instead split at a wiped ENCOUNTER_END, which is the real reset.
+ENGAGEMENT_RESET_GAP_S = 30.0
 
 
 @dataclass
@@ -130,13 +147,40 @@ def _is_interaction(name: str) -> bool:
     return any(s in name for s in _INTERACTION_SUBSTRINGS)
 
 
-def collect_engagements(events: Iterable[Event]) -> dict[str, UnitEngagement]:
-    """Map of enemy GUID -> engagement window."""
+def collect_engagements(
+    events: Iterable[Event],
+    reset_gap_seconds: float = ENGAGEMENT_RESET_GAP_S,
+) -> dict[str, UnitEngagement]:
+    """Map of key -> engagement window, in first-seen order.
+
+    The key is the enemy GUID for its first engagement and ``GUID#n`` for
+    the n-th, when the enemy reset and was engaged again (see
+    ENGAGEMENT_RESET_GAP_S); ``UnitEngagement.guid`` is always the bare
+    GUID.
+    """
     engagements: dict[str, UnitEngagement] = {}
+    # GUID -> key of its latest engagement, and how many it has had
+    latest: dict[str, str] = {}
+    counts: dict[str, int] = {}
+    # a wiped encounter resets every enemy still alive; their next
+    # interaction is a new engagement however soon it comes
+    reset_since: set[str] = set()
+    in_encounter = False
     for event in events:
         name = event.name
+        if name == "ENCOUNTER_START":
+            in_encounter = True
+            continue
+        if name == "ENCOUNTER_END":
+            in_encounter = False
+            wiped = len(event.params) > 4 and event.params[4].strip() == "0"
+            if wiped:
+                reset_since.update(
+                    g for g, k in latest.items() if engagements[k].died_at is None)
+            continue
         if name == "UNIT_DIED":
-            eng = engagements.get(event.dest_guid)
+            key = latest.get(event.dest_guid)
+            eng = engagements.get(key) if key is not None else None
             if eng is not None and eng.died_at is None:
                 eng.died_at = event.ts
             continue
@@ -176,9 +220,20 @@ def collect_engagements(events: Iterable[Event]) -> dict[str, UnitEngagement]:
             pos = (adv.pos_x, adv.pos_y)
             map_id = adv.ui_map_id or None
 
-        eng = engagements.get(enemy_guid)
+        key = latest.get(enemy_guid)
+        eng = engagements.get(key) if key is not None else None
+        if eng is not None and eng.died_at is None and (
+            enemy_guid in reset_since
+            or (not in_encounter and event.ts - eng.last_ts > reset_gap_seconds)
+        ):
+            eng = None  # it reset: this interaction opens a new engagement
+        reset_since.discard(enemy_guid)
         if eng is None:
-            engagements[enemy_guid] = UnitEngagement(
+            n = counts.get(enemy_guid, 0) + 1
+            counts[enemy_guid] = n
+            key = enemy_guid if n == 1 else f"{enemy_guid}#{n}"
+            latest[enemy_guid] = key
+            engagements[key] = UnitEngagement(
                 guid=enemy_guid,
                 npc_id=g.npc_id,
                 name=enemy_name,
@@ -236,12 +291,23 @@ def detect_pulls(
     pulls: list[ActualPull] = []
     current: Optional[ActualPull] = None
     current_end = 0.0
+    # GUID -> its engagement in the current pull
+    in_current: dict[str, UnitEngagement] = {}
     for eng in ordered:
         if current is not None and eng.first_ts <= current_end + gap_seconds:
-            current.units.append(eng)
+            earlier = in_current.get(eng.guid)
+            if earlier is not None:
+                # The same enemy split by a long silence yet back inside the
+                # same pull: CC'd, not reset. One unit, not two.
+                earlier.last_ts = max(earlier.last_ts, eng.last_ts)
+                earlier.died_at = eng.died_at
+            else:
+                current.units.append(eng)
+                in_current[eng.guid] = eng
             current_end = max(current_end, eng.end_ts)
         else:
             current = ActualPull(index=len(pulls) + 1, units=[eng])
+            in_current = {eng.guid: eng}
             current_end = eng.end_ts
             pulls.append(current)
 
