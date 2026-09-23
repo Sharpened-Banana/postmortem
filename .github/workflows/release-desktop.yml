@@ -50,6 +50,46 @@ permissions:
   attestations: write
 
 jobs:
+  # Before ANYTHING is created: the tag must be exactly alpha-desktop-N or
+  # beta-desktop-N.M. The on.push filter above is a glob, and so was the
+  # old check (which ran only in the build jobs, after the release already
+  # existed): alpha-desktop-50.1 passed both and would have been published
+  # as the "Latest" stable release, yet desktop/updater.py's build_key()
+  # returns None for it, so an app stamped with it could never update
+  # again. A quote in a tag name also reached generated Python source and
+  # the installer compiler's command line. The tag is read from the
+  # environment, never interpolated into the script, so the check itself
+  # can't be injected.
+  validate-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the tag is a plain release tag
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_NAME" =~ ^alpha-desktop-[0-9]+$ ]] \
+             || [[ "$GITHUB_REF_NAME" =~ ^beta-desktop-[0-9]+\.[0-9]+$ ]]; then
+            echo "releasing $GITHUB_REF_NAME"
+          else
+            echo "::error::refusing to release from tag '$GITHUB_REF_NAME' -- expected alpha-desktop-N or beta-desktop-N.M"
+            exit 1
+          fi
+
+  # The suite, before a release exists: a tag pushed from a commit that
+  # fails its own tests must not become the build every installed app
+  # auto-updates to.
+  tests:
+    needs: validate-tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e . pytest certifi
+      - name: Test
+        run: python -m pytest tests -q
+
   # Create the tag's GitHub release exactly once, before any build runs.
   # Both matrix builds (and release-addon.yml's packager) then only ever
   # *upload* to an existing release. Letting each job create-or-update it
@@ -58,6 +98,7 @@ jobs:
   # macOS job failed, Windows job cancelled by fail-fast), and the addon
   # packager raced both (alpha-desktop-37, a 422 of its own).
   release:
+    needs: [validate-tag, tests]
     runs-on: ubuntu-latest
     steps:
       - name: Create the release for this tag (idempotent)
@@ -120,15 +161,16 @@ jobs:
       # see that module's own docstring.
       # A tag is pushed by hand, and it lands in generated Python source
       # and on the installer compiler's command line -- so a tag with a
-      # quote in it would inject code into the build. Cheap to refuse.
+      # quote in it would inject code into the build. validate-tag has
+      # already refused anything else; repeated here, with the same
+      # strict patterns, right before the tag is written into source.
       - name: Check the tag is a plain release tag
         shell: bash
         run: |
-          case "$GITHUB_REF_NAME" in
-            alpha-desktop-[0-9]*) ;;
-            beta-desktop-[0-9]*.[0-9]*) ;;
-            *) echo "refusing to build from tag '$GITHUB_REF_NAME'"; exit 1 ;;
-          esac
+          if ! [[ "$GITHUB_REF_NAME" =~ ^alpha-desktop-[0-9]+$ ]] \
+             && ! [[ "$GITHUB_REF_NAME" =~ ^beta-desktop-[0-9]+\.[0-9]+$ ]]; then
+            echo "refusing to build from tag '$GITHUB_REF_NAME'"; exit 1
+          fi
 
       - name: Stamp version
         shell: bash

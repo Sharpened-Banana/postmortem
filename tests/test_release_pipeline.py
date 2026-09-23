@@ -48,3 +48,75 @@ class TestInstallerIsPerUser:
     def test_app_id_never_changes(self):
         # Changing it would stack a second install instead of upgrading.
         assert _iss_setup_directives()["AppId"] == "{{8E5F1B42-7C3D-4A9E-9F21-6D0B5A7C4E13}"
+
+
+WORKFLOW = ROOT / ".github" / "workflows" / "release-desktop.yml"
+
+
+def _jobs() -> dict[str, str]:
+    """Each job's raw text, keyed by job id, in file order. The workflow
+    is plain block YAML with two-space indentation; stdlib has no YAML
+    parser and none is needed to find a job's own lines."""
+    text = WORKFLOW.read_text(encoding="utf-8")
+    body = text.split("\njobs:\n", 1)[1]
+    jobs: dict[str, str] = {}
+    current = None
+    for line in body.splitlines():
+        m = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", line)
+        if m:
+            current = m.group(1)
+            jobs[current] = ""
+        elif current is not None:
+            jobs[current] += line + "\n"
+    return jobs
+
+
+def _tag_patterns(job_text: str) -> list[re.Pattern]:
+    return [re.compile(p) for p in re.findall(r'=~ (\^\S+\$) \]\]', job_text)]
+
+
+class TestReleaseTagValidation:
+    """alpha-desktop-50.1 passed the old glob check and would have been
+    published as the Latest stable release that build_key() -- and so
+    every installed updater -- can't parse. The check also ran only
+    after the release was already created."""
+
+    ACCEPTED = ["alpha-desktop-49", "alpha-desktop-50", "beta-desktop-50.5"]
+    REJECTED = ["alpha-desktop-50.1", "beta-desktop-50", "alpha-desktop-",
+                "alpha-desktop-5x", 'alpha-desktop-1"; import os #',
+                "beta-desktop-1.2.3", "beta-desktop-1.x", "addon-v0.3.4"]
+
+    def test_validation_is_the_first_job(self):
+        assert list(_jobs())[0] == "validate-tag"
+
+    def test_the_first_job_accepts_exactly_the_updater_parseable_tags(self):
+        from postmortem.desktop.updater import build_key
+
+        patterns = _tag_patterns(_jobs()["validate-tag"])
+        assert len(patterns) == 2
+        for tag in self.ACCEPTED:
+            assert any(p.search(tag) for p in patterns), tag
+            assert build_key(tag) is not None
+        for tag in self.REJECTED:
+            assert not any(p.search(tag) for p in patterns), tag
+            # The invariant that matters: nothing the workflow accepts is
+            # a tag installed updaters can't order.
+            assert build_key(tag) is None
+
+    def test_the_build_jobs_own_check_is_just_as_strict(self):
+        build = _jobs()["build"]
+        patterns = _tag_patterns(build)
+        assert len(patterns) == 2
+        for tag in self.REJECTED:
+            assert not any(p.search(tag) for p in patterns), tag
+
+    def test_nothing_is_created_before_validation_and_tests(self):
+        jobs = _jobs()
+        assert re.search(r"needs: \[validate-tag, tests\]", jobs["release"])
+        assert "needs: validate-tag" in jobs["tests"]
+        assert "needs: release" in jobs["build"]
+        for early in ("validate-tag", "tests"):
+            assert "gh release" not in jobs[early]
+
+    def test_the_tests_job_runs_the_suite(self):
+        assert "python -m pytest tests" in _jobs()["tests"]
