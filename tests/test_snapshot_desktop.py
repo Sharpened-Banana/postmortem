@@ -91,7 +91,9 @@ class TestWatchLiveBuild:
         page = tmp_path / "out" / f"{run.path.stem}-snapshot-1.html"
         assert ready[0]["path"] == str(page) and ready[0]["role"] == "healer"
         html = page.read_text(encoding="utf-8")
-        assert "healer" in html.lower() and "<script" not in html
+        assert "healer" in html.lower()
+        # the only script is Wowhead's external tooltip loader, no inline code
+        assert html.count("<script") == 1 and 'id="wowhead-tooltips" src=' in html
         assert api.open_snapshot(str(page))["ok"] is True
 
     def test_a_broken_slice_reports_snapshot_failed(self, api, tmp_path):

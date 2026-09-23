@@ -164,7 +164,8 @@ class TestQueryRunsShape:
         row = query_runs(db_path)[0]
         assert len(row["deaths_detail"]) == row["deaths"] == len(report["deaths"])
         for d, src in zip(row["deaths_detail"], report["deaths"]):
-            assert set(d) == {"t", "player", "spell"}
+            assert set(d) == {"t", "player", "spell", "spell_id"}
+            assert d["spell_id"] == (src.get("killing_blow") or {}).get("spell_id")
             assert d["player"] == src["player"]
 
 
