@@ -1582,6 +1582,11 @@ class DesktopAPI:
             return {"ok": False, "error": "auto-update only works in a packaged build"}
         if not _updater._is_trusted_download_url(download_url):
             return {"ok": False, "error": "refusing to download from an untrusted source"}
+        # Before downloading anything: an install this account can't
+        # replace (Program Files) used to download, report success, and
+        # relaunch the old build unchanged -- every single time.
+        if not _updater.install_location_writable():
+            return {"ok": False, "error": _updater.unwritable_install_message()}
 
         def run_update() -> None:
             try:

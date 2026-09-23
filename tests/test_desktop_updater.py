@@ -531,6 +531,27 @@ class TestApplyUpdateAndRelaunch:
             "Postmortem.app", "Postmortem.app.backup-3000"]
         assert (backup / "Contents" / "v").read_text() == "old"
 
+    def test_a_writable_install_location_is_reported_writable(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "win32")
+        root = tmp_path / "Postmortem"
+        root.mkdir()
+        assert updater.install_location_writable(root)
+        assert list(tmp_path.rglob(".postmortem-update-probe-*")) == []  # cleaned up
+
+    @pytest.mark.skipif(sys.platform == "win32" or not hasattr(__import__("os"), "geteuid")
+                        or __import__("os").geteuid() == 0,
+                        reason="needs POSIX permissions and a non-root user")
+    def test_a_read_only_install_location_is_not(self, tmp_path):
+        # Program Files for a non-admin: readable, not changeable.
+        parent = tmp_path / "Program Files"
+        root = parent / "Postmortem"
+        root.mkdir(parents=True)
+        parent.chmod(0o555)
+        try:
+            assert not updater.install_location_writable(root)
+        finally:
+            parent.chmod(0o755)
+
     def test_windows_helper_prunes_older_backups_after_a_swap(self):
         script = updater._WINDOWS_RELAUNCH_SCRIPT
         prune = script.index('-Filter "$leaf.backup-*"')

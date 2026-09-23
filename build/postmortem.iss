@@ -65,9 +65,16 @@ UninstallFilesDir={userappdata}\postmortem\uninstall
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-; Per-user install: no admin rights, no UAC prompt (see header).
+; Per-user install: no admin rights, no UAC prompt (see header). With
+; lowest privileges {autopf} above resolves to the per-user
+; %LOCALAPPDATA%\Programs, which the app can write to.
+;
+; No PrivilegesRequiredOverridesAllowed. It used to be "dialog", which
+; offered "Install for all users" -- that puts the app in Program Files,
+; where the in-app updater (running as the user) can never move the old
+; install aside, so every self-update from such an install failed. Per-
+; user is the only install mode that keeps auto-update working.
 PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog
 ; The app is 64-bit only, matching the CI runner's Python. Spelled "x64"
 ; rather than 6.3's newer "x64compatible" so this still compiles on the
 ; older Inno Setup 6.x that a CI image might ship -- 6.3 accepts "x64"

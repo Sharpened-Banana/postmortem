@@ -547,6 +547,49 @@ def _current_install_root() -> Path:
     return exe.parent  # Windows: .../Postmortem/Postmortem.exe -> Postmortem/
 
 
+def install_location_writable(root: Optional[Path] = None) -> bool:
+    """Whether this account can do the swap the relaunch helper does:
+    move the install aside and a new one into its place.
+
+    An "all users" Windows install lands in Program Files, which a normal
+    user can read but not change. The helper runs as that user, so the
+    move aside fails every time, it relaunches the old build, and the UI
+    had already said the update succeeded. Asking first lets
+    start_update() say what to do instead. Probes by actually creating a
+    file, since permission bits and ACLs don't answer this reliably.
+    Both the folder the install sits in (the move needs it) and, on
+    Windows, the install folder itself (moving a directory there needs
+    delete rights on it). Never inside a macOS .app bundle: writing into
+    a signed bundle, even briefly, is not something to do casually."""
+    try:
+        root = root if root is not None else _current_install_root()
+    except (OSError, IndexError):
+        return False
+    probes = [root.parent] + ([root] if sys.platform == "win32" else [])
+    for folder in probes:
+        try:
+            fd, path = tempfile.mkstemp(prefix=".postmortem-update-probe-", dir=str(folder))
+            os.close(fd)
+            os.unlink(path)
+        except OSError:
+            return False
+    return True
+
+
+def unwritable_install_message() -> str:
+    """What to tell someone whose install this app cannot replace."""
+    releases = f"https://github.com/{REPO}/releases"
+    if sys.platform == "win32":
+        return ("Postmortem is installed in a folder this Windows account can't change "
+                "(usually Program Files, from an \"all users\" install), so it can't "
+                "update itself. Download and run Postmortem-Setup.exe from "
+                f"{releases} -- it installs for your account, and updates work "
+                "automatically from then on.")
+    return ("Postmortem is in a folder this account can't change, so it can't update "
+            f"itself. Download the new version from {releases}, or move Postmortem "
+            "to a folder you own (e.g. Applications in your home folder) and try again.")
+
+
 # The macOS half of the same contract the Windows script below keeps: the
 # user is never left without a launchable app. Until 2026-09-12 this moved
 # the old bundle aside and then moved the new one in with `set -e` -- so a

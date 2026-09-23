@@ -1569,6 +1569,28 @@ class TestAutoUpdate:
         monkeypatch.setattr(api_module.os, "_exit", exits.append)
         return exits
 
+    @pytest.fixture(autouse=True)
+    def writable_install(self, monkeypatch):
+        # Under pytest the "install" is the Python interpreter's own
+        # folder, which is usually not writable; tests that care about
+        # that case override this.
+        monkeypatch.setattr(updater_module, "install_location_writable", lambda *a: True)
+
+    def test_an_install_this_account_cannot_replace_is_refused_up_front(
+        self, api, events, monkeypatch,
+    ):
+        # An "all users" Windows install (Program Files) used to download,
+        # report success, and relaunch the old build unchanged.
+        monkeypatch.setattr(api_module.sys, "frozen", True, raising=False)
+        monkeypatch.setattr(updater_module, "install_location_writable", lambda *a: False)
+        called = []
+        monkeypatch.setattr(updater_module, "check_for_update",
+                            lambda *a, **k: called.append("check"))
+        result = api.start_update("https://github.com/Sharpened-Banana/postmortem/releases/download/alpha-desktop-9/Postmortem-windows.zip")
+        assert result["ok"] is False
+        assert "can't update itself" in result["error"]
+        assert called == [] and events == []
+
     def _wait_for(self, events, event_type, timeout=5.0):
         import time as _time
 
