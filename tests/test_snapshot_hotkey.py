@@ -185,6 +185,33 @@ class TestSettingsGuard:
         assert api.save_settings({"snapshot_hotkey": ""}) == {"ok": True}   # empty = disabled
 
 
+class TestWindowsVirtualKeyLookup:
+    def test_no_key_on_this_layout_is_reported_not_registered(self, monkeypatch):
+        # VkKeyScanW returns a SHORT; read as ctypes' default int, its -1
+        # ("no such key") arrives as 65535, and the old `== -1` check
+        # passed it on as virtual key 0xFF.
+        import ctypes
+        import types
+
+        from postmortem.desktop.hotkey import WindowsBackend
+
+        registered = []
+
+        def vk_key_scan(ch):
+            return 0xFFFF
+
+        user32 = types.SimpleNamespace(
+            VkKeyScanW=vk_key_scan,
+            RegisterHotKey=lambda *a: registered.append(a) or 1,
+        )
+        monkeypatch.setattr(ctypes, "windll",
+                            types.SimpleNamespace(user32=user32, kernel32=None),
+                            raising=False)
+        ok, message = WindowsBackend().start(parse_combo("ctrl+shift+é"), lambda: None)
+        assert ok is False and "no virtual key" in message
+        assert registered == []
+
+
 class TestDefaultHotkey:
     """ctrl+alt+s was the default, and Windows reports AltGr as Ctrl+Alt:
     the hotkey also fired on AltGr+S, an ordinary character on several
