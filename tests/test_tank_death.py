@@ -168,6 +168,38 @@ class TestExternals:
 
         assert death.tank_analysis["externals_available"] == []
 
+    def _run_with_healer_death(self, after_death):
+        b = LogBuilder()
+        npc = b.npc_guid(FELWYRM, "0001")
+        b.start(0)
+        b.combatant(0.5, TANK)
+        b.combatant(0.5, HEALER)
+        b.cast(100, HEALER, *SPIRIT_LINK_TOTEM)
+        b.unit_died(DEATH_T - 30, HEALER[0], HEALER[1], HEALER[2])
+        after_death(b)
+        b.npc_damage(DEATH_T, npc, "Felwyrm", TANK, BIG_HIT_SPELL, "Big Hit",
+                     500000, hp=0)
+        b.unit_died(DEATH_T + 0.5, TANK[0], TANK[1], TANK[2])
+        b.end(DEATH_T + 10)
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        stats = compute_stats(run.events, detect_pulls(run.events))
+        annotate_deaths(stats, load_bundled_tank_defensives(), True,
+                        run_start_ts=run.start_ts)
+        (death,) = [d for d in stats.deaths if d.player_guid == TANK[0]]
+        return death
+
+    def test_a_groupmate_already_dead_is_not_listed(self):
+        """The healer died 30s before the tank; a corpse throws no Spirit
+        Link, so it is not an external the group "had"."""
+        death = self._run_with_healer_death(lambda b: None)
+        assert death.tank_analysis["externals_available"] == []
+
+    def test_a_groupmate_brought_back_before_the_death_is_listed(self):
+        # battle-rezzed and casting again well before the tank died
+        death = self._run_with_healer_death(
+            lambda b: b.cast(DEATH_T - 10, HEALER, 8004, "Healing Surge"))
+        assert "Spirit Link Totem" in _names(death.tank_analysis["externals_available"])
+
     def test_external_still_on_cooldown_is_not_reported(self):
         death = _run(lambda b, npc: b.cast(DEATH_T - 20, HEALER, *SPIRIT_LINK_TOTEM))
 
