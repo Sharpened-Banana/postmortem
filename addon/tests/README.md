@@ -83,3 +83,9 @@ group, hearth, kicked): no COMPLETED/RESET arrives, so `Tracker.lua` must
 notice the challenge is gone and dispatch a synthetic
 `CHALLENGE_MODE_RESET`, which is what stops `CombatLogging.lua` forcing
 logging back on. A loading screen back into the same key must not end it.
+
+`avoidable_harvest.lua` covers `AvoidableDatabase.lua`: one harvest per
+key even when COMPLETED and RESET both arrive, no harvest ticker left
+running afterwards, and only the amount a key added on top of the Overall
+session's key-start snapshot is recorded (a meter reset in between makes
+the whole session this key's).
