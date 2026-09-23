@@ -523,6 +523,27 @@ class TestRecorderRotationAndCatchUp:
         assert [r.zone for r in completed] == ["The Blinding Vale"]
         assert completed[0].completed and completed[0].keystone_level == 7
 
+    def test_rotates_away_from_a_deleted_log(self, tmp_path):
+        # A deleted current log made its stat() raise, which _maybe_rotate
+        # treated as "no change" -- so a newer session log was never
+        # picked up for the rest of the watch.
+        logs = tmp_path / "Logs"; logs.mkdir()
+        old = logs / "WoWCombatLog-090226_050445.txt"
+        old.write_text("", encoding="utf-8")
+        rec = Recorder(log_path=old, out_dir=tmp_path / "runs",
+                       rotation_check_s=0.0, echo=lambda s: None)
+        fh = rec._open()
+        old.unlink()
+        new = logs / "WoWCombatLog-090226_085516.txt"
+        new.write_text("", encoding="utf-8")
+        handle = rec._maybe_rotate(fh)
+        try:
+            assert handle is not None, "rotation refused after the log was deleted"
+            assert rec.log_path == new
+        finally:
+            if handle is not None:
+                handle.close()
+
     def test_catches_up_on_a_key_that_finished_before_the_watch_began(self, tmp_path):
         log = tmp_path / "WoWCombatLog.txt"
         b = LogBuilder()

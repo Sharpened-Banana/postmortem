@@ -463,9 +463,19 @@ class Recorder:
             candidate = newest_combat_log(self.log_path.parent)
             if candidate is None or candidate.resolve() == self.log_path.resolve():
                 return None
-            if candidate.stat().st_mtime <= self.log_path.stat().st_mtime:
-                return None
+            candidate_mtime = candidate.stat().st_mtime
         except OSError:
+            return None
+        try:
+            current_mtime = self.log_path.stat().st_mtime
+        except OSError:
+            # The current log is gone (deleted, or moved by a log-cleanup
+            # tool). Treating that stat error as "no change" -- as the
+            # block above does for the candidate -- refused rotation for
+            # good, so a WoW restart's fresh WoWCombatLog-*.txt was never
+            # picked up. A missing log is older than any log that exists.
+            current_mtime = float("-inf")
+        if candidate_mtime <= current_mtime:
             return None
         if self._current is not None:
             self._close_run(completed=False)
