@@ -86,7 +86,7 @@ def parse_combo(text: str) -> Combo:
     if not (len(key) == 1 or key in NAMED_KEYS):
         raise ValueError(f"unknown key {key!r}")
     if not mods:
-        raise ValueError("a hotkey needs at least one modifier (e.g. ctrl+alt+s)")
+        raise ValueError("a hotkey needs at least one modifier (e.g. ctrl+shift+f9)")
     return Combo(frozenset(mods), key)
 
 

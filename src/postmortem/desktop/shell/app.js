@@ -142,7 +142,7 @@ function defaultSettings() {
     snapshot_before_s: 120,
     snapshot_after_s: 60,
     update_channel: "stable",
-    snapshot_hotkey: "ctrl+alt+s",
+    snapshot_hotkey: "ctrl+shift+f9",
     snapshot_focus: "healer",
     snapshot_character: "",
   };
@@ -1157,7 +1157,7 @@ async function applySettingsToForm() {
   set.snapshotBefore.value = s.snapshot_before_s ?? 120;
   set.snapshotAfter.value = s.snapshot_after_s ?? 60;
   set.updateChannel.value = s.update_channel === "beta" ? "beta" : "stable";
-  set.snapshotHotkey.value = s.snapshot_hotkey ?? "ctrl+alt+s";
+  set.snapshotHotkey.value = s.snapshot_hotkey ?? "ctrl+shift+f9";
   validateHotkeyField();
   set.snapshotFocus.value = s.snapshot_focus || "healer";
   set.snapshotCharacter.value = s.snapshot_character || "";
@@ -1336,7 +1336,7 @@ async function onSyncKeystoneGuru() {
 // screen: pressing shift+` used to type "~" (a bare key, refused) --
 // 2026-09-18. Physical key from event.code so Shift never changes the
 // key's name; modifiers from the event flags. Backspace/Delete clears,
-// Tab and Escape behave normally, and typing "ctrl+alt+s" by hand still
+// Tab and Escape behave normally, and typing "ctrl+shift+f9" by hand still
 // works because a lone letter with no modifier is left to the text field.
 const HOTKEY_CODE_NAMES = {
   Backquote: "`", Minus: "-", Equal: "=", BracketLeft: "[", BracketRight: "]",

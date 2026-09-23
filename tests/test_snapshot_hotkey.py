@@ -185,6 +185,44 @@ class TestSettingsGuard:
         assert api.save_settings({"snapshot_hotkey": ""}) == {"ok": True}   # empty = disabled
 
 
+class TestDefaultHotkey:
+    """ctrl+alt+s was the default, and Windows reports AltGr as Ctrl+Alt:
+    the hotkey also fired on AltGr+S, an ordinary character on several
+    keyboard layouts."""
+
+    def _write(self, payload):
+        import json
+        path = desktop_config.settings_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def test_the_default_has_no_ctrl_alt_and_parses(self):
+        default = desktop_config.DEFAULT_SETTINGS["snapshot_hotkey"]
+        combo = parse_combo(default)
+        assert not {"ctrl", "alt"} <= combo.modifiers
+        assert str(combo) == default
+        from postmortem.desktop.hotkey import _MAC_NAMED_KEYCODES, _WIN_NAMED_VK
+        assert combo.key in _WIN_NAMED_VK and combo.key in _MAC_NAMED_KEYCODES
+
+    def test_a_saved_old_default_moves_to_the_new_one(self):
+        self._write({"snapshot_hotkey": "ctrl+alt+s", "snapshot_focus": "tank"})
+        s = desktop_config.load_settings()
+        assert s["snapshot_hotkey"] == desktop_config.DEFAULT_SNAPSHOT_HOTKEY
+        assert s["snapshot_focus"] == "tank"
+
+    def test_any_other_saved_hotkey_is_left_alone(self):
+        for mine in ("ctrl+`", "shift+f8", ""):
+            self._write({"snapshot_hotkey": mine})
+            assert desktop_config.load_settings()["snapshot_hotkey"] == mine
+
+    def test_choosing_ctrl_alt_s_again_after_the_migration_sticks(self):
+        self._write({"snapshot_hotkey": "ctrl+alt+s"})
+        desktop_config.save_settings({"snapshot_focus": "tank"})  # any save persists it
+        assert desktop_config.load_settings()["snapshot_hotkey"] == "ctrl+shift+f9"
+        desktop_config.save_settings({"snapshot_hotkey": "ctrl+alt+s"})
+        assert desktop_config.load_settings()["snapshot_hotkey"] == "ctrl+alt+s"
+
+
 class TestFocusByName:
     def test_character_name_picks_the_role(self):
         from conftest import DUNGEON_DATA, build_run_log

@@ -45,6 +45,13 @@ SETTINGS_FILENAME = "desktop_settings.json"
 #: Every field a fresh install (or a corrupt/missing settings file)
 #: falls back to. ``load_settings()`` always returns a dict containing at
 #: least these keys.
+DEFAULT_SNAPSHOT_HOTKEY = "ctrl+shift+f9"
+#: The default before 2026-09-23 -- see DEFAULT_SETTINGS' comment on it.
+OLD_DEFAULT_SNAPSHOT_HOTKEY = "ctrl+alt+s"
+#: Set once a saved ctrl+alt+s has been moved to the new default, so a
+#: user who then picks ctrl+alt+s again on purpose keeps it.
+_HOTKEY_MIGRATED_KEY = "snapshot_hotkey_migrated"
+
 DEFAULT_SETTINGS: dict[str, Any] = {
     "wow_addon_path": None,
     "raiderio_region": None,
@@ -73,7 +80,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # "stable" = alpha-desktop-N builds everyone gets; "beta" = also the
     # beta-desktop-N.M test builds, for testers.
     "update_channel": "stable",
-    "snapshot_hotkey": "ctrl+alt+s",
+    # Not ctrl+alt+anything: on Windows, AltGr is reported as Ctrl+Alt,
+    # so the old ctrl+alt+s default also fired on AltGr+S -- a plain
+    # character (ś, ß ...) on Polish, German and other layouts. A function
+    # key is the same physical key on every layout and both platforms'
+    # listeners know it (desktop/hotkey.py). See _migrate_settings.
+    "snapshot_hotkey": DEFAULT_SNAPSHOT_HOTKEY,
     "snapshot_focus": "healer",
     "snapshot_character": "",
     # Per-dungeon default MDT routes, applied automatically to any run
@@ -143,7 +155,25 @@ def load_settings() -> dict[str, Any]:
     _LAST_LOAD_ERROR = None
     if isinstance(payload, dict):
         settings.update(payload)
+        _migrate_settings(payload, settings)
     return settings
+
+
+def _migrate_settings(saved: dict[str, Any], settings: dict[str, Any]) -> None:
+    """Move a saved file off defaults that have since changed.
+
+    The snapshot hotkey is saved with every Settings save, so almost every
+    install has the old ctrl+alt+s default written into its file -- a new
+    default alone would reach nobody. Only a value EQUAL to the old
+    default moves (anything else is the user's own choice), and only
+    once: the marker rides along in the next save, so choosing ctrl+alt+s
+    again later is respected."""
+    if saved.get(_HOTKEY_MIGRATED_KEY):
+        return
+    current = str(saved.get("snapshot_hotkey") or "").strip().lower()
+    if current == OLD_DEFAULT_SNAPSHOT_HOTKEY:
+        settings["snapshot_hotkey"] = DEFAULT_SNAPSHOT_HOTKEY
+        settings[_HOTKEY_MIGRATED_KEY] = True
 
 
 def last_load_error() -> Optional[tuple[str, str]]:
