@@ -351,3 +351,74 @@ class TestAnalyzeHistoryDB:
             "--format", "text",
         ]) == 0
         assert not db_path.exists()
+
+
+class TestReportJsonLast:
+    """``report_json`` is kept as the last column of ``runs`` so reading any
+    other column never walks a report's overflow pages (2026-09-22: the
+    site's run list read the whole 175MB database on a cold disk)."""
+
+    @staticmethod
+    def _cols(db_path):
+        return [r[1] for r in sqlite3.connect(str(db_path)).execute("PRAGMA table_info(runs)")]
+
+    def test_fresh_database(self, tmp_path):
+        db_path = tmp_path / "runs.db"
+        Store(db_path).close()
+        assert self._cols(db_path)[-1] == "report_json"
+
+    def test_old_database_is_rebuilt_keeping_ids_children_and_sequence(self, tmp_path, report):
+        db_path = tmp_path / "runs.db"
+        ingest(report, db_path)
+        second = copy.deepcopy(report)
+        second["run"]["start_ts"] = report["run"]["start_ts"] + 5000
+        ingest(second, db_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA foreign_keys = ON")
+        # Simulate the shape every real database has: a column added by
+        # ALTER TABLE after the blob, and a deleted run leaving a gap in ids.
+        conn.execute("ALTER TABLE runs ADD COLUMN later_col TEXT")
+        conn.execute("UPDATE runs SET later_col = 'kept' WHERE id = 2")
+        conn.execute("INSERT INTO runs (zone, start_ts, report_json) VALUES ('Gone', 9e9, '{}')")
+        conn.execute("DELETE FROM runs WHERE zone = 'Gone'")
+        conn.commit()
+        players_before = conn.execute("SELECT COUNT(*) FROM players").fetchone()[0]
+        conn.close()
+        assert self._cols(db_path)[-1] == "later_col"
+        assert players_before > 0
+
+        with Store(db_path) as store:
+            assert store.get_report(1)["run"]["zone"] == report["run"]["zone"]
+
+        cols = self._cols(db_path)
+        assert cols[-1] == "report_json" and "later_col" in cols
+        conn = sqlite3.connect(str(db_path))
+        assert [r[0] for r in conn.execute("SELECT id FROM runs ORDER BY id")] == [1, 2]
+        assert conn.execute("SELECT later_col FROM runs WHERE id = 2").fetchone()[0] == "kept"
+        assert conn.execute("SELECT COUNT(*) FROM players").fetchone()[0] == players_before
+        assert conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'runs'").fetchone()[0] == 3
+        # the UNIQUE(zone, start_ts) constraint survived
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("INSERT INTO runs (zone, start_ts, report_json) "
+                         "SELECT zone, start_ts, '{}' FROM runs WHERE id = 1")
+        conn.close()
+        # a new run never reuses the deleted run's id
+        third = copy.deepcopy(report)
+        third["run"]["start_ts"] = report["run"]["start_ts"] + 9000
+        ingest(third, db_path)
+        ids = [r[0] for r in sqlite3.connect(str(db_path)).execute("SELECT id FROM runs ORDER BY id")]
+        assert ids == [1, 2, 4]
+
+    def test_deleting_a_run_still_cascades_after_the_rebuild(self, tmp_path, report):
+        db_path = tmp_path / "runs.db"
+        ingest(report, db_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("ALTER TABLE runs ADD COLUMN later_col TEXT")
+        conn.commit(); conn.close()
+        Store(db_path).close()
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("DELETE FROM runs")
+        conn.commit()
+        assert conn.execute("SELECT COUNT(*) FROM players").fetchone()[0] == 0
+        conn.close()
