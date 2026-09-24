@@ -212,7 +212,10 @@ def _encode_item(value: Any, out: bytearray) -> None:
         else:
             _encode_head(1, -1 - value, out)
     elif isinstance(value, float):
-        if value == int(value) and abs(value) < 2 ** 53 and math.isfinite(value):
+        # isfinite first: int(inf) raises OverflowError (and int(nan)
+        # ValueError), so the old order failed on the very values the
+        # check was there to route to the float64 branch.
+        if math.isfinite(value) and abs(value) < 2 ** 53 and value == int(value):
             _encode_item(int(value), out)
         else:
             out.append(0xFB)

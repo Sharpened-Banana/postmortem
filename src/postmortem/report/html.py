@@ -8,7 +8,36 @@ from __future__ import annotations
 
 import html
 import json
+import math
 from typing import Any
+
+
+def _finite_only(value: Any) -> Any:
+    """``value`` with every non-finite float (inf, -inf, nan) replaced by
+    None, recursively through dicts, lists and tuples."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {k: _finite_only(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_finite_only(v) for v in value]
+    return value
+
+
+def script_json(value: Any) -> str:
+    """``value`` as JSON that is safe to embed in a ``<script>`` data block
+    and that the browser's ``JSON.parse`` accepts.
+
+    Python's ``json.dumps`` writes ``Infinity``/``NaN`` for non-finite
+    floats, which is not JSON: ``JSON.parse`` throws on it and the page
+    renders nothing at all. A ratio over a zero-length pull or a rate from
+    an anonymous upload is enough to produce one, so they become null (the
+    renderers already show null as "?"/"—"), and ``allow_nan=False`` makes
+    any path that slips past the sanitiser fail here, loudly, rather than
+    in every visitor's browser. "</" is split so a value cannot close the
+    surrounding script element.
+    """
+    return json.dumps(_finite_only(value), allow_nan=False).replace("</", "<\\/")
 
 _TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
@@ -90,9 +119,11 @@ td.txt .pk b { color: var(--dim); font-weight: 600; margin-right: 4px; }
 /* Spellsteal-worthy casts (user-tagged, see --stealable-data): a left
    accent bar on the row rather than recoloring the kick-rate text, so it
    never collides with the ok/dev-early/dev-off kick-rate coloring
-   already on that same row. */
+   already on that same row. The star's CSS escape is doubled because
+   this template is a plain Python string: a single backslash made it the
+   octal escape \\260 and the page showed a degree sign and a 5. */
 tr.stealable { box-shadow: inset 3px 0 0 var(--steal); }
-tr.stealable td:first-child::after { content: " \2605"; color: var(--steal); }
+tr.stealable td:first-child::after { content: " \\2605"; color: var(--steal); }
 details { margin: 4px 0; }
 summary { cursor: pointer; }
 .legend { font-size: 12px; color: var(--dim); margin-top: 6px; }
@@ -205,12 +236,14 @@ details.sec:not([open]) > summary .sec-toggle::before { content: "\\25B8"; }
 // So the angle brackets are neutralised once, here, for every string in
 // the report, before a single template runs. Nothing downstream can then
 // open a tag, whatever context it lands in. Escaping (rather than
-// stripping) keeps the characters readable, and it is deliberately ONLY
-// < and > -- quotes are left for esc() at the attribute sites, because
-// pre-escaping them here would double-escape the many legitimate
-// apostrophes in WoW names.
+// stripping) keeps the characters readable. & is escaped too, so every
+// string is exactly the HTML text of the original value and esc() below
+// can tell deTag's entities from a literal "&lt;" in a name. Quotes are
+// left for esc() at the attribute sites, because pre-escaping them here
+// would double-escape the many legitimate apostrophes in WoW names.
 function deTag(value) {
-  if (typeof value === "string") return value.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  if (typeof value === "string")
+    return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   if (Array.isArray(value)) return value.map(deTag);
   if (value && typeof value === "object") {
     const out = {};
@@ -225,7 +258,14 @@ const R = deTag(JSON.parse(document.getElementById("report-data").textContent));
 // an escaped value is safe in a single-quoted attribute and in a
 // template literal, not only in the double-quoted attributes this file
 // happens to use today.
-const esc = s => String(s ?? "").replace(/[&<>"'`]/g,
+//
+// An & that already starts one of deTag's entities is left alone: every
+// report string has been through deTag, and escaping its &lt; again made
+// a name with a bracket display as "A&lt;b&gt;". The output is just as
+// inert -- no raw < > " ' ` survives, and & appears only as an entity.
+// (Nothing on this page reads a report value back out of an attribute;
+// the feed in report/index.py does, and has attr() for that.)
+const esc = s => String(s ?? "").replace(/&(?!(?:amp|lt|gt);)|[<>"'`]/g,
   c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;","`":"&#96;"}[c]));
 
 // Ability names link to the ability on Wowhead: a click opens its page,
@@ -272,10 +312,14 @@ const plain = (n, fallback = "?") => {
   return n == null || n === "" || !Number.isFinite(v) ? fallback : String(v);
 };
 const pct = n => plain(n, "?") + "%";
-const mmss = s => { if (s == null) return "?"; s = Math.round(s);
+// The magnitude is formatted and the sign put in front: Math.floor on a
+// negative made -65s "-2:-5". A non-number is "?", not "NaN:NaN".
+const mmss = s => { if (s == null || s === "") return "?"; s = Math.round(Number(s));
+  if (!Number.isFinite(s)) return "?";
+  const sign = s < 0 ? "-" : ""; s = Math.abs(s);
   const m = Math.floor(s/60), sec = s%60;
-  return m >= 60 ? `${Math.floor(m/60)}:${String(m%60).padStart(2,"0")}:${String(sec).padStart(2,"0")}`
-                 : `${m}:${String(sec).padStart(2,"0")}`; };
+  return sign + (m >= 60 ? `${Math.floor(m/60)}:${String(m%60).padStart(2,"0")}:${String(sec).padStart(2,"0")}`
+                         : `${m}:${String(sec).padStart(2,"0")}`); };
 const npcs = list => (list||[]).map(e =>
   `${e.n}x ${esc(e.name || ("npc:"+e.npc_id))}`).join(", ");
 
@@ -414,7 +458,12 @@ let sectionIds = {};  // reset per render()
 function section(html) {
   const m = /^<h2>([\\s\\S]*?)<\\/h2>/.exec(html);
   if (!m) return { id: "", title: "", html };
-  const title = m[1].replace(/<[^>]*>/g, "").replace(/\\s*\\(.*$/, "").trim();
+  // A trailing <span> is a per-report annotation (the dispel score, the
+  // kick total), not part of the name: left in, "85% overall" landed in
+  // the id -- so the id and its remembered collapsed state changed from
+  // one report to the next -- and in the phone index chip.
+  const title = m[1].replace(/\\s*<span\\b[^>]*>[\\s\\S]*?<\\/span>\\s*$/, "")
+    .replace(/<[^>]*>/g, "").replace(/\\s*\\(.*$/, "").trim();
   const base = "sec-" + (title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "section");
   const n = (sectionIds[base] || 0) + 1;
   sectionIds[base] = n;
@@ -437,7 +486,11 @@ function timerInfo() {
   if (t.margin_ms == null) return `<div class="sub">${esc(parLabel)}</div>`;
   const cls = t.margin_ms >= 0 ? "ok" : "dev-off";
   const verb = t.margin_ms >= 0 ? "beat timer by" : "over timer by";
-  const thr = t.threshold ? ` (+${t.threshold})` : "";
+  // Clamped to a whole 1..3 like the feed's stars (chestCount in
+  // report/index.py): the value is whatever the uploaded report says, and
+  // a "+-1" or "+Infinity" upgrade reads as a bug in the page.
+  const thrN = Math.min(3, Math.trunc(Number(t.threshold)));
+  const thr = thrN >= 1 ? ` (+${thrN})` : "";
   return `<div class="sub"><span class="${cls}">${verb} ${mmss(Math.abs(t.margin_ms)/1000)}${thr}</span>`
     + ` · ${esc(parLabel)}</div>`;
 }
@@ -975,7 +1028,7 @@ def render_html(report: dict[str, Any]) -> str:
     # JSON below is separately guarded by the </-splitting on the next
     # line, and every log-derived field the client-side JS renders goes
     # through its own esc(); this <title> was the one server-side gap.
-    payload = json.dumps(report).replace("</", "<\\/")
+    payload = script_json(report)
     return _TEMPLATE.replace("__TITLE__", html.escape(title)).replace(
         "__REPORT_JSON__", payload
     )

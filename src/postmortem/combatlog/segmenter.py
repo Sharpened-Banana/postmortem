@@ -105,6 +105,11 @@ def _parse_bracket_ints(value: str) -> list[int]:
     return out
 
 
+def _zone_instance(event: Event) -> Optional[int]:
+    raw = event.params[0].strip() if event.params else ""
+    return int(raw) if raw.lstrip("-").isdigit() else None
+
+
 def segment_runs(
     events: Iterable[Event], max_run_events: Optional[int] = None,
 ) -> Iterator[RunSegment]:
@@ -116,7 +121,7 @@ def segment_runs(
     ``max_run_events``, when given, caps how many events a single run
     accumulates before it's yielded early (marked ``truncated=True``,
     ``completed=False``) and the rest of that run's events are dropped
-    until the next CHALLENGE_MODE_START -- exactly like an abandoned run
+    until the next START of a different key (see truncated_key) -- exactly like an abandoned run
     otherwise, just cut off by size instead of by a missing END. Default
     None preserves the original unbounded behavior for every existing
     caller (CLI, desktop app) -- this exists for postmortem_site's
@@ -139,15 +144,43 @@ def segment_runs(
     # so far; maps from other dungeons are harmless (bounds are looked up
     # by the uiMapID the position samples carry).
     latest_map_change: dict[str, Event] = {}
+    # (challenge map id, keystone level) of the run the event cap last cut
+    # off, while that key may still be running. Its remaining events are
+    # dropped -- but a mid-key /reload re-logs the same key's START, which
+    # used to open a fresh run from nothing, and the key's real END then
+    # closed that stub as a second, fake "completed, timed" run. Same-key
+    # STARTs are dropped too until something shows that key is over: a
+    # different key's START, the phantom END that precedes every real new
+    # key, or leaving the instance.
+    truncated_key: Optional[tuple[Optional[int], Optional[int]]] = None
+    truncated_instance: Optional[int] = None
     for event in events:
         if event.name == "MAP_CHANGE" and event.params:
             latest_map_change[event.params[0].strip()] = event
+        if event.name == "ZONE_CHANGE" and current is None \
+                and _zone_instance(event) not in (None, truncated_instance):
+            truncated_key = None
+        if event.name == "ZONE_CHANGE" and current is not None \
+                and _zone_instance(event) not in (None, current.instance_id):
+            # The group left the dungeon with the key still open: an
+            # abandon (vote, walk-out, hearth). Close the run here. It used
+            # to stay open until the next CHALLENGE_MODE_START, so an
+            # abandoned key that was the last one in the log swallowed
+            # everything after it -- a whole evening of world content, or a
+            # raid, analysed as one "abandoned" key. The ZONE_CHANGE itself
+            # is kept, so likely_abandoned still reads it.
+            current.events.append(event)
+            yield current
+            current = None
+            continue
         if (
             max_run_events is not None
             and current is not None
             and len(current.events) >= max_run_events
         ):
             current.truncated = True
+            truncated_key = (current.challenge_map_id, current.keystone_level)
+            truncated_instance = current.instance_id
             yield current
             current = None
         if event.name == "CHALLENGE_MODE_START":
@@ -160,6 +193,11 @@ def segment_runs(
                 affixes=_parse_bracket_ints(p[4]) if len(p) > 4 else [],
                 start_ts=event.ts,
             )
+            if current is None and truncated_key is not None:
+                if truncated_key == (new_run.challenge_map_id,
+                                     new_run.keystone_level):
+                    continue  # /reload inside the key the cap cut off
+                truncated_key = None
             if current is not None:
                 # A start while a run is open: a /reload re-logs the start
                 # for the same key — keep accumulating into the same run.
@@ -177,10 +215,12 @@ def segment_runs(
             # the START stays events[0].
             current.events.extend(latest_map_change.values())
         elif event.name == "CHALLENGE_MODE_END":
-            if current is None:
-                continue
             p = event.params
             total_time_ms = to_int(p[3]) if len(p) > 3 else 0
+            if current is None:
+                if total_time_ms == 0:
+                    truncated_key = None  # phantom: a real new key follows
+                continue
             # WoW fires an all-zeroed phantom CHALLENGE_MODE_END
             # ("...END,<id>,0,0,0,0.000000,0.000000") immediately before
             # *every* CHALLENGE_MODE_START -- confirmed against real logs

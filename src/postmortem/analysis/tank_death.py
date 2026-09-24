@@ -336,6 +336,7 @@ def analyze_tank_death(
     full_cast_timeline: bool,
     knowledge: Optional[TankKnowledge] = None,
     run_start_ts: Optional[float] = None,
+    deaths: Iterable[Any] = (),
 ) -> dict[str, Any]:
     """Build the tank-death annotation for one :class:`stats.DeathRecord`.
 
@@ -447,7 +448,7 @@ def analyze_tank_death(
             })
 
     externals_available = _externals_available(
-        death, casts_by_guid, players, data
+        death, casts_by_guid, players, data, deaths
     )
     return {
         "scored": True,
@@ -472,6 +473,7 @@ def _externals_available(
     casts_by_guid: dict[str, list[dict[str, Any]]],
     players: dict[str, Any],
     data: TankDefensiveData,
+    deaths: Iterable[Any] = (),
 ) -> list[dict[str, Any]]:
     """Externals a *groupmate* could have thrown on the victim and didn't.
 
@@ -479,10 +481,19 @@ def _externals_available(
     victim's own defensives: a healer who never pressed Pain Suppression all
     run may not be Discipline-specced the way the table assumes, so their
     silence is not evidence.
+
+    A groupmate lying dead when the victim died could not have thrown
+    anything, and blaming them for an unused external is simply wrong --
+    yet a healer who died first was listed as "had Pain Suppression ready"
+    until 2026-09-23. A death before the victim's counts as still dead
+    unless that player cast something after it (a battle res leaves no
+    single reliable line of its own, but a living player casts).
     """
     out: list[dict[str, Any]] = []
     for guid, player in players.items():
         if guid == death.player_guid:
+            continue
+        if _dead_at(guid, death.ts, deaths, casts_by_guid.get(guid, [])):
             continue
         caster_spec = getattr(player, "spec_id", None)
         casts = casts_by_guid.get(guid, [])
@@ -498,6 +509,24 @@ def _externals_available(
                     "last_used_ts": last_cast,
                 })
     return sorted(out, key=lambda e: (e["caster"], e["name"]))
+
+
+def _dead_at(guid: str, ts: float, deaths: Iterable[Any],
+             casts: list[dict[str, Any]]) -> bool:
+    """Was ``guid`` dead at ``ts``: their latest death before it has no
+    cast of theirs after it (see _externals_available)."""
+    last_death: Optional[float] = None
+    for d in deaths:
+        d_ts = getattr(d, "ts", None)
+        if getattr(d, "player_guid", None) != guid or d_ts is None or d_ts >= ts:
+            continue
+        if last_death is None or d_ts > last_death:
+            last_death = d_ts
+    if last_death is None:
+        return False
+    return not any(
+        c.get("ts") is not None and last_death < c["ts"] <= ts for c in casts
+    )
 
 
 def _mitigation_gap(
@@ -552,5 +581,5 @@ def annotate_deaths(
         spec_id = getattr(player, "spec_id", None) if player is not None else None
         death.tank_analysis = analyze_tank_death(
             death, spec_id, casts_by_guid, stats.players, data, full_cast_timeline,
-            knowledge=knowledge, run_start_ts=run_start_ts,
+            knowledge=knowledge, run_start_ts=run_start_ts, deaths=stats.deaths,
         )
