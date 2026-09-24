@@ -98,6 +98,9 @@ summary { cursor: pointer; }
 .legend { font-size: 12px; color: var(--dim); margin-top: 6px; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px;
   margin: 0 4px 0 12px; vertical-align: -1px; }
+a.ability { color: inherit; text-decoration: none;
+  border-bottom: 1px dotted var(--dim); }
+a.ability:hover { color: var(--accent); border-bottom-color: var(--accent); }
 .map-wrap { padding: 0; }
 .map-wrap svg { display: block; width: 100%; height: auto; max-height: 560px;
   background: var(--panel2); }
@@ -224,6 +227,34 @@ const R = deTag(JSON.parse(document.getElementById("report-data").textContent));
 // happens to use today.
 const esc = s => String(s ?? "").replace(/[&<>"'`]/g,
   c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;","`":"&#96;"}[c]));
+
+// Ability names link to the ability on Wowhead: a click opens its page,
+// and where Wowhead's tooltip script loads (the public site, the desktop
+// app online) hovering shows the in-game tooltip. Offline -- a saved
+// report, no network -- they stay ordinary links. The id must be a
+// positive integer, so no report value can shape the URL.
+function ability(name, id) {
+  const label = esc(name);
+  const sid = Number(id);
+  if (!Number.isInteger(sid) || sid <= 0) return label;
+  return `<a class="ability" href="https://www.wowhead.com/spell=${sid}" data-wowhead="spell=${sid}"`
+    + ` target="_blank" rel="noopener noreferrer">${label}</a>`;
+}
+
+// Wowhead's tooltip script, loaded once after the first render instead of
+// as a <script src> in the template, so the page still has exactly one
+// inline script for the site's CSP hash. Its defaults leave link text,
+// colour and icons alone (no whTooltips config needed); it watches the
+// document for hovers, so re-rendered rows keep working.
+function loadAbilityTooltips() {
+  if (typeof window === "undefined" || !document.createElement || !document.head) return;
+  if (document.getElementById("wowhead-tooltips")) return;
+  const s = document.createElement("script");
+  s.id = "wowhead-tooltips";
+  s.src = "https://wow.zamimg.com/js/tooltips.js";
+  s.async = true;
+  document.head.appendChild(s);
+}
 // Every field in this report came out of an uploaded log, and on the
 // public site that upload is anonymous -- so a value the schema calls a
 // number can be arbitrary text. num() now rejects a non-number instead
@@ -303,6 +334,7 @@ function render() {
   html += sections.map(x => x.html).join("");
   const app = document.getElementById("app");
   app.innerHTML = html;
+  loadAbilityTooltips();
   wireSections(app);
 }
 
@@ -479,10 +511,10 @@ function playersTable() {
     <td class="num${p.deaths ? ' dev-off' : ''}" data-l="Deaths">${p.deaths}</td></tr>
     <tr><td colspan="14" style="border-bottom:1px solid var(--line)">
       <details><summary class="dim">top abilities & buffs</summary>
-      <div class="dim">Damage: ${(p.top_damage_spells||[]).slice(0,8).map(s => `${esc(s.name)} ${num(s.total)}`).join(" · ")}</div>
-      ${(p.top_healing_spells||[]).length ? `<div class="dim">Healing: ${(p.top_healing_spells||[]).slice(0,8).map(s => `${esc(s.name)} ${num(s.total)}`).join(" · ")}</div>` : ""}
-      <div class="dim">Damage taken: ${(p.top_damage_taken||[]).slice(0,8).map(s => `${esc(s.name)} ${num(s.total)}`).join(" · ")}</div>
-      ${(p.buff_uptimes||[]).length ? `<div class="dim">Buff uptime: ${(p.buff_uptimes||[]).slice(0,10).map(b => `${esc(b.name)} ${b.uptime_pct}%`).join(" · ")}</div>` : ""}
+      <div class="dim">Damage: ${(p.top_damage_spells||[]).slice(0,8).map(s => `${ability(s.name, s.spell_id)} ${num(s.total)}`).join(" · ")}</div>
+      ${(p.top_healing_spells||[]).length ? `<div class="dim">Healing: ${(p.top_healing_spells||[]).slice(0,8).map(s => `${ability(s.name, s.spell_id)} ${num(s.total)}`).join(" · ")}</div>` : ""}
+      <div class="dim">Damage taken: ${(p.top_damage_taken||[]).slice(0,8).map(s => `${ability(s.name, s.spell_id)} ${num(s.total)}`).join(" · ")}</div>
+      ${(p.buff_uptimes||[]).length ? `<div class="dim">Buff uptime: ${(p.buff_uptimes||[]).slice(0,10).map(b => `${ability(b.name, b.spell_id)} ${b.uptime_pct}%`).join(" · ")}</div>` : ""}
       ${(p.damage_to_bosses ? `<div class="dim">Boss damage: ${num(p.damage_to_bosses)} (${p.damage_done ? Math.round(100*p.damage_to_bosses/p.damage_done) : 0}% of total)</div>` : "")}
       ${(p.potions_used || p.healthstones_used || p.distance_traveled) ? `<div class="dim">${p.potions_used ? p.potions_used + " potions · " : ""}${p.healthstones_used ? p.healthstones_used + " healthstones · " : ""}${p.distance_traveled ? "~" + num(p.distance_traveled) + " yd traveled" : ""}</div>` : ""}
       ${buildDetail(p)}
@@ -509,7 +541,7 @@ function buildDetail(p) {
   const t = b.talents;
   if (t && (t.picks||[]).length) {
     const named = t.picks.filter(x => x.name)
-      .map(x => esc(x.name) + (x.rank > 1 ? ` <span class="dim">×${x.rank}</span>` : ""));
+      .map(x => ability(x.name, x.spell_id) + (x.rank > 1 ? ` <span class="dim">×${x.rank}</span>` : ""));
     const unsure = t.picks.filter(x => x.options)
       .map(x => `<span class="dev-late">${x.options.map(esc).join(" / ")}</span>`);
     out += `<div class="dim">Talents (${t.named_count}/${t.total_count} identified`
@@ -538,7 +570,7 @@ function avoidableDamage() {
     <td class="num">${num(p.avoidable_damage_taken)}</td>
     <td class="num">${p.avoidable_hits}</td>
     <td class="dim" style="white-space:normal">${(p.by_spell||[]).slice(0, 6)
-      .map(s => `${esc(s.name)} ${num(s.amount)} (${s.hits}x)`).join(" · ")}</td></tr>`).join("");
+      .map(s => `${ability(s.name, s.spell_id)} ${num(s.amount)} (${s.hits}x)`).join(" · ")}</td></tr>`).join("");
   return `<h2>Avoidable damage taken (${a.tagged_spell_count} tagged spell${a.tagged_spell_count === 1 ? "" : "s"})</h2>
     <div class="wrap"><table>
     <tr><th>Player</th><th class="num">Damage</th><th class="num">Hits</th><th>By spell</th></tr>
@@ -725,7 +757,7 @@ function enemyCasts() {
       const pct = total ? Math.round(100 * s.kicked / total) : 0;
       const cls = pct >= 70 ? "ok" : pct >= 30 ? "dev-early" : "dev-off";
       return `<tr class="${s.stealable ? "stealable" : ""}"${s.stealable ? ' title="Worth Spellstealing"' : ""}>
-        <td>${esc(s.name)}</td>
+        <td>${ability(s.name, s.spell_id)}</td>
         <td class="num${s.got_through ? " dev-off" : ""}" data-l="Got through">${plain(s.got_through, "0")}</td>
         <td class="num" data-l="Kicked">${plain(s.kicked, "0")}</td><td class="num" data-l="Died mid-cast">${s.expired ? plain(s.expired, "") : ""}</td>
         <td data-l="Kick rate"><span class="${cls}">${pct}%</span></td></tr>`;
@@ -743,7 +775,7 @@ function dispelEfficiency() {
       ? s.dispellers.map(p => `${esc(p.name)} <span class="dim">(${esc([p.spec, p.class].filter(Boolean).join(" "))}${p.dispels ? ", " + p.dispels + " dispel" + (p.dispels === 1 ? "" : "s") : ""})</span>`).join(", ")
       : `<span class="dim">nobody in the group can dispel ${esc(s.school)} — not scored</span>`;
     const eff = s.efficiency_pct == null ? "—" : pct(s.efficiency_pct);
-    const rows = s.spells.map(sp => `<tr><td>${esc(sp.name)}</td>
+    const rows = s.spells.map(sp => `<tr><td>${ability(sp.name, sp.spell_id)}</td>
       <td class="num">${plain(sp.applied, "0")}</td><td class="num">${plain(sp.dispelled, "0")}</td>
       <td class="num${sp.expired && s.dispellers.length ? " dev-off" : ""}">${plain(sp.expired, "0")}</td>
       <td class="num">${sp.avg_time_to_dispel_s != null ? plain(sp.avg_time_to_dispel_s) + "s" : '<span class="dim">—</span>'}</td></tr>`).join("");
@@ -775,11 +807,11 @@ function deaths() {
   const rows = list.map(d => {
     const kb = d.killing_blow || {};
     const recap = (d.recap||[]).map(r =>
-      `${mmss(r.ts - (R.run.start_ts||0))} ${esc(r.spell)} from ${esc(r.source)}: ${num(r.amount)}${r.hp_after != null ? ` (hp ${num(r.hp_after)})` : ""}`).join("<br>");
+      `${mmss(r.ts - (R.run.start_ts||0))} ${ability(r.spell, r.spell_id)} from ${esc(r.source)}: ${num(r.amount)}${r.hp_after != null ? ` (hp ${num(r.hp_after)})` : ""}`).join("<br>");
     const used = d.defensives_used_before_death || [];
     let defensive;
     if (used.length) {
-      const names = used.map(u => `${esc(u.name)} (${Math.round(d.ts - u.ts)}s before)`).join(", ");
+      const names = used.map(u => `${ability(u.name, u.spell_id)} (${Math.round(d.ts - u.ts)}s before)`).join(", ");
       defensive = `<span class="ok">${names}</span>`;
     } else if (d.died_without_defensive === true) {
       defensive = `<span class="bad">no defensive used</span>`;
@@ -791,7 +823,7 @@ function deaths() {
     }
     return `<tr><td data-l="Time">${mmss(d.t)}</td><td data-l="Player">${esc(d.player)}</td>
       <td class="num" data-l="Pull">${d.pull ?? ""}</td>
-      <td data-l="Killing blow">${kb.spell ? `${esc(kb.spell)} from ${esc(kb.source)} for ${num(kb.amount)}` : '<span class="dim">?</span>'}</td>
+      <td data-l="Killing blow">${kb.spell ? `${ability(kb.spell, kb.spell_id)} from ${esc(kb.source)} for ${num(kb.amount)}` : '<span class="dim">?</span>'}</td>
       <td class="num" data-l="Biggest hit">${num(d.biggest_hit)}</td>
       <td class="num" data-l="Last 5s">${num(d.damage_last_5s)}</td>
       <td data-l="Defensive">${defensive}</td>
@@ -822,7 +854,7 @@ function postMortem(d) {
   const active = t.active_at_death || [];
   if (active.length) {
     parts.push(`<div><span class="ok">Was holding:</span> `
-      + active.map(a => esc(a.name)).join(", ") + `</div>`);
+      + active.map(a => ability(a.name, a.spell_id)).join(", ") + `</div>`);
   }
   if (unused.length) {
     parts.push(`<div><span class="bad">Ready and unused:</span> ` + unused.map(u =>
@@ -830,8 +862,8 @@ function postMortem(d) {
       // they had it and never pressed it all run, so there is no
       // "off cooldown for N seconds" to quote -- it was up the whole time.
       u.never_cast
-        ? `${esc(u.name)} <span class="dim">(never pressed this run)</span>`
-        : `${esc(u.name)} <span class="dim">(off cooldown ${Math.round(u.ready_for_s)}s)</span>`
+        ? `${ability(u.name, u.spell_id)} <span class="dim">(never pressed this run)</span>`
+        : `${ability(u.name, u.spell_id)} <span class="dim">(off cooldown ${Math.round(u.ready_for_s)}s)</span>`
     ).join(", ") + `</div>`);
   }
   if (gap != null) {
@@ -839,7 +871,7 @@ function postMortem(d) {
   }
   if (externals.length) {
     parts.push(`<div><span class="bad">Group had up:</span> ` + externals.map(e =>
-      `${esc(e.name)} <span class="dim">(${esc(e.caster)})</span>`).join(", ") + `</div>`);
+      `${ability(e.name, e.spell_id)} <span class="dim">(${esc(e.caster)})</span>`).join(", ") + `</div>`);
   }
   if (never.length) {
     // Never pressed all run. From the log alone that cannot be told apart
@@ -850,11 +882,11 @@ function postMortem(d) {
     const unsure = never.filter(n => !n.known);
     if (proven.length) {
       parts.push(`<div class="dim">Had, never used this run: `
-        + proven.map(n => esc(n.name)).join(", ") + `</div>`);
+        + proven.map(n => ability(n.name, n.spell_id)).join(", ") + `</div>`);
     }
     if (unsure.length) {
       parts.push(`<div class="dim">Never used this run (may not be talented): `
-        + unsure.map(n => esc(n.name)).join(", ") + `</div>`);
+        + unsure.map(n => ability(n.name, n.spell_id)).join(", ") + `</div>`);
     }
   }
   if (!parts.length) return '<span class="ok">nothing left unused</span>';
@@ -871,7 +903,7 @@ function closeCalls() {
   const rows = list.map(c => `<tr><td data-l="Time">${mmss(c.t)}</td><td data-l="Player">${esc(c.player)}</td>
     <td class="num" data-l="Pull">${c.pull ?? ""}</td>
     <td class="num dev-off" data-l="HP left">${c.hp_pct}%</td>
-    <td data-l="Spell">${esc(c.spell)}</td><td data-l="Source">${esc(c.source)}</td>
+    <td data-l="Spell">${ability(c.spell, c.spell_id)}</td><td data-l="Source">${esc(c.source)}</td>
     <td class="num" data-l="Amount">${num(c.amount)}</td></tr>`).join("");
   return `<h2>Close calls</h2><div class="wrap"><table class="cards list">
     <tr><th>Time</th><th>Player</th><th class="num">Pull</th><th class="num">HP left</th>
@@ -881,8 +913,8 @@ function closeCalls() {
 
 function utility() {
   const rows = [];
-  (R.lust||[]).forEach(l => rows.push([l.t, "Bloodlust", `${esc(l.spell)}${l.source ? " (" + esc(l.source) + ")" : ""}`, l.pull]));
-  (R.brez||[]).forEach(b => rows.push([b.t, "Battle res", `${esc(b.player)} → ${esc(b.target || "?")} (${esc(b.spell)})`, b.pull]));
+  (R.lust||[]).forEach(l => rows.push([l.t, "Bloodlust", `${ability(l.spell, l.spell_id)}${l.source ? " (" + esc(l.source) + ")" : ""}`, l.pull]));
+  (R.brez||[]).forEach(b => rows.push([b.t, "Battle res", `${esc(b.player)} → ${esc(b.target || "?")} (${ability(b.spell, b.spell_id)})`, b.pull]));
   (R.interrupts||[]).forEach(i => {
     const est = [];
     if (i.estimated_prevented_damage) {
@@ -898,11 +930,11 @@ function utility() {
     const suffix = est.length
       ? ` — <span class="ok" title="${esc(basis)}">${est.join(" + ")} prevented${borrowed ? ` <span class="dim">(${esc(i.estimate_source)})</span>` : ""}</span>`
       : ' — <span class="dim">no landed casts to estimate from</span>';
-    rows.push([i.t, "Interrupt", `${esc(i.player)} kicked ${esc(i.interrupted_spell || "?")} on ${esc(i.target)}${suffix}`, i.pull]);
+    rows.push([i.t, "Interrupt", `${esc(i.player)} kicked ${ability(i.interrupted_spell || "?", i.interrupted_spell_id)} on ${esc(i.target)}${suffix}`, i.pull]);
   });
-  (R.dispels||[]).forEach(d => rows.push([d.t, "Dispel", `${esc(d.player)} dispelled ${esc(d.dispelled_spell || "?")} on ${esc(d.target)}`, d.pull]));
+  (R.dispels||[]).forEach(d => rows.push([d.t, "Dispel", `${esc(d.player)} dispelled ${ability(d.dispelled_spell || "?", d.dispelled_spell_id)} on ${esc(d.target)}`, d.pull]));
   ((R.cc||{}).events||[]).forEach(c => rows.push([c.t_start, "CC",
-    `${esc(c.caster || "?")} ${esc(c.spell)} on ${esc(c.target || "?")} (${c.duration_s.toFixed(1)}s)`, c.pull]));
+    `${esc(c.caster || "?")} ${ability(c.spell, c.spell_id)} on ${esc(c.target || "?")} (${c.duration_s.toFixed(1)}s)`, c.pull]));
   if (!rows.length) return "";
   rows.sort((a, b) => a[0] - b[0]);
   return `<h2>Utility timeline (lust · brez · kicks · dispels · CC)</h2>

@@ -331,8 +331,14 @@ class TestRenderers:
         report = build_snapshot(marked_run, marked_run.start_ts + 66.0)
         page = render_snapshot_html(report)
         assert page.startswith("<!DOCTYPE html>")
-        assert "<script" not in page
-        assert "http://" not in page and "https://" not in page
+        # No inline script. The one external resource is Wowhead's tooltip
+        # script; every other https:// is a link to an ability's page.
+        import re as _re
+        assert _re.findall(r"<script[^>]*>", page) == [
+            '<script async id="wowhead-tooltips" src="https://wow.zamimg.com/js/tooltips.js">']
+        assert "http://" not in page
+        assert set(_re.findall(r"https://[a-z.]+", page)) <= {
+            "https://wow.zamimg.com", "https://www.wowhead.com"}
         assert "@import" not in page and "<link" not in page
         assert "--accent: #C9A227" in page  # brand tokens from report/html.py
         assert page.count("<svg") >= 3       # hp, damage taken, healing, mana

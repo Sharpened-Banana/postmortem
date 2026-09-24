@@ -57,6 +57,7 @@ def deaths_summary(report: dict[str, Any]) -> list[dict[str, Any]]:
             "t": d.get("t"),
             "player": d.get("player") or "",
             "spell": killing_blow.get("spell") or "Unknown",
+            "spell_id": killing_blow.get("spell_id"),
         })
     return out
 
@@ -241,6 +242,8 @@ select { background:var(--panel); color:var(--text); border:1px solid var(--line
 .run-detail .stats span { color:var(--dim); }
 .run-detail .deaths { margin-top:6px; color:var(--dim); }
 .run-detail .deaths b { color:var(--text); font-weight:500; }
+a.ability { color:inherit; text-decoration:none; border-bottom:1px dotted var(--dim); }
+a.ability:hover { color:var(--accent); border-bottom-color:var(--accent); }
 .run-detail .open { float:right; margin-left:20px; }
 
 /* Phone: each row becomes a card on the same DOM (docs/MOBILE_PLAN.md
@@ -332,6 +335,25 @@ const RUNS = deTag(JSON.parse(document.getElementById("runs-data").textContent))
 // escape stays complete so the next author cannot reintroduce it.
 const esc = s => String(s ?? "").replace(/[&<>"'`]/g,
   c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;","`":"&#96;"}[c]));
+
+// Killing-blow names link to the ability on Wowhead (see report/html.py's
+// ability() -- same contract: a positive integer id or plain text).
+function ability(name, id) {
+  const label = esc(name);
+  const sid = Number(id);
+  if (!Number.isInteger(sid) || sid <= 0) return label;
+  return `<a class="ability" href="https://www.wowhead.com/spell=${sid}" data-wowhead="spell=${sid}"`
+    + ` target="_blank" rel="noopener noreferrer">${label}</a>`;
+}
+function loadAbilityTooltips() {
+  if (typeof window === "undefined" || !document.createElement || !document.head) return;
+  if (document.getElementById("wowhead-tooltips")) return;
+  const s = document.createElement("script");
+  s.id = "wowhead-tooltips";
+  s.src = "https://wow.zamimg.com/js/tooltips.js";
+  s.async = true;
+  document.head.appendChild(s);
+}
 // Report fields are typed only by whatever was uploaded: SQLite's loose
 // typing lets a string through a column declared INTEGER, so a "number"
 // here can be arbitrary text. Anything rendered as a number goes through
@@ -474,7 +496,7 @@ function detailBlock(r) {
   parts.push(`<span>${esc(r.date)}</span>`);
 
   const deaths = (r.deaths_detail || []).map(d =>
-    `<b>${esc(shortName(d.player))}</b> → ${esc(d.spell)}${d.t != null ? ` <span>at ${mmss(d.t)}</span>` : ""}`
+    `<b>${esc(shortName(d.player))}</b> → ${ability(d.spell, d.spell_id)}${d.t != null ? ` <span>at ${mmss(d.t)}</span>` : ""}`
   ).join(" · ");
 
   const open = r.html ? `<a class="open" href="${esc(r.html)}">open full report →</a>`
@@ -683,6 +705,7 @@ document.getElementById("app").addEventListener("change", ev => {
   if (ev.target.id === "dungeon-filter") { dungeon = ev.target.value; render(); }
 });
 render();
+loadAbilityTooltips();
 </script>
 </body>
 </html>

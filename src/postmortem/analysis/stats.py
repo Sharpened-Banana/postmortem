@@ -665,6 +665,7 @@ def compute_stats(
                                 "pull": pull_idx,
                                 "hp_pct": round(hp_pct * 100, 1),
                                 "spell": sp.spell_name if sp else "Melee",
+                                "spell_id": sp.spell_id if sp else 0,
                                 "amount": damage.amount,
                                 "source": src_name or src_guid,
                             })
@@ -897,6 +898,7 @@ def compute_stats(
                     "pull": pull_idx,
                     "player": source_player.name or src_name,
                     "spell": sp.spell_name,
+                    "spell_id": sp.spell_id,
                     "target": dst_name,
                 })
             if full_cast_timeline:

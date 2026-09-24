@@ -43,7 +43,12 @@ def inline_script_hashes(html: str) -> list[str]:
     ``html``, in document order, ready to drop into a script-src list."""
     out: list[str] = []
     for match in _SCRIPT_RE.finditer(html):
-        type_match = _TYPE_RE.search(match.group("attrs") or "")
+        attrs = match.group("attrs") or ""
+        # An external script (src=...) is allowed by its host in the
+        # policy, not by a hash; its (empty) body is not inline code.
+        if re.search(r"\bsrc\s*=", attrs, re.IGNORECASE):
+            continue
+        type_match = _TYPE_RE.search(attrs)
         if type_match and type_match.group(1).lower() not in _EXECUTABLE_TYPES:
             continue
         digest = hashlib.sha256(match.group("body").encode("utf-8")).digest()

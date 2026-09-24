@@ -34,6 +34,8 @@ _EXTRA_STYLE = """
 .legend b { font-weight: 600; color: var(--text); }
 .focus-note { color: var(--dim); font-style: italic; }
 .marker { color: var(--accent); font-weight: 600; }
+a.ability { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--dim); }
+a.ability:hover { color: var(--accent); border-bottom-color: var(--accent); }
 .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 12px; }
 </style>
@@ -46,6 +48,7 @@ _TEMPLATE = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>__TITLE__</title>
 __STYLE__
+<script async id="wowhead-tooltips" src="https://wow.zamimg.com/js/tooltips.js"></script>
 </head>
 <body>
 __BODY__
@@ -59,6 +62,31 @@ _PALETTE = ("#C9A227", "#5c9ad0", "#5CB85C", "#b47fdb", "#D9534F", "#E0A13C", "#
 
 def _esc(value: Any) -> str:
     return _html.escape("" if value is None else str(value), quote=True)
+
+
+class _Html(str):
+    """A table cell that is already safe HTML (built only by ``_ability``
+    and ``_from`` below, which escape everything they are given)."""
+
+
+def _ability_html(name: Any, spell_id: Any) -> str:
+    """An ability name linked to its Wowhead page; Wowhead's tooltip script
+    (loaded by the template) turns a hover into the in-game tooltip. Plain
+    escaped text unless the id is a positive integer."""
+    label = _esc(name)
+    if isinstance(spell_id, bool) or not isinstance(spell_id, int) or spell_id <= 0:
+        return label
+    return (f'<a class="ability" href="https://www.wowhead.com/spell={spell_id}" '
+            f'data-wowhead="spell={spell_id}" target="_blank" rel="noopener noreferrer">{label}</a>')
+
+
+def _ability(name: Any, spell_id: Any) -> _Html:
+    return _Html(_ability_html(name, spell_id))
+
+
+def _from(spell: Any, spell_id: Any, source: Any) -> _Html:
+    """"<ability> from <source>", the ability linked."""
+    return _Html(f"{_ability_html(spell, spell_id)} from {_esc(source)}")
 
 
 def _role_label(role: Optional[str]) -> str:
@@ -326,8 +354,9 @@ def _table(headers: list[tuple[str, bool]], rows: list[list[Any]]) -> str:
         cells = []
         for (h, num), cell in zip(headers, row):
             label = f' data-l="{_esc(h)}"'
-            cells.append(f'<td class="num"{label}>{_esc(cell)}</td>' if num
-                         else f"<td{label}>{_esc(cell)}</td>")
+            text = cell if isinstance(cell, _Html) else _esc(cell)
+            cells.append(f'<td class="num"{label}>{text}</td>' if num
+                         else f"<td{label}>{text}</td>")
         body.append("<tr>" + "".join(cells) + "</tr>")
     # Five or more columns cannot survive a phone as a table; the brand
     # block's phone rules turn a .cards table into labelled cards.
@@ -379,15 +408,15 @@ def _around_html(report: dict[str, Any]) -> str:
     for d in around.get("deaths") or []:
         kb = d.get("killing_blow") or {}
         rows.append([_fmt_time(d.get("t")), "DEATH", d["player"],
-                     f"{kb.get('spell', '?')} from {kb.get('source', '?')}" if kb else "",
+                     _from(kb.get("spell", "?"), kb.get("spell_id"), kb.get("source", "?")) if kb else "",
                      _fmt_num(kb.get("amount")) if kb else ""])
     for c in around.get("close_calls") or []:
         rows.append([_fmt_time(c.get("t")), f"CLOSE ({c['hp_pct']}%)", c["player"],
-                     f"{c['spell']} from {c['source']}", _fmt_num(c["amount"])])
+                     _from(c["spell"], c.get("spell_id"), c["source"]), _fmt_num(c["amount"])])
     for h in around.get("largest_hits") or []:
         hp = f" → {h['hp_pct']}%" if h.get("hp_pct") is not None else ""
         rows.append([_fmt_time(h.get("t")), f"hit{hp}", h["player"],
-                     f"{h['spell']} from {h['source']}", _fmt_num(h["amount"])])
+                     _from(h["spell"], h.get("spell_id"), h["source"]), _fmt_num(h["amount"])])
     out.append(_table([("When", False), ("What", False), ("Player", False),
                        ("Ability", False), ("Amount", True)], rows))
     return "".join(out)
@@ -418,21 +447,22 @@ def _focus_html(report: dict[str, Any]) -> str:
              for t in f.get("healing_by_target") or []]) + "</div>")
         out.append("<div><h2>Healing by spell</h2>" + _table(
             [("Spell", False), ("Effective", True)],
-            [[s["name"], _fmt_num(s["total"])] for s in (f.get("healing_by_spell") or [])[:12]]) + "</div>")
+            [[_ability(s["name"], s.get("spell_id")), _fmt_num(s["total"])]
+             for s in (f.get("healing_by_spell") or [])[:12]]) + "</div>")
         out.append("</div>")
         out.append("<h2>Cooldowns, externals, dispels</h2>" + _table(
             [("When", False), ("Kind", False), ("Spell", False), ("Target", False)],
-            [[_fmt_time(c["t"]), "cooldown", c["spell"], c.get("target") or ""]
+            [[_fmt_time(c["t"]), "cooldown", _ability(c["spell"], c.get("spell_id")), c.get("target") or ""]
              for c in f.get("cooldowns_used") or []]
-            + [[_fmt_time(c["t"]), "external", c["spell"], c.get("target") or ""]
+            + [[_fmt_time(c["t"]), "external", _ability(c["spell"], c.get("spell_id")), c.get("target") or ""]
                for c in f.get("externals_given") or []]
             + [[_fmt_time(d.get("t")), d.get("kind", "dispel"),
-                d.get("dispelled_spell") or "?", d.get("target") or ""]
+                _ability(d.get("dispelled_spell") or "?", d.get("dispelled_spell_id")), d.get("target") or ""]
                for d in f.get("dispels") or []]))
         out.append("<h2>Who took the damage</h2>" + _table(
             [("Player", False), ("Taken", True), ("From", False)],
             [[e["name"], _fmt_num(e["damage_taken"]),
-              ", ".join(s["name"] for s in e["top_spells"][:3])]
+              _Html(", ".join(_ability_html(s["name"], s.get("spell_id")) for s in e["top_spells"][:3]))]
              for e in f.get("damage_taken_by_player") or []]))
         out.append("<h2>Damage by source</h2>" + _table(
             [("Source", False), ("Damage to group", True)],
@@ -451,25 +481,27 @@ def _focus_html(report: dict[str, Any]) -> str:
         if f.get("active_mitigation"):
             out.append(_table(
                 [("Ability", False), ("Casts", True), ("Uptime", True), ("Uptime %", True)],
-                [[m["name"], m["casts"], f"{m['uptime_s']:.0f}s",
+                [[_ability(m["name"], m.get("spell_id")), m["casts"], f"{m['uptime_s']:.0f}s",
                   f"{m['uptime_pct']}%" if m.get("uptime_pct") is not None else "?"]
                  for m in f["active_mitigation"]]))
         else:
             out.append(f'<div class="focus-note">{_esc(f.get("mitigation_note") or "no mitigation data")}</div>')
         out.append("<h2>Cooldowns used</h2>" + _table(
             [("When", False), ("Spell", False)],
-            [[_fmt_time(c["t"]), c["spell"]] for c in f.get("cooldowns_used") or []]))
+            [[_fmt_time(c["t"]), _ability(c["spell"], c.get("spell_id"))]
+             for c in f.get("cooldowns_used") or []]))
         out.append('<div class="cols">')
         out.append("<div><h2>Damage by spell</h2>" + _table(
             [("Spell", False), ("Damage", True)],
-            [[s["name"], _fmt_num(s["total"])] for s in (f.get("damage_by_spell") or [])[:12]]) + "</div>")
+            [[_ability(s["name"], s.get("spell_id")), _fmt_num(s["total"])]
+             for s in (f.get("damage_by_spell") or [])[:12]]) + "</div>")
         out.append("<div><h2>Damage by source</h2>" + _table(
             [("Source", False), ("Damage", True)],
             [[s["name"], _fmt_num(s["total"])] for s in f.get("damage_by_source") or []]) + "</div>")
         out.append("</div>")
         out.append("<h2>Biggest hits</h2>" + _table(
             [("When", False), ("Amount", True), ("Ability", False), ("HP after", True)],
-            [[_fmt_time(h.get("t")), _fmt_num(h["amount"]), f"{h['spell']} from {h['source']}",
+            [[_fmt_time(h.get("t")), _fmt_num(h["amount"]), _from(h["spell"], h.get("spell_id"), h["source"]),
               f"{h['hp_pct']}%" if h.get("hp_pct") is not None else ""]
              for h in f.get("biggest_hits") or []]))
     return "".join(out)
@@ -498,21 +530,23 @@ def render_snapshot_html(report: dict[str, Any]) -> str:
     body.append("<h2>Deaths in window</h2>" + _table(
         [("When", False), ("Player", False), ("Killing blow", False), ("Amount", True), ("Defensive", False)],
         [[_fmt_time(d.get("t")), d["player"],
-          f"{(d.get('killing_blow') or {}).get('spell', '?')} from {(d.get('killing_blow') or {}).get('source', '?')}"
+          _from((d.get("killing_blow") or {}).get("spell", "?"), (d.get("killing_blow") or {}).get("spell_id"),
+                (d.get("killing_blow") or {}).get("source", "?"))
           if d.get("killing_blow") else "",
           _fmt_num((d.get("killing_blow") or {}).get("amount")) if d.get("killing_blow") else "",
-          ", ".join(u["name"] for u in d.get("defensives_used_before_death") or [])
+          _Html(", ".join(_ability_html(u["name"], u.get("spell_id"))
+                          for u in d.get("defensives_used_before_death") or []))
           or ("none used" if d.get("died_without_defensive") else "")]
          for d in deaths]))
     body.append("<h2>Close calls in window</h2>" + _table(
         [("When", False), ("Player", False), ("HP", True), ("Ability", False), ("Amount", True)],
         [[_fmt_time(c.get("t")), c["player"], f"{c['hp_pct']}%",
-          f"{c['spell']} from {c['source']}", _fmt_num(c["amount"])]
+          _from(c["spell"], c.get("spell_id"), c["source"]), _fmt_num(c["amount"])]
          for c in report.get("close_calls") or []]))
     spells = (report.get("enemy_casts") or {}).get("spells") or []
     body.append("<h2>Enemy casts</h2>" + _table(
         [("Spell", False), ("Landed", True), ("Kicked", True)],
-        [[s["name"], s["got_through"], s["kicked"]] for s in spells[:15]]))
+        [[_ability(s["name"], s.get("spell_id")), s["got_through"], s["kicked"]] for s in spells[:15]]))
     body.append("<h2>Players (window)</h2>" + _table(
         [("Player", False), ("Spec", False), ("DPS", True), ("HPS", True), ("Taken", True),
          ("DTPS", True), ("Casts", True), ("Kicks", True), ("Deaths", True)],
