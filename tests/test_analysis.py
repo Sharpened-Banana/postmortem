@@ -1131,7 +1131,7 @@ class TestAnalyzeRun:
         report = analyze_run(run_segment, route=route, store=None)
         assert report["forces"]["required"] is None  # the no-data case this guards
         html = render_html(report)
-        assert "forces.required ? stat(" in html
+        assert "if (forces.required)" in html
 
     def test_html_renders_calibrated_path_and_death_markers(
         self, run_segment, route, dungeon_data_file

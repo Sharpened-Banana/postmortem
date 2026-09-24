@@ -63,10 +63,12 @@ class TestChestThresholdClamp:
         report["timer"] = {"par_ms": 1_800_000, "threshold_2_ms": 1_440_000,
                            "threshold_3_ms": 1_080_000, "margin_ms": 5000,
                            "threshold": -1}
+        report["verdict"]["chests"] = -1
         out = _run(_extract_script(render_html(report)), "report-data",
                    json.dumps(report), extra="render();")
-        assert "beat timer by" in out
+        assert "under the timer" in out
         assert "+-1" not in out
+        assert 'aria-label="0 of 3 chests"' in out
 
 
 @needs_node

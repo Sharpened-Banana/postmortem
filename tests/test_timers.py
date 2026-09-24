@@ -288,7 +288,7 @@ class TestTimerRendering:
         run_segment.completed = True
         report = analyze_run(run_segment, par_ms=1_000_000)
         html = render_html(report)
-        assert "beat timer by" in html
+        assert "Timed +3 with 1:40 to spare" in html
         assert '"threshold": 3' in html
 
     def test_html_shows_over_timer(self, run_segment):
@@ -296,7 +296,7 @@ class TestTimerRendering:
         run_segment.completed = True
         report = analyze_run(run_segment, par_ms=1_000_000)
         html = render_html(report)
-        assert "over timer by" in html
+        assert "Over by 1:40" in html
 
     def test_html_omits_timer_block_when_absent(self, run_segment):
         run_segment.challenge_map_id = 99999   # no timer known for it
