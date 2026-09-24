@@ -238,15 +238,18 @@ select option { background:var(--panel); color:var(--text); }
 .chart-svg { width:100%; height:56px; display:block; }
 
 /* Leaderboard rows. One shared grid template for the header and every row
-   so columns line up; .col-score marks the Kicks/Route pair, kept as the
-   last two cells so dropping them later is two cells + one rule. */
-.board { min-width:860px; }
+   so columns line up; .col-score marks the Kick eff./Route % pair, kept as
+   the last two cells so dropping them later is two cells + one rule. */
+.board { min-width:1040px; }
 /* DPS is minmax(0,1fr), not 1fr: a bare 1fr track's minimum is its
-   content width, so five long names would push Kicks/Route off the right
-   edge instead of truncating. */
+   content width, so five long names would push the score columns off the
+   right edge instead of truncating. The dungeon track carries the full
+   name (ellipsised past 180px, whole name on hover). */
 .run-head, .run-row { display:grid; align-items:center;
-  grid-template-columns:22px 44px 70px 86px 60px 120px 104px 104px minmax(0,1fr) 56px 56px;
+  grid-template-columns:22px 70px minmax(120px,180px) 44px 56px 104px 136px 96px 96px minmax(0,1fr) 72px 64px;
   gap:0 8px; padding:0 8px; }
+.run-head [title] { text-decoration:underline dotted var(--dim);
+  text-underline-offset:3px; }
 .run-head { color:var(--dim); font-size:11px; text-transform:uppercase;
   letter-spacing:.12em; user-select:none; border-bottom:1px solid var(--line);
   padding-top:6px; padding-bottom:6px; }
@@ -261,16 +264,25 @@ select option { background:var(--panel); color:var(--text); }
 .run-row .rank { color:var(--accent); font-weight:700; text-align:center;
   font-variant-numeric:tabular-nums; }
 .run-row .rank.none { color:var(--dim); font-weight:400; }
-.run-row .dungeon { font-weight:500; letter-spacing:.01em; color:var(--text); }
+.run-row .dungeon { font-weight:500; letter-spacing:.01em; color:var(--text);
+  overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.run-row .dungeon .dn-abbr { display:none; }
 .run-row .level { font-variant-numeric:tabular-nums; }
+/* Result badge: the run page's TIMED/OVER/ABANDONED pill (report/html.py
+   .badge), copied rather than shared because the two pages ship as
+   separate self-contained documents. One component, three states. */
+.badge { display:inline-flex; align-items:center; gap:5px; padding:2px 10px;
+  border-radius:12px; font-weight:600; font-size:11.5px; line-height:1.5;
+  letter-spacing:.04em; text-transform:uppercase;
+  font-variant-numeric:tabular-nums; white-space:nowrap; }
+.badge.timed { background:#1d3a28; color:var(--good); }
+.badge.over { background:#3a2d1d; color:var(--warn); }
+.badge.abandoned { background:#232733; color:var(--dim); font-weight:500; }
+.badge .stars { color:var(--accent); font-size:11px; letter-spacing:-1px; }
 .run-row .snap-tag { display:inline-block; margin-left:6px; padding:1px 5px;
   border:1px solid var(--line); border-radius:3px; font-size:10px;
   font-weight:400; color:var(--dim); letter-spacing:.02em; white-space:nowrap;
   vertical-align:1px; }
-.run-row .level .stars { color:var(--accent); font-size:11px; margin-left:3px;
-  letter-spacing:-1px; }
-.run-row .level.over { color:var(--warn); }
-.run-row .level.dnf { color:var(--bad); }
 .run-row .time { font-variant-numeric:tabular-nums; }
 .run-row .time.over { color:var(--warn); }
 .affix { display:inline-block; font-size:10.5px; padding:1px 6px; margin-right:4px;
@@ -284,6 +296,7 @@ select option { background:var(--panel); color:var(--text); }
 .pname.unk { color:var(--dim); font-weight:400; }
 .run-row .score { text-align:right; font-variant-numeric:tabular-nums; }
 .run-head .score, .run-head .num { text-align:right; }
+.run-head .rank-h { text-align:center; }
 .run-detail { background:var(--panel2); border-bottom:1px solid var(--line);
   padding:10px 14px 10px 46px; font-size:13px; }
 .run-detail .stats { display:flex; flex-wrap:wrap; gap:6px 22px; }
@@ -317,15 +330,19 @@ a.ability:hover { color:var(--accent); border-bottom-color:var(--accent); }
     color:var(--muted); min-height:30px; display:flex; align-items:center;
     text-align:left; }
   .run-head > div.static { display:none; }
+  .run-head [title] { text-decoration:none; }
   .run-row { grid-template-columns:36px minmax(0,1fr) auto;
-    grid-template-areas:"rank dungeon time" "rank level level"
+    grid-template-areas:"rank dungeon time" "rank level result"
       "affixes affixes affixes"; gap:2px 8px; padding:10px 10px 12px;
     white-space:normal; min-height:0; }
   .run-row .caret { display:none; }
   .run-row .rank { grid-area:rank; align-self:start; font-size:18px;
     line-height:1.2; }
   .run-row .dungeon { grid-area:dungeon; font-size:15px; }
+  .run-row .dungeon .dn-full { display:none; }
+  .run-row .dungeon .dn-abbr { display:inline; }
   .run-row .level { grid-area:level; }
+  .run-row .result { grid-area:result; justify-self:end; }
   .run-row .time { grid-area:time; text-align:right; }
   .run-row .affixes { grid-area:affixes; margin-top:4px; }
   .run-row .party { grid-column:1 / -1; white-space:normal; overflow:visible;
@@ -336,7 +353,7 @@ a.ability:hover { color:var(--accent); border-bottom-color:var(--accent); }
   .run-row .score::before { color:var(--dim); font-size:10px; text-transform:uppercase;
     letter-spacing:.1em; margin-right:6px; }
   .run-row .score:nth-last-child(2) { grid-column:1 / 3; }
-  .run-row .score:nth-last-child(2)::before { content:"Kicks"; }
+  .run-row .score:nth-last-child(2)::before { content:"Kick eff."; }
   .run-row .score:last-child { grid-column:3; }
   .run-row .score:last-child::before { content:"Route"; }
   .run-detail { padding:10px 12px; }
@@ -510,6 +527,50 @@ function stars(r) {
   return null;
 }
 
+// The Result column: one badge, three states -- timed (green, with the
+// margin under par and the chest stars), over (amber, the margin past
+// it) and abandoned (dim). The margin decides the state when the report
+// has one, so the sign and the colour can never disagree; older reports
+// without a resolved par fall back to the stars/timed flag and say
+// "timed"/"over" in words. A completed run with no verdict at all shares
+// the dim look with "done".
+function resultState(r) {
+  if (!r.completed) return "abandoned";
+  const m = marginMs(r);
+  if (m != null) return m >= 0 ? "timed" : "over";
+  const st = stars(r);
+  if (st == null) return "done";
+  return st > 0 ? "timed" : "over";
+}
+function marginMs(r) {
+  if (r.margin_ms == null || r.margin_ms === "") return null;
+  const m = Number(r.margin_ms);
+  return Number.isFinite(m) ? m : null;
+}
+function resultBadge(r) {
+  const state = resultState(r);
+  if (state === "abandoned")
+    return '<span class="badge abandoned" title="Key not completed">abandoned</span>';
+  if (state === "done")
+    return '<span class="badge abandoned" title="Completed; no timer verdict in this report">done</span>';
+  const m = marginMs(r);
+  const st = state === "timed" ? stars(r) : 0;
+  const starStr = st ? `<span class="stars">${"★".repeat(st)}</span>` : "";
+  let label, tip;
+  if (m == null) {
+    label = state === "timed" ? "timed" : "over";
+    tip = state === "timed" ? "Timed" : "Over the timer";
+  } else if (state === "timed") {
+    label = "+" + mmss(m / 1000);
+    tip = `Timed with ${mmss(m / 1000)} to spare`;
+  } else {
+    label = "−" + mmss(-m / 1000);
+    tip = `${mmss(-m / 1000)} over the timer`;
+  }
+  if (st) tip += ` · key upgrades +${st}`;
+  return `<span class="badge ${state}" title="${tip}">${label}${starStr}</span>`;
+}
+
 function result(r) {
   if (!r.completed) return '<span class="dnf">incomplete</span>';
   if (r.timed == null) return '<span class="dnf">completed</span>';
@@ -517,20 +578,20 @@ function result(r) {
                  : '<span class="over">over timer</span>';
 }
 
-// Rank = position among ALL your completed runs of the same dungeon at the
-// same key level, fastest first. Computed once over the full set so
+// Rank = position among ALL the completed runs on this page of the same
+// dungeon at the same key level, fastest first (the "Lvl rank" column). Computed once over the full set so
 // filtering the page never renumbers anyone.
 function assignRanks() {
   const groups = {};
   for (const r of RUNS) {
-    r._rank = null;
+    r._rank = null; r._rankOf = 0;
     if (!r.completed || r.level == null || !r.duration_ms) continue;
     const k = `${r.zone}|${r.level}`;
     (groups[k] = groups[k] || []).push(r);
   }
   for (const g of Object.values(groups)) {
     g.sort((a, b) => a.duration_ms - b.duration_ms);
-    g.forEach((r, i) => { r._rank = i + 1; });
+    g.forEach((r, i) => { r._rank = i + 1; r._rankOf = g.length; });
   }
 }
 
@@ -593,14 +654,19 @@ function snapTag(r) {
   return `<span class="snap-tag" title="${n} snapshot report${n === 1 ? "" : "s"} marked during this run">${n} snapshot${n === 1 ? "" : "s"}</span>`;
 }
 
+// "#2 fastest of 5": where this run's clear time places among every
+// completed run of the same dungeon at the same key level on this page.
+function rankTitle(r) {
+  if (!r._rank) return "Not ranked: key not completed";
+  return `#${r._rank} fastest of ${r._rankOf} completed +${num(r.level, "?")} runs of this dungeon`;
+}
+
 function runRow(r) {
   const key = runKey(r);
   const isOpen = openKey === key;
-  const st = stars(r);
-  const levelCls = !r.completed ? "level dnf" : (st === 0 ? "level over" : "level");
-  const starStr = st ? "★".repeat(st) : "";
+  const state = resultState(r);
   const timeStr = r.duration_ms ? mmss(r.duration_ms/1000) : mmss(r.wall_s);
-  const timeCls = (r.completed && st === 0) ? "time over" : "time";
+  const timeCls = state === "over" ? "time over" : "time";
   const party = r.party || [];
   const by = { tank: [], healer: [], dps: [], unknown: [] };
   for (const p of party) by[roleOf(p.role)].push(p);
@@ -620,10 +686,11 @@ function runRow(r) {
   // a 22px glyph is too small a click target on its own.
   return `<div class="run-row${isOpen ? " open" : ""}" data-key="${attr(key)}">
     <div class="caret">${isOpen ? "▾" : "▸"}</div>
-    <div class="rank${r._rank ? "" : " none"}">${num(r._rank, "—")}</div>
-    <div class="dungeon" title="${esc(r.zone)}">${esc(abbrev(r.zone))}${snapTag(r)}</div>
-    <div class="${levelCls}">+${num(r.level, "?")}<span class="stars">${starStr}</span></div>
+    <div class="rank${r._rank ? "" : " none"}" title="${rankTitle(r)}">${num(r._rank, "—")}</div>
+    <div class="dungeon" title="${esc(r.zone)}"><span class="dn-full">${esc(r.zone || "Unknown dungeon")}</span><span class="dn-abbr">${esc(abbrev(r.zone))}</span>${snapTag(r)}</div>
+    <div class="level">+${num(r.level, "?")}</div>
     <div class="${timeCls}">${timeStr}</div>
+    <div class="result">${resultBadge(r)}</div>
     <div class="affixes">${affixCell(r.affixes)}</div>
     ${partyCells}
     <div class="score col-score">${pct(r.kick_efficiency_pct)}</div>
@@ -722,9 +789,13 @@ function render() {
   }
 
   const stat = (v, l) => `<div class="stat"><div class="v">${esc(v)}</div><div class="l">${esc(l)}</div></div>`;
-  const hd = (label, key, cls) => key
-    ? `<div class="${cls || ""}" data-sort="${esc(key)}">${label}${sortKey === key ? (sortDir > 0 ? " ▲" : " ▼") : ""}</div>`
-    : `<div class="static ${cls || ""}">${label}</div>`;
+  // `tip` explains a header whose name alone isn't enough (static text).
+  const hd = (label, key, cls, tip) => {
+    const t = tip ? ` title="${esc(tip)}"` : "";
+    return key
+      ? `<div class="${cls || ""}" data-sort="${esc(key)}"${t}>${label}${sortKey === key ? (sortDir > 0 ? " ▲" : " ▼") : ""}</div>`
+      : `<div class="static ${cls || ""}"${t}>${label}</div>`;
+  };
 
   document.getElementById("app").innerHTML = `
   <div class="grid">
@@ -741,10 +812,12 @@ function render() {
   ${chartsSection(chartRows)}
   <div class="wrap"><div class="board">
     <div class="run-head">
-      ${hd("", null)}${hd("Rank", "_rank")}${hd("Dungeon", "zone")}${hd("Level", "level")}
-      ${hd("Time", "duration_ms")}${hd("Affixes", null)}
+      ${hd("", null)}${hd("Lvl rank", "_rank", "rank-h", "Fastest-first position among completed runs of the same dungeon at the same key level (1 = fastest)")}
+      ${hd("Dungeon", "zone")}${hd("Level", "level")}
+      ${hd("Time", "duration_ms")}${hd("Result", "margin_ms", "", "Time left on the timer when timed (stars = key upgrades), or time over it")}
+      ${hd("Affixes", null)}
       ${hd("🛡 Tank", null)}${hd("✚ Healer", null)}${hd("🗡 DPS", null)}
-      ${hd("Kicks", "kick_efficiency_pct", "score col-score")}${hd("Route", "adherence_pct", "score col-score")}
+      ${hd("Kick eff.", "kick_efficiency_pct", "score col-score", "Interrupt efficiency: share of kickable enemy casts that were kicked")}${hd("Route %", "adherence_pct", "score col-score", "Route adherence: how closely the pulls followed the planned route")}
     </div>
     ${rows.map(runRow).join("") || '<div class="run-row"><div></div><div class="dim" style="grid-column:2/-1">no runs yet</div></div>'}
   </div></div>

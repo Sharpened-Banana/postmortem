@@ -14,12 +14,15 @@ def test_phone_rules_live_under_one_media_query():
     css = _css(render_index([]))
     at = css.index("@media (max-width:720px)")
     # every card rule is after the query; the desktop grid template is before it
-    assert css.index("grid-template-columns:22px 44px 70px") < at
+    assert css.index("grid-template-columns:22px 70px minmax(120px,180px)") < at
     for rule in (
         '.run-row { grid-template-columns:36px minmax(0,1fr) auto;',
         '.run-head > div.static { display:none; }',
-        '.run-row .score:nth-last-child(2)::before { content:"Kicks"; }',
+        '.run-row .score:nth-last-child(2)::before { content:"Kick eff."; }',
         '.run-row .score:last-child::before { content:"Route"; }',
+        '.run-row .dungeon .dn-full { display:none; }',
+        '.run-row .dungeon .dn-abbr { display:inline; }',
+        '.run-row .result { grid-area:result; justify-self:end; }',
         '.run-row .party { grid-column:1 / -1;',
         '.board { min-width:0; }',
     ):
@@ -28,7 +31,9 @@ def test_phone_rules_live_under_one_media_query():
 
 def test_desktop_board_keeps_its_minimum_width_rule():
     css = _css(render_index([]))
-    assert ".board { min-width:860px; }" in css
+    assert ".board { min-width:1040px; }" in css
+    # full dungeon names on desktop; the abbreviation only shows on phones
+    assert css.index(".run-row .dungeon .dn-abbr { display:none; }") < css.index("@media (max-width:720px)")
 
 
 def test_phone_body_size_and_viewport_fit():
