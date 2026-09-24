@@ -236,6 +236,27 @@ select option { background:var(--panel); color:var(--text); }
 .chart-value { color:var(--text); font-weight:600; text-transform:none;
   letter-spacing:normal; }
 .chart-svg { width:100%; height:56px; display:block; }
+.chart-legend { display:flex; gap:12px; margin-top:4px; font-size:10px;
+  color:var(--dim); letter-spacing:.06em; }
+.chart-legend i { display:inline-block; width:7px; height:7px; border-radius:50%;
+  margin-right:5px; vertical-align:0; }
+/* Trends fold into one strip: open on desktop, closed by default on a
+   phone (render() decides), so four charts no longer push the runs list
+   ~450px down a small screen. The summary wears the h2 look. */
+.trends { margin:30px 0 16px; }
+.trends > summary { list-style:none; cursor:pointer; display:flex;
+  align-items:baseline; gap:12px; flex-wrap:wrap; padding-bottom:8px;
+  border-bottom:1px solid var(--line); margin-bottom:12px; user-select:none; }
+.trends > summary::-webkit-details-marker { display:none; }
+.trends > summary::before { content:"▸"; color:var(--accent); font-size:11px;
+  width:10px; }
+.trends[open] > summary::before { content:"▾"; }
+.trends:not([open]) > summary { margin-bottom:0; }
+.trends-title { font-size:12px; font-weight:600; text-transform:uppercase;
+  letter-spacing:.16em; color:var(--accent); }
+.trends-hint { font-size:11px; color:var(--dim); letter-spacing:.04em; }
+.trends > summary:hover .trends-hint { color:var(--muted); }
+.trends > summary:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
 
 /* Leaderboard rows. One shared grid template for the header and every row
    so columns line up; .col-score marks the Kick eff./Route % pair, kept as
@@ -319,6 +340,7 @@ a.ability:hover { color:var(--accent); border-bottom-color:var(--accent); }
   .filter { display:flex; }
   .select-wrap { flex:1; min-width:0; }
   select { width:100%; min-width:0; min-height:42px; font-size:14px; }
+  .trends-order { display:none; }
   .board { min-width:0; }
   .wrap { padding:0; }
   .run-head { display:flex; flex-wrap:wrap; align-items:center; gap:6px;
@@ -451,6 +473,11 @@ let sortKey = "start_ts", sortDir = -1;
 // Which row's detail block is open, keyed by the run's (start_ts|zone)
 // identity so it survives re-sorting. One at a time.
 let openKey = null;
+// Whether the Trends strip is expanded: open on a desktop, folded on a
+// phone-width screen. Kept here because render() rewrites #app wholesale,
+// which would otherwise reset the <details> on every sort or filter.
+let trendsOpen = !(typeof window !== "undefined" && window.matchMedia
+  && window.matchMedia("(max-width:720px)").matches);
 
 // Affix ids -> names, as they appear in a report's run.affixes (the
 // numeric ids from the CHALLENGE_MODE_START log line). Unknown ids still
@@ -729,6 +756,11 @@ function sparklineChart(pts, opts) {
   }
   flush();
 
+  // opts.dot(p) -> a color gives every valid point its own dot on top of
+  // the line (the key-level chart colors each run by its result).
+  const dots = opts.dot ? pts.filter(p => p.y != null).map(p =>
+    `<circle cx="${sx(p.x).toFixed(1)}" cy="${sy(p.y).toFixed(1)}" r="1.9" fill="${opts.dot(p)}"/>`
+  ).join("") : "";
   const marks = segs.map(seg => seg.length > 1
     ? `<polyline points="${seg.map(pt => `${pt.x.toFixed(1)},${pt.y.toFixed(1)}`).join(" ")}"
         fill="none" stroke="${opts.color}" stroke-width="1.5"
@@ -739,7 +771,7 @@ function sparklineChart(pts, opts) {
   const last = valid[valid.length - 1].y;
   return `<div class="chart">
     <div class="chart-title">${esc(opts.title)}<span class="chart-value">${esc(opts.fmt(last))}</span></div>
-    <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" class="chart-svg">${marks}</svg>
+    <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" class="chart-svg">${marks}${dots}</svg>${opts.legend || ""}
   </div>`;
 }
 
@@ -747,22 +779,34 @@ function sparklineChart(pts, opts) {
 // (by the dungeon <select>) and sorted chronologically ascending -- the
 // caller (render()) owns that ordering; this function never re-sorts, so
 // it can't drift from the board's own (independent, user-clickable) sort.
+// The first chart used to be the cumulative timed rate, which flattens
+// into a straight line after a dozen runs and says nothing. Key level per
+// run, each dot colored by its result, shows both progression and where
+// the timer started winning.
+const RESULT_COLORS = { timed: "var(--good)", over: "var(--warn)",
+  abandoned: "var(--dim)", done: "var(--dim)" };
 function chartsSection(sorted) {
-  let timedSoFar = 0;
-  const timedPts = sorted.map((r, i) => {
-    if (r.timed) timedSoFar++;
-    return { x: i, y: Math.round(1000 * timedSoFar / (i + 1)) / 10 };
+  const levelPts = sorted.map((r, i) => {
+    const lv = Number(r.level);
+    return { x: i, y: r.level != null && r.level !== "" && Number.isFinite(lv) ? lv : null,
+             state: resultState(r) };
   });
   const deathPts = sorted.map((r, i) => ({ x: i, y: r.deaths || 0 }));
   const adherPts = sorted.map((r, i) => ({ x: i, y: r.adherence_pct }));
   const kickPts = sorted.map((r, i) => ({ x: i, y: r.kick_efficiency_pct }));
-  return `<h2>Trends</h2>
+  const legend = `<div class="chart-legend"><span><i style="background:var(--good)"></i>timed</span>`
+    + `<span><i style="background:var(--warn)"></i>over</span>`
+    + `<span><i style="background:var(--dim)"></i>abandoned</span></div>`;
+  return `<details class="trends"${trendsOpen ? " open" : ""}>
+  <summary><span class="trends-title">Trends</span><span class="trends-hint">key level · deaths · route · kicks<span class="trends-order">, oldest → newest</span></span></summary>
   <div class="charts">
-    ${sparklineChart(timedPts, { title: "Timed rate (cumulative)", color: "var(--good)", fmt: v => v + "%" })}
+    ${sparklineChart(levelPts, { title: "Key level", color: "var(--line)", fmt: v => "+" + v,
+                                 dot: p => RESULT_COLORS[p.state], legend })}
     ${sparklineChart(deathPts, { title: "Deaths per run", color: "var(--bad)", fmt: v => String(v) })}
     ${sparklineChart(adherPts, { title: "Route adherence", color: "var(--accent)", fmt: v => v + "%" })}
     ${sparklineChart(kickPts, { title: "Kick efficiency", color: "var(--warn)", fmt: v => v + "%" })}
-  </div>`;
+  </div>
+  </details>`;
 }
 
 function render() {
@@ -853,6 +897,10 @@ document.getElementById("app").addEventListener("click", ev => {
   const row = ev.target.closest(".run-row[data-key]");
   if (row) toggle(row.getAttribute("data-key"));
 });
+// "toggle" doesn't bubble, hence the capture-phase listener.
+document.getElementById("app").addEventListener("toggle", ev => {
+  if (ev.target.classList && ev.target.classList.contains("trends")) trendsOpen = ev.target.open;
+}, true);
 document.getElementById("app").addEventListener("change", ev => {
   if (ev.target.id === "dungeon-filter") { dungeon = ev.target.value; render(); }
 });

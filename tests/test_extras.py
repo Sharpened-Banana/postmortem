@@ -193,7 +193,11 @@ class TestHistoryCharts:
         html = render_index(rows)
         assert "chartsSection" in html
         assert "sparklineChart" in html
-        assert "<h2>Trends</h2>" in html
+        assert '<details class="trends"${trendsOpen ? " open" : ""}>' in html
+        assert '<span class="trends-title">Trends</span>' in html
+        # the flat cumulative timed-rate line is gone; key level replaced it
+        assert "Timed rate (cumulative)" not in html
+        assert 'title: "Key level"' in html
         assert 'class="charts"' in html
         assert "chart-svg" in html
 
@@ -267,6 +271,46 @@ class TestHistoryChartsRuntime:
         # back to "not enough data" instead of crashing or plotting zeros
         assert filtered_b.count("not enough data") == 2
         assert filtered_b != unfiltered
+
+    def test_trends_strip_open_without_a_phone_viewport(self, tmp_path):
+        # node has no window/matchMedia: that is the desktop default
+        out = _run_chart_js(tmp_path, [_row()])
+        assert '<details class="trends" open>' in out
+
+    def test_trends_strip_folds_on_a_phone_viewport(self, tmp_path):
+        out = _run_chart_js(tmp_path, [_row()], extra_js=(
+            "trendsOpen = false;\n"))
+        assert '<details class="trends">' in out
+        assert out.count("<svg") == 4  # still built, just folded
+
+    def test_phone_media_query_starts_folded(self, tmp_path):
+        html = render_index([_row()])
+        script = _extract_inline_script(html)
+        harness = (
+            "class El { constructor() { this.innerHTML = ''; this.textContent = '[]'; }"
+            " addEventListener() {} }\n"
+            "const __els = { 'runs-data': new El(), 'app': new El() };\n"
+            "global.document = { getElementById: id => __els[id] };\n"
+            "global.window = { matchMedia: q => ({ matches: q === '(max-width:720px)' }) };\n"
+            + script + "\nconsole.log(String(trendsOpen));\n"
+        )
+        js = tmp_path / "phone.js"
+        js.write_text(harness, encoding="utf-8")
+        result = subprocess.run([NODE, str(js)], capture_output=True, text=True, timeout=30)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "false"
+
+    def test_key_level_chart_colors_each_run_by_result(self, tmp_path):
+        rows = [
+            _row(start_ts=1, level=8, margin_ms=60_000, file="a.json"),
+            _row(start_ts=2, level=9, timed=False, threshold=0, margin_ms=-30_000, file="b.json"),
+            _row(start_ts=3, level=10, completed=False, timed=None, file="c.json"),
+        ]
+        out = _run_chart_js(tmp_path, rows)
+        assert 'fill="var(--good)"' in out
+        assert 'fill="var(--warn)"' in out
+        assert 'fill="var(--dim)"' in out
+        assert '<span class="chart-value">+10</span>' in out
 
     def test_missing_values_do_not_crash_runtime(self, tmp_path):
         rows = [
