@@ -203,6 +203,35 @@ class TestSegmenter:
         assert runs[0].truncated and not runs[0].completed
         assert runs[1].completed and not runs[1].truncated
 
+    def test_a_reload_after_truncation_is_not_a_second_completed_run(self):
+        """After the cap drops a run, a mid-key /reload re-logs the same
+        key's START and the real END then closed that stub as a fake
+        second "completed, timed" run."""
+        b = LogBuilder()
+        b.start(0)
+        for i in range(20):
+            b.player_damage(i + 1, DPS1, b.npc_guid(1, "1"), "X", 1, "S", 10)
+        b.start(50)  # /reload: same key
+        b.player_damage(51, DPS1, b.npc_guid(1, "1"), "X", 1, "S", 10)
+        b.end(100)
+        runs = list(segment_runs(iter_events(b.lines), max_run_events=5))
+        assert len(runs) == 1
+        assert runs[0].truncated and not runs[0].completed
+
+    def test_same_key_after_a_real_key_transition_is_a_new_run(self):
+        """The phantom END WoW writes before every real new key means the
+        next same-key START is a genuine rerun, not a /reload."""
+        b = LogBuilder()
+        b.start(0)
+        for i in range(20):
+            b.player_damage(i + 1, DPS1, b.npc_guid(1, "1"), "X", 1, "S", 10)
+        b.raw(199, "CHALLENGE_MODE_END,2830,0,0,0,0.000000,0.000000")
+        b.start(200)
+        b.end(250)
+        runs = list(segment_runs(iter_events(b.lines), max_run_events=5))
+        assert len(runs) == 2
+        assert runs[1].completed and not runs[1].truncated
+
     def test_the_truncated_flag_leaves_the_segmenter(self):
         """Nothing outside segmenter.py could see this flag until
         2026-09-11, so a size-capped run reached the user labelled
@@ -261,6 +290,27 @@ class TestLikelyAbandoned:
         (run,) = list(segment_runs(iter_events(b.lines)))
         assert not run.completed
         assert not run.likely_abandoned
+
+    def test_leaving_the_instance_closes_the_run(self):
+        """An abandoned key with no later CHALLENGE_MODE_START used to stay
+        open to the end of the log and swallow everything after it."""
+        b = LogBuilder()
+        b.start(0)  # default instance=2830
+        b.player_damage(5, DPS1, b.npc_guid(1, "1"), "X", 1, "S", 10)
+        b.raw(20, 'ZONE_CHANGE,1519,"Stormwind City",1')
+        for i in range(50):  # an evening of open-world combat afterwards
+            b.player_damage(30 + i, DPS1, b.npc_guid(2, "2"), "Boar", 1, "S", 10)
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        assert not run.completed and run.likely_abandoned
+        assert run.events[-1].name == "ZONE_CHANGE"
+        assert run.wall_duration == 20
+
+    def test_a_completed_key_is_untouched_by_leaving_afterwards(self):
+        b = build_run_log()
+        b.raw(1000, 'ZONE_CHANGE,1519,"Stormwind City",1')
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        assert run.completed and not run.truncated
+        assert all(ev.name != "ZONE_CHANGE" for ev in run.events)
 
     def test_zone_change_to_the_same_instance_is_not_flagged(self):
         # e.g. a multi-floor dungeon's own internal transition that still
@@ -411,6 +461,30 @@ class TestDaylightSaving:
     def test_an_ordinary_day_is_unchanged(self):
         import calendar
 
-        event = self._parse_at("America/New_York", "8/30/2026 22:06:30.452-7  ZONE_CHANGE,1,\"x\",1")
+        event = self._parse_at("America/New_York", "8/30/2026 22:06:30.452-4  ZONE_CHANGE,1,\"x\",1")
         assert event is not None
         assert event.ts == calendar.timegm((2026, 8, 31, 2, 6, 30, 0, 1, 0)) + 0.452
+
+    def test_the_fall_back_hour_does_not_run_time_backwards(self):
+        """01:00-01:59 happens twice on 2026-11-01 in New York. The offset
+        suffix says which copy a line is in; it used to be parsed and
+        thrown away, and mktime(isdst=-1) put both copies on one clock, so
+        01:59:59-4 followed by 01:00:01-5 went back ~an hour."""
+        before = self._parse_at("America/New_York", "11/1/2026 01:59:59.000-4  ZONE_CHANGE,1,\"x\",1")
+        after = self._parse_at("America/New_York", "11/1/2026 01:00:01.000-5  ZONE_CHANGE,1,\"x\",1")
+        assert before is not None and after is not None
+        assert after.ts - before.ts == 2.0
+
+    def test_the_offset_wins_over_the_machines_zone(self):
+        """A log parsed somewhere else (the site's server runs in UTC) still
+        lands on the real instant the line was written."""
+        import calendar
+
+        event = self._parse_at("UTC", "8/30/2026 22:06:30.000-7  ZONE_CHANGE,1,\"x\",1")
+        assert event.ts == calendar.timegm((2026, 8, 31, 5, 6, 30, 0, 1, 0))
+
+    def test_a_line_without_an_offset_still_uses_the_local_clock(self):
+        import calendar
+
+        event = self._parse_at("America/New_York", "8/30/2026 22:06:30.000  ZONE_CHANGE,1,\"x\",1")
+        assert event.ts == calendar.timegm((2026, 8, 31, 2, 6, 30, 0, 1, 0))

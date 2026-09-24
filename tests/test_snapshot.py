@@ -121,9 +121,15 @@ class TestFindMarkers:
         pair, so nothing here may be mistaken for a keybind press."""
         runs = list(segment_runs(parse_file(REAL_LOG)))
         assert len(runs) == 2
+        # Read from the whole log: the pair is logged after the first key
+        # was abandoned (its ZONE_CHANGE out closes that run) and before the
+        # next START, so it belongs to neither run.
         headers = [
-            ev.ts for run in runs for ev in run.events if ev.name == "COMBAT_LOG_VERSION"
+            ev.ts for ev in parse_file(REAL_LOG) if ev.name == "COMBAT_LOG_VERSION"
         ]
+        assert find_markers(
+            [ev for ev in parse_file(REAL_LOG) if ev.name == "COMBAT_LOG_VERSION"]
+        ) == []
         assert len(headers) == 4
         gaps = [b - a for a, b in zip(headers, headers[1:])]
         assert min(gaps) > MARKER_GAP_S

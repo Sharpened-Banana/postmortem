@@ -407,6 +407,56 @@ def compute_stats(
         for key in [k for k in open_cc if k[0] == target_guid]:
             close_cc(key[0], key[1], end_ts)
 
+    def read_victim(ev, adv, dst_guid: str, dst_name: str, pull_idx,
+                    sp, amount: int, source: str):
+        """Read a damaged group member's own HP and position off the hit.
+
+        Only a line whose advanced block describes the VICTIM can be read;
+        returns the victim's HP after the hit, or None when this line
+        carries someone else's block. That distinction matters for melee:
+        in real logs SWING_DAMAGE's block describes the ATTACKER and only
+        the SWING_DAMAGE_LANDED line that follows it carries the victim's
+        (all 207 melee hits on players in the real fixture
+        abandoned_key_instance_mismatch.txt are shaped that way). Reading
+        only SWING_DAMAGE, as this did until 2026-09-23, meant no melee hit
+        ever fed close calls, recap hp_after or the movement track.
+        """
+        if adv is None or adv.info_guid != dst_guid:
+            return None
+        hp_left = adv.current_hp
+        # the victim's own position is in the advanced block of
+        # every hit against them "for free" -- including the
+        # killing blow, so a death now has a nearby position
+        # sample even though it isn't a cast (see WP-A4: this
+        # is what powers the map overlay's death markers).
+        if adv.pos_x or adv.pos_y:
+            track_movement(dst_guid, ev.ts, adv.pos_x, adv.pos_y,
+                           adv.ui_map_id)
+        if adv.max_hp:
+            hp_pct = hp_left / adv.max_hp
+            prev_pct = last_hp_pct.get(dst_guid)
+            if hp_pct < CLOSE_CALL_HP_PCT and (
+                prev_pct is None or prev_pct >= CLOSE_CALL_HP_PCT
+            ):
+                # whether this hit was actually survived isn't
+                # knowable yet -- UNIT_DIED for the player, if
+                # it happens, hasn't been seen. _tag_close_calls
+                # drops any entry too close to that player's
+                # real death after the full pass finishes.
+                stats.close_calls.append({
+                    "ts": ev.ts,
+                    "player_guid": dst_guid,
+                    "player": dst_name,
+                    "pull": pull_idx,
+                    "hp_pct": round(hp_pct * 100, 1),
+                    "spell": sp.spell_name if sp else "Melee",
+                    "spell_id": sp.spell_id if sp else 0,
+                    "amount": amount,
+                    "source": source,
+                })
+            last_hp_pct[dst_guid] = hp_pct
+        return hp_left
+
     def track_movement(guid: str, ts: float, x: float, y: float, ui_map_id: int) -> None:
         prev = last_position.get(guid)
         if prev is not None:
@@ -590,7 +640,26 @@ def compute_stats(
             continue
 
         damage = parse_damage(event)
-        if damage is not None and name != "SWING_DAMAGE_LANDED":
+        if damage is not None and name == "SWING_DAMAGE_LANDED":
+            # Never totalled (it repeats the SWING_DAMAGE line before it),
+            # but it is the only melee line whose advanced block is the
+            # victim's -- see read_victim(). Read the HP here and backfill
+            # the matching recap entry the SWING_DAMAGE line left blank.
+            if is_group_player(dst_flags):
+                hp_left = read_victim(event, adv, dst_guid, dst_name, pull_idx,
+                                      None, damage.amount, src_name or src_guid)
+                buf = recent_damage.get(dst_guid)
+                if hp_left is not None and buf:
+                    source = src_name or src_guid
+                    for entry in reversed(buf):
+                        if event.ts - entry["ts"] > 1.0:
+                            break  # not this swing's pair
+                        if entry["spell_id"] == 0 and entry["source"] == source:
+                            if entry["hp_after"] is None:
+                                entry["hp_after"] = hp_left
+                            break
+            continue
+        if damage is not None:
             source_player = resolve_source(src_guid, src_name, src_flags)
             if source_player is not None and is_hostile_npc(dst_flags):
                 # amount + absorbed: damage that landed on an enemy's
@@ -636,40 +705,8 @@ def compute_stats(
                 if is_hostile_npc(src_flags):
                     stats.enemy_damage_taken[src_name or src_guid] += damage.amount
                 buf = recent_damage.setdefault(dst_guid, deque(maxlen=10))
-                hp_left = None
-                if adv is not None and adv.info_guid == dst_guid:
-                    hp_left = adv.current_hp
-                    # the victim's own position is in the advanced block of
-                    # every hit against them "for free" -- including the
-                    # killing blow, so a death now has a nearby position
-                    # sample even though it isn't a cast (see WP-A4: this
-                    # is what powers the map overlay's death markers).
-                    if adv.pos_x or adv.pos_y:
-                        track_movement(dst_guid, event.ts, adv.pos_x, adv.pos_y,
-                                       adv.ui_map_id)
-                    if adv.max_hp:
-                        hp_pct = hp_left / adv.max_hp
-                        prev_pct = last_hp_pct.get(dst_guid)
-                        if hp_pct < CLOSE_CALL_HP_PCT and (
-                            prev_pct is None or prev_pct >= CLOSE_CALL_HP_PCT
-                        ):
-                            # whether this hit was actually survived isn't
-                            # knowable yet -- UNIT_DIED for the player, if
-                            # it happens, hasn't been seen. _tag_close_calls
-                            # drops any entry too close to that player's
-                            # real death after the full pass finishes.
-                            stats.close_calls.append({
-                                "ts": event.ts,
-                                "player_guid": dst_guid,
-                                "player": dst_name,
-                                "pull": pull_idx,
-                                "hp_pct": round(hp_pct * 100, 1),
-                                "spell": sp.spell_name if sp else "Melee",
-                                "spell_id": sp.spell_id if sp else 0,
-                                "amount": damage.amount,
-                                "source": src_name or src_guid,
-                            })
-                        last_hp_pct[dst_guid] = hp_pct
+                hp_left = read_victim(event, adv, dst_guid, dst_name, pull_idx,
+                                      sp, damage.amount, src_name or src_guid)
                 buf.append({
                     "ts": event.ts,
                     "spell": sp.spell_name if sp else "Melee",
@@ -982,6 +1019,14 @@ def compute_stats(
                 if applied_ts is not None:
                     # held until it's clear whether a SPELL_DISPEL follows
                     # (see pending_removals)
+                    if key in pending_removals:
+                        # An earlier removal of this debuff is still held:
+                        # it ran out, re-landed and came off again inside
+                        # the grace window. No dispel claimed the earlier
+                        # one before this, so it ran out -- overwriting it
+                        # silently lost that "expired" count.
+                        pending_removals.pop(key)
+                        stats.dispel_outcomes[key[1]]["expired"] += 1
                     pending_removals[key] = (event.ts, applied_ts)
                 start = open_buffs.pop(key, None)
                 if start is not None:

@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from conftest import DPS1, LogBuilder
+from conftest import DPS1, HOSTILE, LogBuilder
 
 from postmortem.analysis.interrupt_learning import (
     DEFAULT_MIN_ATTEMPTS,
@@ -207,3 +207,72 @@ class TestThreshold:
         strict = obs.to_interrupt_data(min_attempts=10)["spells"]
         assert set(lenient) == {"1", "2"}
         assert set(strict) == {"2"}
+
+
+class TestStaleOpenCasts:
+    """A cast stopped by a stun, LoS or its caster's death logs no SUCCESS
+    and no INTERRUPT, so it stayed "open" forever and every later use of an
+    interrupt ability on that enemy counted as a survived attempt."""
+
+    def _kick_with(self, b, t, spell_id, spell_name, target=MOB):
+        guid, name, flags, _ = DPS1
+        adv = LogBuilder._advanced(guid)
+        b.raw(t, f'SPELL_CAST_SUCCESS,{guid},"{name}",{flags:#06x},0x0,'
+                 f'{target},"Test Mob",0x0a48,0x0,{spell_id},"{spell_name}",0x1,{adv}')
+
+    def test_a_cast_stopped_unlogged_expires(self):
+        def build(b):
+            # stunned mid-cast: no SUCCESS, no INTERRUPT, ever
+            b.npc_cast_start(10, MOB, "Test Mob", 900810, "Kickable Bolt")
+            for t in (30, 45, 60, 75):
+                _kick_attempt(b, t)
+        obs = observe_events(_events(build))
+        assert 900810 not in obs.spells
+
+    def test_expiry_uses_the_spells_observed_cast_time(self):
+        def build(b):
+            # a 2s cast seen completing once...
+            b.npc_cast_start(10, MOB, "Test Mob", 900811, "Quick Bolt")
+            b.npc_cast_success(12, MOB, "Test Mob", 900811, "Quick Bolt")
+            # ...so a kick 4s into a later one (under the 5s default) is
+            # against a cast that already ended unlogged
+            b.npc_cast_start(20, MOB, "Test Mob", 900811, "Quick Bolt")
+            _kick_attempt(b, 24)
+        obs = observe_events(_events(build))
+        assert 900811 not in obs.spells
+
+    def test_a_dead_casters_cast_is_closed(self):
+        def build(b):
+            b.npc_cast_start(10, MOB, "Test Mob", 900812, "Kickable Bolt")
+            b.unit_died(11, MOB, "Test Mob", HOSTILE)
+            _kick_attempt(b, 11.5)  # a kick queued at the corpse
+        obs = observe_events(_events(build))
+        assert 900812 not in obs.spells
+
+    def test_a_kick_inside_the_cast_still_counts(self):
+        def build(b):
+            b.npc_cast_start(10, MOB, "Test Mob", 900813, "Immune Bolt")
+            _kick_attempt(b, 12)
+        obs = observe_events(_events(build))
+        assert obs.spells[900813]["survived_attempts"] == 1
+
+    def test_avengers_shield_is_not_a_kick_attempt(self):
+        """Thrown on cooldown at whatever the tank is fighting; landing on
+        a casting enemy says nothing about the cast being immune."""
+        def build(b):
+            t = 10.0
+            for _ in range(DEFAULT_MIN_ATTEMPTS + 2):
+                b.npc_cast_start(t, MOB, "Test Mob", 900814, "Kickable Bolt")
+                self._kick_with(b, t + 0.5, 31935, "Avenger's Shield")
+                b.npc_cast_success(t + 1.0, MOB, "Test Mob", 900814, "Kickable Bolt")
+                t += 10
+        obs = observe_events(_events(build))
+        assert "900814" not in obs.to_interrupt_data()["spells"]
+
+    def test_an_avengers_shield_interrupt_is_still_proof(self):
+        def build(b):
+            b.npc_cast_start(10, MOB, "Test Mob", 900815, "Kickable Bolt")
+            b.interrupt(10.5, DPS1, MOB, "Test Mob", 31935, "Avenger's Shield",
+                        900815, "Kickable Bolt")
+        obs = observe_events(_events(build))
+        assert obs.to_interrupt_data()["spells"]["900815"]["interruptible"] is True

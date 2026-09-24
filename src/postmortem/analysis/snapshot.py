@@ -195,7 +195,31 @@ def _scan(events: list[Event], start_ts: float, end_ts: float) -> _Scan:
         damage = parse_damage(ev)
         if damage is not None:
             if name == "SWING_DAMAGE_LANDED":
-                continue  # duplicates SWING_DAMAGE (see combatlog.events)
+                # Duplicates SWING_DAMAGE (see combatlog.events), so it is
+                # never a second hit -- but it is the only melee line whose
+                # advanced block is the VICTIM's: SWING_DAMAGE's describes
+                # the attacker. Until 2026-09-23 this line was skipped
+                # outright, so the tank's HP series never saw a melee hit,
+                # the thing a tank snapshot most needs. Take the HP sample
+                # here and give it to the hit the SWING_DAMAGE line logged.
+                if dst_is_player:
+                    before = len(scan.hp.get(dst_guid, ()))
+                    note_unit(ev, dst_guid, dst_name)
+                    samples = scan.hp.get(dst_guid, ())
+                    if len(samples) > before:
+                        source = src_name or src_guid
+                        # the pair is logged together (a few ms apart at
+                        # most); the bound keeps a LANDED whose SWING fell
+                        # outside the slice from rewriting an older hit
+                        for hit in reversed(scan.hits):
+                            if ev.ts - hit["ts"] > 1.0:
+                                break
+                            if hit["player_guid"] == dst_guid \
+                                    and hit["spell_id"] == 0 \
+                                    and hit["source"] == source:
+                                hit["hp_pct"] = round(samples[-1][1], 1)
+                                break
+                continue
             if dst_is_player:
                 note_unit(ev, dst_guid, dst_name)
                 sp = spell_info(ev)

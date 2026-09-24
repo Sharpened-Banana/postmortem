@@ -61,7 +61,6 @@ KNOWN_INTERRUPT_ABILITY_IDS: frozenset[int] = frozenset({
     2139,    # Counterspell (mage)
     6552,    # Pummel (warrior)
     19647,   # Spell Lock (warlock pet)
-    31935,   # Avenger's Shield (paladin)
     47528,   # Mind Freeze (death knight)
     57994,   # Wind Shear (shaman)
     93985,   # Skull Bash (druid)
@@ -71,6 +70,34 @@ KNOWN_INTERRUPT_ABILITY_IDS: frozenset[int] = frozenset({
     187707,  # Muzzle (hunter)
     347008,  # Axe Toss (warlock pet)
 })
+
+#: Spells that interrupt but are cast on cooldown for their damage/threat,
+#: not as a decision to stop a cast. Avenger's Shield (Protection paladin)
+#: is thrown every time it comes up, at whatever the tank is fighting, so
+#: in a real key it constantly lands on enemies that happen to be casting
+#: something -- and each such throw read as "somebody tried to kick this
+#: and it shrugged it off". That is not evidence the cast is immune, and it
+#: was enough on its own to mark kickable spells uninterruptible. Its
+#: landed SPELL_INTERRUPTs still count as proof of interruptible (pass 1
+#: reads every interrupt, whatever did it); only its casts stop counting
+#: as attempts.
+ROTATIONAL_INTERRUPT_IDS: frozenset[int] = frozenset({
+    31935,   # Avenger's Shield (paladin)
+})
+
+#: How long an enemy hard cast with no logged outcome is still assumed to
+#: be in progress, when the log has never shown that spell's cast time.
+#: A cast stopped by a stun, a knock, line of sight or its caster moving
+#: logs no SUCCESS and no INTERRUPT, so without an expiry it stayed "open"
+#: forever and every later interrupt-ability use on that enemy counted as
+#: a survived attempt against a cast that had ended long before. Enemy
+#: hard casts in a key are a few seconds at most.
+DEFAULT_MAX_CAST_S = 5.0
+
+#: Slack added to a spell's longest observed cast time (START to SUCCESS)
+#: before an open cast of it is considered over -- haste/slow effects make
+#: the same spell's cast vary a little.
+CAST_TIME_SLACK_S = 0.5
 
 #: Default number of failed attempts, with zero successes ever, before a
 #: spell is called uninterruptible. Two is enough to clear the common
@@ -203,16 +230,44 @@ def observe_events(events: Iterable[Event]) -> InterruptObservations:
         if stopped is not None:
             obs.add_interrupted(stopped.spell_id, stopped.spell_name)
 
+    interrupt_ability_ids -= ROTATIONAL_INTERRUPT_IDS
+
+    # Each spell's longest observed cast time (START to its SUCCESS), so an
+    # open cast can be expired at the point it must have ended somehow.
+    cast_time: dict[int, float] = {}
+    started: dict[str, tuple[int, float]] = {}
+    for event in events:
+        if not is_hostile_npc(event.source_flags):
+            continue
+        if event.name == "SPELL_CAST_START":
+            sp = spell_info(event)
+            if sp is not None:
+                started[event.source_guid] = (sp.spell_id, event.ts)
+        elif event.name == "SPELL_CAST_SUCCESS":
+            sp = spell_info(event)
+            began = started.pop(event.source_guid, None)
+            if sp is not None and began is not None and began[0] == sp.spell_id:
+                took = event.ts - began[1]
+                if took > cast_time.get(sp.spell_id, 0.0):
+                    cast_time[sp.spell_id] = took
+
+    def max_age(spell_id: int) -> float:
+        known = cast_time.get(spell_id)
+        return known + CAST_TIME_SLACK_S if known else DEFAULT_MAX_CAST_S
+
     # Pass 2: an interrupt ability used on an enemy that was mid-hard-cast,
     # with no interrupt landing on that enemy around then, means the cast
     # shrugged it off.
-    open_casts: dict[str, tuple[int, str]] = {}
+    open_casts: dict[str, tuple[int, str, float]] = {}
     for event in events:
         name = event.name
         if name == "SPELL_CAST_START" and is_hostile_npc(event.source_flags):
             sp = spell_info(event)
             if sp is not None:
-                open_casts[event.source_guid] = (sp.spell_id, sp.spell_name)
+                open_casts[event.source_guid] = (sp.spell_id, sp.spell_name, event.ts)
+        elif name == "UNIT_DIED":
+            # a dead caster's cast is over; nothing logs that it stopped
+            open_casts.pop(event.dest_guid, None)
         elif name == "SPELL_INTERRUPT":
             open_casts.pop(event.dest_guid, None)
         elif name == "SPELL_CAST_SUCCESS":
@@ -227,6 +282,10 @@ def observe_events(events: Iterable[Event]) -> InterruptObservations:
             target_cast = open_casts.get(event.dest_guid)
             if target_cast is None:
                 continue  # kicked something that wasn't casting; says nothing
+            if event.ts - target_cast[2] > max_age(target_cast[0]):
+                # the cast ended unlogged (stun, LoS, ...) long ago
+                open_casts.pop(event.dest_guid, None)
+                continue
             if any(abs(ts - event.ts) <= CORRELATION_WINDOW_S and guid == event.dest_guid
                    for ts, guid in landed):
                 continue  # it worked; already counted as interrupted above

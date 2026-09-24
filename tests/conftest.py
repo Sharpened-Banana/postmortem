@@ -180,14 +180,33 @@ class LogBuilder:
         The builder had no swing emitter at all until 2026-09-11, which is
         why nothing caught every modern swing being parsed with the legacy
         layout -- see the comment in events.py's parse_damage().
+
+        The advanced block follows real logs: SWING_DAMAGE carries the
+        ATTACKER's block, SWING_DAMAGE_LANDED the VICTIM's (every melee
+        line in tests/fixtures/real_logs/abandoned_key_instance_mismatch.txt
+        is shaped that way). This builder used to give SWING_DAMAGE the
+        victim's block -- the same wrong model the analysis held, so no
+        synthetic test could notice melee never reaching close calls or
+        recap hp_after. `hp` is the block owner's HP. Use melee_hit() for
+        the real two-line pair.
         """
-        adv = self._advanced(dst, hp=hp)
+        adv = self._advanced(dst if landed else src, hp=hp)
         base = amount if base_amount is None else base_amount
         name = "SWING_DAMAGE_LANDED" if landed else "SWING_DAMAGE"
         self.raw(t, f'{name},{src},"{src_name}",{src_flags:#06x},0x0,'
                     f'{dst},"{dst_name}",{dst_flags:#06x},0x0,{adv},'
                     f'{amount},{base},{overkill},1,0,0,{absorbed},'
                     f'{"1" if crit else "nil"},nil,nil')
+
+    def melee_hit(self, t, src, src_name, src_flags, dst, dst_name, dst_flags,
+                  amount, attacker_hp=500000, victim_hp=500000, **kw):
+        """A melee hit as a real client logs it: SWING_DAMAGE (attacker's
+        advanced block) then SWING_DAMAGE_LANDED (victim's block), same
+        damage suffix on both."""
+        self.swing_damage(t, src, src_name, src_flags, dst, dst_name,
+                          dst_flags, amount, hp=attacker_hp, **kw)
+        self.swing_damage(t, src, src_name, src_flags, dst, dst_name,
+                          dst_flags, amount, hp=victim_hp, landed=True, **kw)
 
     def player_damage(self, t, player, dst, dst_name, spell_id, spell_name,
                       amount, overkill=0, crit=False):
