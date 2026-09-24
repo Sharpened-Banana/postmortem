@@ -122,6 +122,35 @@ class TestHistoryIndex:
         assert "indexed 1 runs" in capsys.readouterr().out
         assert (out_dir / "index.html").exists()
 
+    @staticmethod
+    def _nested_report(root):
+        sub = root / "2026" / "week-3"
+        sub.mkdir(parents=True)
+        (sub / "run.json").write_text(json.dumps({"run": {"zone": "Z", "start_ts": 1}}))
+        (sub / "run.html").write_text("<html></html>")
+
+    def test_link_to_a_report_in_a_subfolder_keeps_its_folder(self, tmp_path):
+        """collect_reports scans subfolders, but the link used to be the
+        bare file name, which 404s from an index at the top."""
+        self._nested_report(tmp_path)
+        assert collect_reports(tmp_path)[0]["html"] == "2026/week-3/run.html"
+        page = build_index(tmp_path).read_text()
+        assert '"html": "2026/week-3/run.html"' in page
+
+    def test_link_is_relative_to_an_index_written_elsewhere(self, tmp_path):
+        reports = tmp_path / "reports"
+        self._nested_report(reports)
+        (tmp_path / "site").mkdir()
+        out = build_index(reports, tmp_path / "site" / "index.html")
+        assert '"html": "../reports/2026/week-3/run.html"' in out.read_text()
+
+    def test_link_is_url_encoded(self, tmp_path):
+        sub = tmp_path / "keys #3"
+        sub.mkdir()
+        (sub / "run.json").write_text(json.dumps({"run": {"zone": "Z", "start_ts": 1}}))
+        (sub / "run.html").write_text("<html></html>")
+        assert collect_reports(tmp_path)[0]["html"] == "keys%20%233/run.html"
+
     def test_ignores_foreign_json(self, tmp_path):
         (tmp_path / "other.json").write_text('{"hello": "world"}')
         assert collect_reports(tmp_path) == []

@@ -1,0 +1,246 @@
+"""The report pages must survive whatever an uploaded report says.
+
+Every field in a report came out of a combat log, and on the public site
+that upload is anonymous -- so a value the analyzer only ever writes as
+0..3 can arrive as -1, and a float can arrive as Infinity. These tests
+run the pages' own JS under node (the harness in test_report_escaping.py)
+and check that one bad row or value degrades that value, not the page.
+"""
+
+from __future__ import annotations
+
+import json
+import shutil
+
+import pytest
+
+from postmortem.report.html import render_html
+from postmortem.report.index import render_index
+
+from test_report_escaping import _extract_script, _run, real_report  # noqa: F401 (fixture)
+
+NODE = shutil.which("node")
+needs_node = pytest.mark.skipif(NODE is None, reason="needs node to run the page's own JS")
+
+
+def _feed_row(**over) -> dict:
+    row = {
+        "file": "run.json", "html": "run.html",
+        "zone": "Ara-Kara", "level": 12,
+        "start_ts": 1_700_000_000, "date": "2023-11-14 12:00",
+        "completed": True, "timed": True, "duration_ms": 1_500_000,
+        "wall_s": 1500.0, "deaths": 2, "death_cost_s": 10.0,
+        "forces_pct": 100.0, "adherence_pct": 90.0,
+        "kick_efficiency_pct": 80.0, "affixes": [],
+        "party": [{"name": "Tank-Realm", "class": "WARRIOR", "role": "tank"}],
+        "threshold": 2, "margin_ms": 60_000, "deaths_detail": [],
+    }
+    row.update(over)
+    return row
+
+
+def _embedded_json(page: str, data_id: str) -> str:
+    start = page.index(f'id="{data_id}"')
+    start = page.index(">", start) + 1
+    end = page.index("</script>", start)
+    return page[start:end]
+
+
+@needs_node
+class TestChestThresholdClamp:
+    @pytest.mark.parametrize("threshold", [-1, 7, 2.5, "abc", 1e308])
+    def test_feed_renders_with_an_out_of_range_threshold(self, threshold):
+        """A threshold of -1 reached "★".repeat(-1), which throws -- and one
+        such row blanked the /runs feed for every visitor."""
+        rows = [_feed_row(threshold=threshold), _feed_row(zone="Other", start_ts=1_700_000_100)]
+        out = _run(_extract_script(render_index(rows)), "runs-data",
+                   json.dumps(rows), extra="render();")
+        assert "Ara-Kara" in out and "Other" in out
+        assert "★★★★" not in out
+
+    def test_run_report_clamps_the_upgrade_label(self, real_report):
+        report = json.loads(json.dumps(real_report))
+        report["timer"] = {"par_ms": 1_800_000, "threshold_2_ms": 1_440_000,
+                           "threshold_3_ms": 1_080_000, "margin_ms": 5000,
+                           "threshold": -1}
+        out = _run(_extract_script(render_html(report)), "report-data",
+                   json.dumps(report), extra="render();")
+        assert "beat timer by" in out
+        assert "+-1" not in out
+
+
+@needs_node
+class TestSectionTitles:
+    def test_score_in_a_heading_stays_out_of_the_id_and_index(self, real_report):
+        """The dispel heading carries its score in a trailing <span>, and
+        it used to end up in the section id (so the id, and the remembered
+        collapsed state, changed per report) and in the phone index chip."""
+        report = json.loads(json.dumps(real_report))
+        report["dispel_efficiency"] = {
+            "overall_efficiency_pct": 85,
+            "schools": [{"school": "magic", "dispellers": [], "efficiency_pct": None,
+                         "spells": [], "dispelled": 0, "expired": 0}],
+        }
+        out = _run(_extract_script(render_html(report)), "report-data",
+                   json.dumps(report), extra="render();")
+        assert '<a href="#sec-dispel-efficiency">Dispel efficiency</a>' in out
+        assert 'id="sec-dispel-efficiency"' in out
+        assert "85% overall" in out  # still shown in the heading itself
+        assert "sec-dispel-efficiency-85" not in out
+
+
+def _attr_values(html: str, tag: str, name: str) -> list[str]:
+    """Attribute values as the browser would read them back (entities
+    decoded), which is what the pages' listeners compare against."""
+    from html.parser import HTMLParser
+
+    found: list[str] = []
+
+    class P(HTMLParser):
+        def handle_starttag(self, t, attrs):
+            if t == tag:
+                found.extend(v for k, v in attrs if k == name and v is not None)
+
+    P(convert_charrefs=True).feed(html)
+    return found
+
+
+@needs_node
+class TestBracketsDisplayOnce:
+    """deTag() escapes < and > up front, and esc() then escaped the & of
+    that entity again, so "A<b>" displayed as "A&lt;b&gt;"."""
+
+    ZONE = "Rise <&> Fall"
+
+    def _feed(self, extra="render();"):
+        rows = [_feed_row(zone=self.ZONE,
+                          party=[{"name": "A<b>", "class": "WARRIOR", "role": "tank"}])]
+        return rows, _run(_extract_script(render_index(rows)), "runs-data",
+                          json.dumps(rows), extra=extra)
+
+    def test_feed_shows_the_original_characters(self):
+        import re
+        _rows, out = self._feed()
+        assert 'title="A&lt;b&gt;' in out
+        assert 'title="Rise &lt;&amp;&gt; Fall"' in out
+        assert ">Rise &lt;&amp;&gt; Fall</option>" in out
+        # The read-back attributes are escaped in full on purpose (attr());
+        # everything the visitor actually sees is escaped exactly once.
+        shown = re.sub(r'(value|data-key)="[^"]*"', "", out)
+        assert "&amp;lt;" not in shown and "&amp;amp;" not in shown
+
+    def test_feed_filter_and_row_toggle_still_round_trip(self):
+        _rows, out = self._feed()
+        (value,) = [v for v in _attr_values(out, "option", "value") if v]
+        (key,) = _attr_values(out, "div", "data-key")
+        _rows, out = self._feed(
+            extra=f"dungeon = {json.dumps(value)}; openKey = {json.dumps(key)}; render();")
+        assert "open full report" in out, "the row did not open from its own data-key"
+        assert "no runs yet" not in out, "the dungeon filter matched nothing"
+
+    def test_run_report_shows_the_original_characters(self, real_report):
+        report = json.loads(json.dumps(real_report))
+        report["players"][0]["name"] = "A<b>&c"
+        out = _run(_extract_script(render_html(report)), "report-data",
+                   json.dumps(report), extra="render();")
+        assert "A&lt;b&gt;&amp;c" in out
+        assert "&amp;lt;" not in out
+
+
+class TestNegativeTimes:
+    """Floor division put the sign in the wrong place: -65s printed as
+    "-2:55" (text report) and "-2:-5" (both pages)."""
+
+    CASES = {-65: "-1:05", -5: "-0:05", 65: "1:05", 3725: "1:02:05", -3725: "-1:02:05"}
+
+    def test_text_report(self):
+        from postmortem.report.text import _fmt_time
+        for seconds, want in self.CASES.items():
+            assert _fmt_time(seconds) == want
+        assert _fmt_time(float("inf")) == "?"
+
+    @needs_node
+    @pytest.mark.parametrize("page", ["report", "index"])
+    def test_pages(self, page, real_report):
+        values = list(self.CASES) + ["Infinity", "'abc'"]
+        probe = ('document.getElementById("app").innerHTML = ['
+                 + ", ".join(str(v) for v in values) + '].map(mmss).join("|");')
+        if page == "report":
+            out = _run(_extract_script(render_html(real_report)), "report-data",
+                       json.dumps(real_report), extra=probe)
+        else:
+            out = _run(_extract_script(render_index([])), "runs-data", "[]", extra=probe)
+        got = out.strip().split("|")
+        want = list(self.CASES.values())
+        if page == "index":  # the feed's mmss has no hours column
+            want = ["-1:05", "-0:05", "1:05", "62:05", "-62:05"]
+        assert got == want + ["?", "?"]
+
+
+def _strict(payload: str):
+    def reject(constant):
+        raise AssertionError(f"non-standard JSON constant {constant!r} in the page")
+    return json.loads(payload, parse_constant=reject)
+
+
+def _templates() -> dict[str, str]:
+    from postmortem.report.html import _TEMPLATE
+    from postmortem.report.index import _INDEX_TEMPLATE
+    from postmortem.report.snapshot import _TEMPLATE as _SNAPSHOT_TEMPLATE
+    return {"report": _TEMPLATE, "index": _INDEX_TEMPLATE, "snapshot": _SNAPSHOT_TEMPLATE}
+
+
+class TestTemplateEscapes:
+    """The templates are ordinary (non-raw) Python strings holding CSS and
+    JS, so a single backslash is a Python escape: CSS's " \\2605" became
+    the octal escape \\260 -- a degree sign -- followed by "5"."""
+
+    def test_stealable_star_survives_as_a_css_escape(self):
+        page = render_html({"run": {"zone": "Z"}})
+        assert 'content: " \\2605"' in page
+        assert "°5" not in page
+
+    @pytest.mark.parametrize("name", ["report", "index", "snapshot"])
+    def test_no_control_characters_in_the_template(self, name):
+        text = _templates()[name]
+        bad = sorted({hex(ord(c)) for c in text if ord(c) < 0x20 and c not in "\n\t"})
+        assert not bad, f"{name} template has escape-damaged control chars: {bad}"
+
+    @pytest.mark.parametrize("name", ["report", "index", "snapshot"])
+    def test_css_content_escapes_are_intact(self, name):
+        """A mangled \\NNN escape lands as a Latin-1 character (\\260 -> the
+        degree sign), which no generated-content string here means to use."""
+        import re
+        for value in re.findall(r'content:\s*"([^"]*)"', _templates()[name]):
+            assert not any(0x80 <= ord(c) <= 0xFF for c in value), \
+                f"{name}: CSS content {value!r} looks like a swallowed escape"
+
+
+class TestNonFiniteNumbers:
+    """Python's json.dumps writes Infinity/NaN, which JSON.parse rejects,
+    so one non-finite float anywhere in a report blanked the whole page."""
+
+    def test_feed_payload_is_strict_json(self):
+        rows = [_feed_row(forces_pct=float("inf"), wall_s=float("nan"),
+                          party=[{"name": "x", "dps": float("-inf")}])]
+        parsed = _strict(_embedded_json(render_index(rows), "runs-data"))
+        assert parsed[0]["forces_pct"] is None
+        assert parsed[0]["wall_s"] is None
+        assert parsed[0]["party"][0]["dps"] is None
+
+    def test_report_payload_is_strict_json_and_keeps_the_script_guard(self):
+        report = {"run": {"zone": "</script>", "wall_duration_s": float("inf")},
+                  "pulls": [(1, float("nan"))]}
+        payload = _embedded_json(render_html(report), "report-data")
+        parsed = _strict(payload.replace("<\\/", "</"))
+        assert parsed["run"]["wall_duration_s"] is None
+        assert parsed["pulls"] == [[1, None]]
+        assert "</script>" not in payload
+
+    @needs_node
+    def test_feed_renders_in_node_with_a_non_finite_value(self):
+        rows = [_feed_row(forces_pct=float("inf"))]
+        page = render_index(rows)
+        out = _run(_extract_script(page), "runs-data",
+                   _embedded_json(page, "runs-data"), extra="render();")
+        assert "Ara-Kara" in out

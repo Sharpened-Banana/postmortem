@@ -2,15 +2,32 @@
 
 from __future__ import annotations
 
+import math
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from .decode import MDTDecodeError
 from .dungeon_data import DungeonData
 
 
 class RouteError(ValueError):
     pass
+
+
+def _finite(v: Any) -> Any:
+    """``v`` unchanged, unless it is a non-finite float.
+
+    Both wire formats can carry one (AceSerializer's "1.#INF", a CBOR
+    float64), and every number in a route ends up in an int(): int(inf)
+    is an OverflowError and int(nan) a ValueError, neither of which is the
+    MDTDecodeError the CLI and the desktop app catch -- so a doctored paste
+    was a raw traceback. No real route holds one, so reject it as bad
+    route data.
+    """
+    if isinstance(v, float) and not math.isfinite(v):
+        raise MDTDecodeError(f"route data contains a non-finite number ({v})")
+    return v
 
 
 def _int_keyed(table: Any) -> dict[int, Any]:
@@ -25,6 +42,7 @@ def _int_keyed(table: Any) -> dict[int, Any]:
         for k, v in table.items():
             if isinstance(k, bool):
                 continue
+            _finite(k)
             if isinstance(k, (int, float)) and float(k).is_integer():
                 out[int(k)] = v
             elif isinstance(k, str) and k.lstrip("-").isdigit():
@@ -104,12 +122,13 @@ class Route:
                     continue
                 if isinstance(k, str) and not k.lstrip("-").isdigit():
                     continue  # other metadata keys
+                _finite(k)  # outside the try: MDTDecodeError is a ValueError
                 try:
                     enemy_idx = int(k)
                 except (TypeError, ValueError):
                     continue
                 clones = sorted(
-                    int(c) for c in _int_keyed(v).values()
+                    int(_finite(c)) for c in _int_keyed(v).values()
                     if isinstance(c, (int, float))
                 )
                 if clones:
@@ -119,7 +138,7 @@ class Route:
         dungeon_idx = value.get("currentDungeonIdx")
         return cls(
             name=str(preset.get("text") or "unnamed route"),
-            dungeon_idx=int(dungeon_idx) if isinstance(dungeon_idx, (int, float)) else None,
+            dungeon_idx=int(_finite(dungeon_idx)) if isinstance(dungeon_idx, (int, float)) else None,
             week=_maybe_int(preset.get("week")),
             difficulty=_maybe_int(preset.get("difficulty")),
             pulls=pulls,
@@ -184,5 +203,5 @@ def _maybe_int(v: Any) -> Optional[int]:
     if isinstance(v, bool) or v is None:
         return None
     if isinstance(v, (int, float)):
-        return int(v)
+        return int(_finite(v))
     return None

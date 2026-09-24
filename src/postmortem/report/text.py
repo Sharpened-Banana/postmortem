@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 
 def _fmt_time(seconds: float | None) -> str:
-    if seconds is None:
+    if seconds is None or not math.isfinite(seconds):
         return "?"
-    seconds = int(seconds)
-    m, s = divmod(seconds, 60)
+    # Format the magnitude and put the sign in front: divmod floors, so
+    # -65 used to come out as "-2:55" rather than "-1:05".
+    whole = int(seconds)
+    sign = "-" if whole < 0 else ""
+    m, s = divmod(abs(whole), 60)
     if m >= 60:
         h, m = divmod(m, 60)
-        return f"{h}:{m:02d}:{s:02d}"
-    return f"{m}:{s:02d}"
+        return f"{sign}{h}:{m:02d}:{s:02d}"
+    return f"{sign}{m}:{s:02d}"
 
 
 def _pull_label(pull: object) -> str:

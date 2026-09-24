@@ -276,6 +276,16 @@ def _keep_report_json_last(conn: sqlite3.Connection) -> None:
                 "AND tbl_name = 'runs' AND sql IS NOT NULL")]
             seq = conn.execute(
                 "SELECT seq FROM sqlite_sequence WHERE name = 'runs'").fetchone()
+            # The check at the end must only fail on violations the rebuild
+            # caused. An unscoped foreign_key_check covers the whole file,
+            # and the site keeps its accounts/sessions tables in it too, so
+            # one orphan anywhere (or a players row left by a delete made
+            # with foreign keys off) rolled the rebuild back -- and since it
+            # runs on every open, every Store() then raised. So check only
+            # the tables that reference runs, and compare with what was
+            # already broken before we started.
+            children = _tables_referencing(conn, "runs")
+            fk_before = _fk_violations(conn, children)
             names = ", ".join(f'"{c[1]}"' for c in ordered)
             conn.execute("DROP TABLE IF EXISTS runs_reordered")
             conn.execute(f"CREATE TABLE runs_reordered ({', '.join(defs)})")
@@ -289,7 +299,7 @@ def _keep_report_json_last(conn: sqlite3.Connection) -> None:
                 conn.execute(
                     "INSERT INTO sqlite_sequence (name, seq) VALUES ('runs', "
                     "MAX(?, COALESCE((SELECT MAX(id) FROM runs), 0)))", (seq[0],))
-            bad = conn.execute("PRAGMA foreign_key_check").fetchall()
+            bad = sorted(_fk_violations(conn, children) - fk_before)
             if bad:
                 raise sqlite3.IntegrityError(f"foreign key check failed: {bad[:3]}")
             conn.commit()
@@ -299,6 +309,27 @@ def _keep_report_json_last(conn: sqlite3.Connection) -> None:
     finally:
         if fk_on:
             conn.execute("PRAGMA foreign_keys = ON")
+
+
+def _tables_referencing(conn: sqlite3.Connection, parent: str) -> list[str]:
+    """Every table with a foreign key whose parent is ``parent``."""
+    out = []
+    for (name,) in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'").fetchall():
+        fks = conn.execute(f'PRAGMA foreign_key_list("{name}")').fetchall()
+        if any(str(fk[2]).lower() == parent.lower() for fk in fks):
+            out.append(name)
+    return out
+
+
+def _fk_violations(conn: sqlite3.Connection, tables: list[str]) -> set[tuple]:
+    """``PRAGMA foreign_key_check`` rows for ``tables`` only, as a set of
+    plain tuples (table, rowid, parent, fk index) so two calls compare."""
+    out: set[tuple] = set()
+    for name in tables:
+        for row in conn.execute(f'PRAGMA foreign_key_check("{name}")').fetchall():
+            out.add(tuple(row))
+    return out
 
 
 def _backfill_timed_verdict(conn: sqlite3.Connection) -> None:

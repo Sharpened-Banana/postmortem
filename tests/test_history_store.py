@@ -423,3 +423,29 @@ class TestReportJsonLast:
         conn.commit()
         assert conn.execute("SELECT COUNT(*) FROM players").fetchone()[0] == 0
         conn.close()
+
+    def test_pre_existing_orphans_do_not_block_the_rebuild(self, tmp_path, report):
+        """The site keeps its accounts/sessions tables in this same file, so
+        an orphan anywhere in it used to fail the whole-database
+        foreign_key_check, roll the rebuild back, and make every Store()
+        open raise. Only violations the rebuild itself caused may fail it."""
+        db_path = tmp_path / "runs.db"
+        ingest(report, db_path)
+        conn = sqlite3.connect(str(db_path))
+        # An unrelated table with an orphaned row, like a session left
+        # behind by a deleted account.
+        conn.execute("CREATE TABLE accounts (id INTEGER PRIMARY KEY)")
+        conn.execute("CREATE TABLE sessions (id INTEGER PRIMARY KEY, "
+                     "account_id INTEGER REFERENCES accounts(id))")
+        conn.execute("INSERT INTO sessions (account_id) VALUES (999)")
+        # And a players row whose run was deleted with foreign keys off.
+        conn.execute("INSERT INTO players (run_id, name) VALUES (999, 'Ghost')")
+        conn.execute("ALTER TABLE runs ADD COLUMN later_col TEXT")
+        conn.commit()
+        conn.close()
+
+        with Store(db_path) as store:
+            assert store.get_report(1)["run"]["zone"] == report["run"]["zone"]
+        assert self._cols(db_path)[-1] == "report_json"
+        with Store(db_path) as store:  # and the next open is fine too
+            assert store.query_runs()
