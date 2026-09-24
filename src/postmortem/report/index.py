@@ -507,9 +507,9 @@ const AFFIX_KIND = {
 // with spaces removed so "Death Knight" / "DeathKnight" / "DEATHKNIGHT"
 // all resolve.
 const CLASS_COLORS = {
-  deathknight: "#C41E3A", demonhunter: "#A330C9", druid: "#FF7C0A",
+  deathknight: "#D55D71", demonhunter: "#B75ED5", druid: "#FF7C0A",
   evoker: "#33937F", hunter: "#AAD372", mage: "#3FC7EB", monk: "#00FF98",
-  paladin: "#F48CBA", priest: "#FFFFFF", rogue: "#FFF468", shaman: "#0070DD",
+  paladin: "#F48CBA", priest: "#FFFFFF", rogue: "#FFF468", shaman: "#2484E2",
   warlock: "#8788EE", warrior: "#C69B3A",
 };
 const classColor = c => c ? CLASS_COLORS[String(c).toLowerCase().replace(/[^a-z]/g, "")] : null;

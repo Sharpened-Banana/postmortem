@@ -423,7 +423,7 @@ class TestLeaderboardRuntime:
     def test_party_split_by_role_and_class_colored(self, tmp_path):
         out = _run_chart_js(tmp_path, self._rows())
         # realm stripped, class color applied
-        assert 'style="color:#C41E3A" title="Zimengdk-Realm · Death Knight">Zimengdk</span>' in out
+        assert 'style="color:#D55D71" title="Zimengdk-Realm · Death Knight">Zimengdk</span>' in out
         assert 'style="color:#F48CBA" title="Bbpaladin-Realm · Paladin">Bbpaladin</span>' in out
         assert 'style="color:#3FC7EB" title="Qing-Realm · Mage">Qing</span>' in out
         # unknown class/role: uncolored, still listed (after DPS), not dropped
