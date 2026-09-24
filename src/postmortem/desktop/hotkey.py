@@ -86,7 +86,7 @@ def parse_combo(text: str) -> Combo:
     if not (len(key) == 1 or key in NAMED_KEYS):
         raise ValueError(f"unknown key {key!r}")
     if not mods:
-        raise ValueError("a hotkey needs at least one modifier (e.g. ctrl+alt+s)")
+        raise ValueError("a hotkey needs at least one modifier (e.g. ctrl+shift+f9)")
     return Combo(frozenset(mods), key)
 
 
@@ -130,9 +130,19 @@ class WindowsBackend(Backend):
         if combo.key in _WIN_NAMED_VK:
             vk = _WIN_NAMED_VK[combo.key]
         else:
-            scan = user32.VkKeyScanW(ord(combo.key))
-            if scan == -1:
-                return False, f"no virtual key for {combo.key!r}"
+            # VkKeyScanW returns a SHORT, -1 for "no key on this layout".
+            # ctypes assumes int unless told, so that -1 could come back
+            # as 65535, fail the check, and register virtual key 0xFF --
+            # a hotkey that "works" and never fires. Declare the real
+            # type, and compare the low 16 bits either way.
+            try:
+                user32.VkKeyScanW.restype = ctypes.c_short
+                user32.VkKeyScanW.argtypes = [ctypes.c_wchar]
+            except (AttributeError, TypeError):
+                pass
+            scan = int(user32.VkKeyScanW(combo.key))
+            if scan & 0xFFFF == 0xFFFF:
+                return False, f"no virtual key for {combo.key!r} on this keyboard layout"
             vk = scan & 0xFF
         mods = _MOD_NOREPEAT
         for m in combo.modifiers:

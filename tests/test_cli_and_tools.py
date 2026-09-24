@@ -523,6 +523,27 @@ class TestRecorderRotationAndCatchUp:
         assert [r.zone for r in completed] == ["The Blinding Vale"]
         assert completed[0].completed and completed[0].keystone_level == 7
 
+    def test_rotates_away_from_a_deleted_log(self, tmp_path):
+        # A deleted current log made its stat() raise, which _maybe_rotate
+        # treated as "no change" -- so a newer session log was never
+        # picked up for the rest of the watch.
+        logs = tmp_path / "Logs"; logs.mkdir()
+        old = logs / "WoWCombatLog-090226_050445.txt"
+        old.write_text("", encoding="utf-8")
+        rec = Recorder(log_path=old, out_dir=tmp_path / "runs",
+                       rotation_check_s=0.0, echo=lambda s: None)
+        fh = rec._open()
+        old.unlink()
+        new = logs / "WoWCombatLog-090226_085516.txt"
+        new.write_text("", encoding="utf-8")
+        handle = rec._maybe_rotate(fh)
+        try:
+            assert handle is not None, "rotation refused after the log was deleted"
+            assert rec.log_path == new
+        finally:
+            if handle is not None:
+                handle.close()
+
     def test_catches_up_on_a_key_that_finished_before_the_watch_began(self, tmp_path):
         log = tmp_path / "WoWCombatLog.txt"
         b = LogBuilder()
@@ -545,6 +566,50 @@ class TestRecorderRotationAndCatchUp:
         # the replayed slice is a normal recording: its own START..END
         text = completed[0].path.read_text(encoding="utf-8")
         assert text.count("CHALLENGE_MODE_START") == 1 and "CHALLENGE_MODE_END" in text
+
+    def test_catch_up_keeps_a_reloaded_key_whole(self, tmp_path):
+        # A mid-key /reload re-logs the same key's START. The resume scan
+        # used to let that second START overwrite the first, so catch-up
+        # replayed only the post-reload half and asked already_processed()
+        # with the reload's timestamp -- never the stored run's start_ts --
+        # re-uploading a truncated key on every Watch Live start.
+        log = tmp_path / "WoWCombatLog.txt"
+        b = LogBuilder()
+        b.start(0, zone="The Blinding Vale", instance=2859, cm=584, lvl=7)
+        self._filler(b, 5)
+        b.start(50, zone="The Blinding Vale", instance=2859, cm=584, lvl=7)
+        self._filler(b, 55)
+        b.end(100, success=1, lvl=7, ms=971306, instance=2859)
+        log.write_text(b.text(), encoding="utf-8")
+
+        from postmortem.recorder import _start_identity
+        first_start = next(ln for ln in b.text().splitlines(keepends=True)
+                           if "CHALLENGE_MODE_START" in ln)
+        _, first_ts = _start_identity(first_start)
+
+        asked, completed = [], []
+        rec = Recorder(
+            log_path=log, out_dir=tmp_path / "runs",
+            already_processed=lambda zone, ts: asked.append((zone, ts)) or False,
+            on_run_complete=completed.append, echo=lambda s: None,
+        )
+        rec.watch(stop_after_runs=1)
+        assert asked == [("The Blinding Vale", first_ts)]
+        text = completed[0].path.read_text(encoding="utf-8")
+        assert text.count("CHALLENGE_MODE_START") == 2
+
+    def test_resume_point_of_a_reloaded_in_progress_key_is_its_first_start(self, tmp_path):
+        log = tmp_path / "WoWCombatLog.txt"
+        b = LogBuilder()
+        b.start(0, zone="The Blinding Vale", instance=2859, cm=584, lvl=7)
+        self._filler(b, 5)
+        b.start(50, zone="The Blinding Vale", instance=2859, cm=584, lvl=7)
+        self._filler(b, 55)
+        log.write_text(b.text(), encoding="utf-8")
+        rec = Recorder(log_path=log, out_dir=tmp_path / "runs", echo=lambda s: None)
+        with open(log, "r", encoding="utf-8") as fh:
+            offset, in_progress, _ = rec._find_resume_point(fh)
+        assert in_progress and offset == 0
 
     def test_does_not_replay_a_key_the_history_already_has(self, tmp_path):
         import threading

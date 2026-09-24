@@ -142,7 +142,7 @@ function defaultSettings() {
     snapshot_before_s: 120,
     snapshot_after_s: 60,
     update_channel: "stable",
-    snapshot_hotkey: "ctrl+alt+s",
+    snapshot_hotkey: "ctrl+shift+f9",
     snapshot_focus: "healer",
     snapshot_character: "",
   };
@@ -690,15 +690,27 @@ async function onStartWatch() {
   }
 }
 
+// A watch busy on a key (catch-up analysis and upload can take minutes)
+// does not stop at once: stop_watch() then answers {stopping: true} and
+// the backend emits "stopped" when the thread has really exited. Until
+// then the screen stays in its watching state -- flipping to idle here
+// made it look stopped while keys were still being uploaded, and let
+// Start be pressed against a watch that was still running.
 async function onStopWatch() {
   wt.stopBtn.disabled = true;
+  let stillStopping = false;
   try {
-    await api().stop_watch();
+    const result = await api().stop_watch();
+    stillStopping = !!(result && result.stopping);
   } catch (e) {
     showBanner(wt.errorBanner, "Unexpected error while stopping: " + describeError(e));
   } finally {
     wt.stopBtn.disabled = false;
-    setWatchingUI(false);
+    if (stillStopping) {
+      setWatchStatus(true, "Stopping… finishing the run it is on");
+    } else {
+      setWatchingUI(false);
+    }
   }
 }
 
@@ -885,8 +897,13 @@ window.onWatchEvent = function (event) {
       setWatchingUI(false);
       setWatchStatus(false, "Stopped (unexpectedly)");
       break;
+    case "stopping":
+      addWatchLogEntry("info", `Stopping… ${esc(event.detail || "")}`);
+      setWatchStatus(true, "Stopping… finishing the run it is on");
+      break;
     case "stopped":
       addWatchLogEntry("info", "Stopped.");
+      setWatchingUI(false);
       setWatchStatus(false, "Stopped.");
       break;
   }
@@ -1157,7 +1174,7 @@ async function applySettingsToForm() {
   set.snapshotBefore.value = s.snapshot_before_s ?? 120;
   set.snapshotAfter.value = s.snapshot_after_s ?? 60;
   set.updateChannel.value = s.update_channel === "beta" ? "beta" : "stable";
-  set.snapshotHotkey.value = s.snapshot_hotkey ?? "ctrl+alt+s";
+  set.snapshotHotkey.value = s.snapshot_hotkey ?? "ctrl+shift+f9";
   validateHotkeyField();
   set.snapshotFocus.value = s.snapshot_focus || "healer";
   set.snapshotCharacter.value = s.snapshot_character || "";
@@ -1336,7 +1353,7 @@ async function onSyncKeystoneGuru() {
 // screen: pressing shift+` used to type "~" (a bare key, refused) --
 // 2026-09-18. Physical key from event.code so Shift never changes the
 // key's name; modifiers from the event flags. Backspace/Delete clears,
-// Tab and Escape behave normally, and typing "ctrl+alt+s" by hand still
+// Tab and Escape behave normally, and typing "ctrl+shift+f9" by hand still
 // works because a lone letter with no modifier is left to the text field.
 const HOTKEY_CODE_NAMES = {
   Backquote: "`", Minus: "-", Equal: "=", BracketLeft: "[", BracketRight: "]",

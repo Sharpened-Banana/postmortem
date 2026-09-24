@@ -122,7 +122,7 @@ the run's reports for every marker found.
 
 `desktop/hotkey.py`. Since the app already tails the log while the user
 plays, it can take the keypress itself: a system-wide hotkey (setting
-`snapshot_hotkey`, default `ctrl+alt+s`, empty disables) is registered
+`snapshot_hotkey`, default `ctrl+shift+f9`, empty disables) is registered
 when Watch Live starts -- `RegisterHotKey` on Windows, an `NSEvent`
 global key-down monitor on macOS (needs the Input Monitoring
 permission; the app asks once and reports the hint in the watch log).
@@ -132,7 +132,15 @@ path with `source="hotkey"`. **Nothing about combat logging changes**;
 this is why it is the primary trigger and the addon keybind the
 fallback.
 
-The hotkey must include a modifier (`ctrl+``, `ctrl+alt+s`); a bare key
+The default was `ctrl+alt+s` until 2026-09-23. On Windows AltGr is
+reported as Ctrl+Alt, so that combo also fired on AltGr+S -- an ordinary
+character on Polish, German and other layouts. The new default is a
+function key, the same physical key on every layout (on a Mac keyboard
+the F-keys may need `fn` held). A saved value equal to the old default is
+moved to the new one once on load (`config._migrate_settings`); any other
+saved value is left alone, and so is `ctrl+alt+s` chosen again later.
+
+The hotkey must include a modifier (`ctrl+``, `ctrl+shift+f9`); a bare key
 would also type into the game. Settings checks this as you type
 (`validate_hotkey`) and `save_settings` refuses one that fails, so the
 key never reaches Watch Live only to fail there. The Watch screen shows

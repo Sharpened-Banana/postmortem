@@ -106,6 +106,16 @@ def _parse_start_key(line: str) -> tuple[Optional[int], Optional[int]]:
     return _to_int(m.group(3)), _to_int(m.group(4))
 
 
+def _same_start_key(first: str, second: str) -> bool:
+    """Whether two CHALLENGE_MODE_START lines are the same key (same
+    challenge_map_id AND keystone_level) -- i.e. ``second`` is a mid-key
+    ``/reload`` re-logging ``first``'s start. An unparseable map id is
+    never "the same", so a garbled line can't merge two real keys."""
+    map_a, level_a = _parse_start_key(first)
+    map_b, level_b = _parse_start_key(second)
+    return map_a is not None and map_a == map_b and level_a == level_b
+
+
 def _start_identity(line: str) -> tuple[Optional[str], Optional[float]]:
     """``(zone, start_ts)`` for a CHALLENGE_MODE_START line -- the same
     identity the run history de-duplicates on (``Store.ingest``: zone +
@@ -453,9 +463,19 @@ class Recorder:
             candidate = newest_combat_log(self.log_path.parent)
             if candidate is None or candidate.resolve() == self.log_path.resolve():
                 return None
-            if candidate.stat().st_mtime <= self.log_path.stat().st_mtime:
-                return None
+            candidate_mtime = candidate.stat().st_mtime
         except OSError:
+            return None
+        try:
+            current_mtime = self.log_path.stat().st_mtime
+        except OSError:
+            # The current log is gone (deleted, or moved by a log-cleanup
+            # tool). Treating that stat error as "no change" -- as the
+            # block above does for the candidate -- refused rotation for
+            # good, so a WoW restart's fresh WoWCombatLog-*.txt was never
+            # picked up. A missing log is older than any log that exists.
+            current_mtime = float("-inf")
+        if candidate_mtime <= current_mtime:
             return None
         if self._current is not None:
             self._close_run(completed=False)
@@ -563,8 +583,19 @@ class Recorder:
                 next_progress = offset + _SCAN_PROGRESS_EVERY
                 self._notify_scan_progress(offset, total)
             if _START_RE.search(line):
-                pending_start_offset = offset
-                pending_start_line = line
+                # The same same-key rule _feed() applies: a mid-key /reload
+                # re-logs the SAME key's CHALLENGE_MODE_START, and that is
+                # a continuation, not a new key. Overwriting the pending
+                # offset with the reload's START made catch-up replay only
+                # the part after the reload, and asked already_processed()
+                # with the reload's timestamp rather than the key's real
+                # start -- which never matches the stored run, so the
+                # truncated key was re-analyzed and re-uploaded on every
+                # Watch Live start. Keep the first START of the key.
+                if not (pending_start_line is not None
+                        and _same_start_key(pending_start_line, line)):
+                    pending_start_offset = offset
+                    pending_start_line = line
             elif _END_RE.search(line):
                 if (pending_start_offset is not None and pending_start_line
                         and not _is_phantom_end(line)):

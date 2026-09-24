@@ -172,7 +172,7 @@ def check_for_update(fetcher: Fetcher = _default_fetcher,
     payload = fetcher(_RELEASES_URL)
     if not payload:
         return None
-    payload = _newest_desktop_release(payload, channel=channel)
+    payload = _newest_desktop_release(payload, channel=channel, asset_name=asset_name)
     if payload is None:
         return None
     tag = payload.get("tag_name", "")
@@ -185,25 +185,41 @@ def check_for_update(fetcher: Fetcher = _default_fetcher,
     download_url = asset.get("browser_download_url") if asset else None
     if not download_url:
         return None
+    # The SHA256SUMS-<os>.txt published beside the assets, if this
+    # release has one. None means "this release predates digests", which
+    # is not the same as "the digest did not match" -- see verify_digest().
+    # A sums file that IS listed but could not be read is a third case: it
+    # is reported in sha256_error, never folded into None, so the update
+    # fails closed (desktop/api.py refuses to install it).
+    digest_error: Optional[str] = None
+    try:
+        sha256 = _expected_digest(payload, asset_name)
+    except DigestUnavailable as exc:
+        sha256, digest_error = None, str(exc)
     return {
         "tag": tag,
         "download_url": download_url,
         "notes": payload.get("body") or "",
-        # The SHA256SUMS-<os>.txt published beside the assets, if this
-        # release has one. None means "this release predates digests",
-        # which is not the same as "the digest did not match" -- see
-        # verify_digest().
-        "sha256": _expected_digest(payload, asset_name),
+        "sha256": sha256,
+        "sha256_error": digest_error,
     }
 
 
-def _newest_desktop_release(payload, channel: str = "stable") -> Optional[dict]:
+def _newest_desktop_release(payload, channel: str = "stable",
+                            asset_name: Optional[str] = None) -> Optional[dict]:
     """The published (non-draft) desktop release with the highest
     build_key out of a GitHub release listing: ``alpha-desktop-N`` only
     on the stable channel, ``beta-desktop-N.M`` too on the beta one. A
     single release dict is accepted too, so a caller holding one
     ``/releases/<x>`` payload gets the same treatment. None when
-    nothing in it qualifies."""
+    nothing in it qualifies.
+
+    With ``asset_name``, only releases that actually carry that asset
+    count. The release workflow creates the release first and attaches
+    each platform's build as its job finishes, so a newer release whose
+    Windows (or macOS) job failed or is still running used to win here
+    and then be dropped for lacking the asset -- hiding an older release
+    that WAS a valid upgrade for this platform."""
     releases = payload if isinstance(payload, list) else [payload]
     best: Optional[dict] = None
     best_key: tuple[int, int] = (-1, -1)
@@ -214,9 +230,23 @@ def _newest_desktop_release(payload, channel: str = "stable") -> Optional[dict]:
         if channel != "beta" and tag_channel(tag) != "stable":
             continue
         key = build_key(tag)
-        if key is not None and key > best_key:
-            best, best_key = release, key
+        if key is None or key <= best_key:
+            continue
+        if asset_name is not None and not any(
+            isinstance(a, dict) and a.get("name") == asset_name
+            and a.get("browser_download_url")
+            for a in release.get("assets") or []
+        ):
+            continue
+        best, best_key = release, key
     return best
+
+
+class DigestUnavailable(ValueError):
+    """The release lists a sums file, but no usable digest for this
+    platform's asset could be read from it (network error, a URL off this
+    project's releases, no well-formed line). Kept apart from "no sums
+    file at all" on purpose -- see _expected_digest."""
 
 
 def _expected_digest(payload: dict, asset_name: str) -> Optional[str]:
@@ -224,20 +254,29 @@ def _expected_digest(payload: dict, asset_name: str) -> Optional[str]:
     has no sums file. Reads the same GitHub API payload the asset list
     came from, so it is as trustworthy as the URL itself -- which is the
     point: an attacker who can substitute the archive cannot also change
-    what the API says its digest should be."""
+    what the API says its digest should be.
+
+    Only an ABSENT sums asset means "no digest". This used to return None
+    as well for a sums file that was listed but could not be fetched or
+    parsed, and verify_digest(None) accepts -- so a flaky network, or
+    anyone able to break that one small download, switched the check off
+    (it failed open). Those cases raise ``DigestUnavailable`` now."""
     sums_name = f"SHA256SUMS-{'Windows' if sys.platform == 'win32' else 'macOS'}.txt"
     asset = next(
         (a for a in payload.get("assets", []) if a.get("name") == sums_name), None,
     )
-    url = asset.get("browser_download_url") if asset else None
-    if not url or not _is_trusted_download_url(url):
+    if asset is None:
         return None
+    url = asset.get("browser_download_url")
+    if not url or not _is_trusted_download_url(url):
+        raise DigestUnavailable(
+            f"{sums_name} is not hosted on this project's GitHub releases")
     req = urllib.request.Request(url, headers={"User-Agent": "postmortem-desktop"})
     try:
         with urllib.request.urlopen(req, timeout=10, context=_SSL_CONTEXT) as resp:
             body = resp.read(_MAX_SUMS_BYTES).decode("utf-8", "replace")
-    except (urllib.error.URLError, OSError, ValueError):
-        return None
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        raise DigestUnavailable(f"could not download {sums_name}: {exc}") from exc
     for line in body.splitlines():
         parts = line.split()
         # "<hex>  <name>", the shasum(1) format the workflow writes.
@@ -245,7 +284,7 @@ def _expected_digest(payload: dict, asset_name: str) -> Optional[str]:
             digest = parts[0].strip().lower()
             if len(digest) == 64 and all(c in "0123456789abcdef" for c in digest):
                 return digest
-    return None
+    raise DigestUnavailable(f"{sums_name} has no valid checksum for {asset_name}")
 
 
 def verify_digest(path: Path, expected: Optional[str]) -> None:
@@ -508,6 +547,49 @@ def _current_install_root() -> Path:
     return exe.parent  # Windows: .../Postmortem/Postmortem.exe -> Postmortem/
 
 
+def install_location_writable(root: Optional[Path] = None) -> bool:
+    """Whether this account can do the swap the relaunch helper does:
+    move the install aside and a new one into its place.
+
+    An "all users" Windows install lands in Program Files, which a normal
+    user can read but not change. The helper runs as that user, so the
+    move aside fails every time, it relaunches the old build, and the UI
+    had already said the update succeeded. Asking first lets
+    start_update() say what to do instead. Probes by actually creating a
+    file, since permission bits and ACLs don't answer this reliably.
+    Both the folder the install sits in (the move needs it) and, on
+    Windows, the install folder itself (moving a directory there needs
+    delete rights on it). Never inside a macOS .app bundle: writing into
+    a signed bundle, even briefly, is not something to do casually."""
+    try:
+        root = root if root is not None else _current_install_root()
+    except (OSError, IndexError):
+        return False
+    probes = [root.parent] + ([root] if sys.platform == "win32" else [])
+    for folder in probes:
+        try:
+            fd, path = tempfile.mkstemp(prefix=".postmortem-update-probe-", dir=str(folder))
+            os.close(fd)
+            os.unlink(path)
+        except OSError:
+            return False
+    return True
+
+
+def unwritable_install_message() -> str:
+    """What to tell someone whose install this app cannot replace."""
+    releases = f"https://github.com/{REPO}/releases"
+    if sys.platform == "win32":
+        return ("Postmortem is installed in a folder this Windows account can't change "
+                "(usually Program Files, from an \"all users\" install), so it can't "
+                "update itself. Download and run Postmortem-Setup.exe from "
+                f"{releases} -- it installs for your account, and updates work "
+                "automatically from then on.")
+    return ("Postmortem is in a folder this account can't change, so it can't update "
+            f"itself. Download the new version from {releases}, or move Postmortem "
+            "to a folder you own (e.g. Applications in your home folder) and try again.")
+
+
 # The macOS half of the same contract the Windows script below keeps: the
 # user is never left without a launchable app. Until 2026-09-12 this moved
 # the old bundle aside and then moved the new one in with `set -e` -- so a
@@ -564,6 +646,17 @@ if ! mv "$NEW_APP" "$OLD_APP" 2>>"$LOG"; then
 fi
 
 log "update applied"
+
+# Every update leaves a timestamped backup beside the app, and nothing
+# ever removed them -- a full app bundle per update, piling up for good.
+# Keep only the one just made (the rollback for THIS update); only after a
+# successful swap, so a failed one never deletes a working build.
+for old_backup in "$OLD_APP".backup-*; do
+  [ -e "$old_backup" ] || continue
+  [ "$old_backup" = "$BACKUP_APP" ] && continue
+  rm -rf "$old_backup" 2>>"$LOG" || log "could not remove old backup $old_backup"
+done
+
 open -n "$OLD_APP"
 """
 
@@ -672,6 +765,23 @@ try {
 } catch { Log "could not carry the uninstaller over: $_" }
 
 Log "update applied"
+
+# Every update leaves a timestamped backup beside the install, and nothing
+# ever removed them -- a full install per update, piling up for good. Keep
+# only the one just made (the rollback for THIS update); only after a
+# successful swap, so a failed one never deletes a working build.
+try {
+    $keep = [System.IO.Path]::GetFullPath($BackupDir)
+    $parent = Split-Path -Parent $OldDir
+    $leaf = Split-Path -Leaf $OldDir
+    Get-ChildItem -LiteralPath $parent -Directory -Filter "$leaf.backup-*" -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -ine $keep } |
+        ForEach-Object {
+            $stale = $_.FullName
+            try { Remove-Item -LiteralPath $stale -Recurse -Force } catch { Log "could not remove old backup $stale : $_" }
+        }
+} catch { Log "could not prune old backups: $_" }
+
 Launch $OldDir
 """
 

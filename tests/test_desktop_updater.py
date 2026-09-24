@@ -115,6 +115,7 @@ class TestCheckForUpdate:
         # verify_digest() still accepts so an old build can move forward.
         assert result == {
             "sha256": None,
+            "sha256_error": None,
             "tag": "alpha-desktop-8",
             "download_url": "https://github.com/Sharpened-Banana/postmortem/releases/download/alpha-desktop-8/Postmortem-macos.zip",
             "notes": "some release notes",
@@ -492,6 +493,72 @@ class TestApplyUpdateAndRelaunch:
         # The Inno uninstaller must survive the swap.
         assert '-Filter "unins*"' in script
 
+    @pytest.mark.skipif(not Path("/bin/sh").exists(), reason="needs a POSIX shell")
+    def test_macos_helper_keeps_only_the_newest_backup(self, tmp_path):
+        # Every update left a Postmortem.app.backup-<ts> beside the app and
+        # nothing ever removed one. Run the real helper against scratch
+        # dirs (with a stub `open` so nothing is launched).
+        import os
+        import subprocess
+
+        apps = tmp_path / "Applications"
+        apps.mkdir()
+        old_app = apps / "Postmortem.app"
+        (old_app / "Contents").mkdir(parents=True)
+        (old_app / "Contents" / "v").write_text("old")
+        for ts in ("1000", "2000"):
+            (apps / f"Postmortem.app.backup-{ts}").mkdir()
+        new_app = tmp_path / "staged" / "Postmortem.app"
+        (new_app / "Contents").mkdir(parents=True)
+        (new_app / "Contents" / "v").write_text("new")
+        backup = apps / "Postmortem.app.backup-3000"
+
+        fakebin = tmp_path / "bin"
+        fakebin.mkdir()
+        (fakebin / "open").write_text("#!/bin/sh\nexit 0\n")
+        (fakebin / "open").chmod(0o755)
+        script = tmp_path / "relaunch.sh"
+        script.write_text(updater._MACOS_RELAUNCH_SCRIPT)
+        done = subprocess.Popen(["true"])
+        done.wait()  # an exited pid: the helper's wait loop ends at once
+
+        env = dict(os.environ, PATH=f"{fakebin}:/bin:/usr/bin", TMPDIR=str(tmp_path))
+        subprocess.run(["/bin/sh", str(script), str(done.pid), str(old_app),
+                        str(new_app), str(backup)], env=env, check=True, timeout=30)
+
+        assert (old_app / "Contents" / "v").read_text() == "new"
+        assert sorted(p.name for p in apps.iterdir()) == [
+            "Postmortem.app", "Postmortem.app.backup-3000"]
+        assert (backup / "Contents" / "v").read_text() == "old"
+
+    def test_a_writable_install_location_is_reported_writable(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "win32")
+        root = tmp_path / "Postmortem"
+        root.mkdir()
+        assert updater.install_location_writable(root)
+        assert list(tmp_path.rglob(".postmortem-update-probe-*")) == []  # cleaned up
+
+    @pytest.mark.skipif(sys.platform == "win32" or not hasattr(__import__("os"), "geteuid")
+                        or __import__("os").geteuid() == 0,
+                        reason="needs POSIX permissions and a non-root user")
+    def test_a_read_only_install_location_is_not(self, tmp_path):
+        # Program Files for a non-admin: readable, not changeable.
+        parent = tmp_path / "Program Files"
+        root = parent / "Postmortem"
+        root.mkdir(parents=True)
+        parent.chmod(0o555)
+        try:
+            assert not updater.install_location_writable(root)
+        finally:
+            parent.chmod(0o755)
+
+    def test_windows_helper_prunes_older_backups_after_a_swap(self):
+        script = updater._WINDOWS_RELAUNCH_SCRIPT
+        prune = script.index('-Filter "$leaf.backup-*"')
+        # after the swap succeeded, never before it
+        assert script.index('Log "update applied"') < prune
+        assert "Where-Object { $_.FullName -ine $keep }" in script
+
     def test_windows_update_log_lives_in_the_config_dir(self, tmp_path, monkeypatch):
         import postmortem.appdirs as appdirs
         monkeypatch.setattr(appdirs, "config_dir", lambda: tmp_path / "cfg")
@@ -587,8 +654,11 @@ class TestUpdateDigestVerification:
         payload = {"assets": [
             {"name": "SHA256SUMS-macOS.txt", "browser_download_url": f"{base}/SHA256SUMS-macOS.txt"},
         ]}
-        # Not a valid 64-char hex digest, so it is refused rather than used.
-        assert updater._expected_digest(payload, "Postmortem-macos.zip") is None
+        # Not a valid 64-char hex digest, so it is refused rather than used
+        # -- and refused loudly: a listed-but-unusable sums file must not
+        # read as "this release has no digest" (that failed open).
+        with pytest.raises(updater.DigestUnavailable):
+            updater._expected_digest(payload, "Postmortem-macos.zip")
 
     def test_a_wellformed_digest_is_returned(self, monkeypatch):
         import io
@@ -612,10 +682,36 @@ class TestUpdateDigestVerification:
         ]}
         assert updater._expected_digest(payload, "Postmortem-macos.zip") == digest
 
-    def test_a_sums_file_hosted_somewhere_else_is_ignored(self, monkeypatch):
+    def test_a_sums_file_hosted_somewhere_else_is_refused(self, monkeypatch):
         monkeypatch.setattr(sys, "platform", "darwin")
         payload = {"assets": [
             {"name": "SHA256SUMS-macOS.txt",
              "browser_download_url": "https://evil.example/SHA256SUMS-macOS.txt"},
         ]}
-        assert updater._expected_digest(payload, "Postmortem-macos.zip") is None
+        with pytest.raises(updater.DigestUnavailable):
+            updater._expected_digest(payload, "Postmortem-macos.zip")
+
+    def test_no_sums_asset_at_all_is_the_only_no_digest_case(self, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "darwin")
+        assert updater._expected_digest({"assets": []}, "Postmortem-macos.zip") is None
+
+    def test_a_listed_sums_file_that_cannot_be_fetched_fails_closed(self, monkeypatch):
+        # Before: a network error on the sums download returned None, which
+        # verify_digest() accepts -- the update installed unverified.
+        monkeypatch.setattr(sys, "platform", "darwin")
+        monkeypatch.setattr(updater, "VERSION", "alpha-desktop-5")
+
+        def refuse(*a, **k):
+            raise updater.urllib.error.URLError("connection reset")
+
+        monkeypatch.setattr(updater.urllib.request, "urlopen", refuse)
+        base = "https://github.com/Sharpened-Banana/postmortem/releases/download/alpha-desktop-8"
+        release = {"tag_name": "alpha-desktop-8", "assets": [
+            {"name": "Postmortem-macos.zip", "browser_download_url": f"{base}/Postmortem-macos.zip"},
+            {"name": "SHA256SUMS-macOS.txt", "browser_download_url": f"{base}/SHA256SUMS-macOS.txt"},
+        ]}
+        with pytest.raises(updater.DigestUnavailable):
+            updater._expected_digest(release, "Postmortem-macos.zip")
+        result = updater.check_for_update(fetcher=lambda url: [release])
+        assert result["sha256"] is None
+        assert "connection reset" in result["sha256_error"]

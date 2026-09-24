@@ -744,6 +744,28 @@ class TestUploadReport:
         assert result["ok"] is False
         assert api.get_settings()["site_url"] is None
 
+    def test_an_upload_from_the_report_screen_is_recorded_in_history(self, api, monkeypatch):
+        # Only Watch Live used to call mark_uploaded, so History showed a
+        # report-screen upload as never uploaded and catch-up redid it.
+        marked = []
+        monkeypatch.setattr(api_module, "_mark_uploaded",
+                            lambda db, zone, ts: marked.append((zone, ts)))
+        api.save_settings({"site_url": "https://saved.example"})
+        report = {"run": {"zone": "Murder Row", "start_ts": 1234.5}}
+        outcomes = iter([
+            {"ok": True, "run_id": 1, "url": "/runs/1"},
+            {"ok": False, "duplicate": True, "url": "/runs/9", "error": "already submitted"},
+            {"ok": False, "error": "rate limited"},
+        ])
+        monkeypatch.setattr("postmortem.upload.upload_report", lambda r, u, **k: next(outcomes))
+
+        assert api.upload_report(report)["ok"] is True
+        assert marked == [("Murder Row", 1234.5)]
+        api.upload_report(report)  # a groupmate's copy is there: also done
+        assert marked == [("Murder Row", 1234.5)] * 2
+        api.upload_report(report)  # a real failure is not
+        assert len(marked) == 2
+
     def test_falls_back_to_saved_site_url_setting(self, api, monkeypatch):
         seen = {}
 
@@ -946,6 +968,47 @@ class TestWatchMode:
 
     def test_stop_watch_with_nothing_running_is_a_noop_ok(self, api, events):
         assert api.stop_watch() == {"ok": True}
+
+    def test_a_deferred_stop_emits_stopped_once_the_thread_exits(self, api, events):
+        # Stop while the watch thread is mid catch-up used to emit only
+        # "stopping" -- "stopped" waited for a second Stop press, and the
+        # interface showed idle while keys were still being uploaded.
+        release = threading.Event()
+
+        class SlowThread(threading.Thread):
+            def join(self, timeout=None):  # stop_watch's bounded wait: don't sit 5s
+                return super().join(0.05 if timeout is not None else None)
+
+        class Rec:
+            def request_stop(self):
+                pass
+
+        busy = SlowThread(target=lambda: release.wait(10), daemon=True)
+        busy.start()
+        api._watch_recorder = Rec()
+        api._watch_thread = busy
+
+        assert api.stop_watch() == {"ok": True, "stopping": True}
+        assert [e["type"] for e in events] == ["stopping"]
+        assert api._watch_thread is busy  # a new watch still can't start
+
+        release.set()
+        self._wait_for(events, "stopped")
+        assert [e["type"] for e in events] == ["stopping", "stopped"]
+        assert api._watch_thread is None and api._watch_recorder is None
+
+    def test_the_shell_keeps_watching_until_stopped(self):
+        # app.js ignored "stopping" and flipped to idle as soon as
+        # stop_watch() returned.
+        from pathlib import Path
+        js = (Path(api_module.__file__).parent / "shell" / "app.js").read_text(encoding="utf-8")
+        handler = js[js.index("window.onWatchEvent = "):]
+        assert 'case "stopping":' in handler
+        stopped = handler[handler.index('case "stopped":'):]
+        assert "setWatchingUI(false)" in stopped[:stopped.index("break;")]
+        on_stop = js[js.index("async function onStopWatch"):]
+        on_stop = on_stop[:on_stop.index("\n}\n")]
+        assert "result.stopping" in on_stop
 
     def test_starting_watch_before_the_log_file_exists_waits_and_recovers(
         self, api, events, tmp_path,
@@ -1569,6 +1632,28 @@ class TestAutoUpdate:
         monkeypatch.setattr(api_module.os, "_exit", exits.append)
         return exits
 
+    @pytest.fixture(autouse=True)
+    def writable_install(self, monkeypatch):
+        # Under pytest the "install" is the Python interpreter's own
+        # folder, which is usually not writable; tests that care about
+        # that case override this.
+        monkeypatch.setattr(updater_module, "install_location_writable", lambda *a: True)
+
+    def test_an_install_this_account_cannot_replace_is_refused_up_front(
+        self, api, events, monkeypatch,
+    ):
+        # An "all users" Windows install (Program Files) used to download,
+        # report success, and relaunch the old build unchanged.
+        monkeypatch.setattr(api_module.sys, "frozen", True, raising=False)
+        monkeypatch.setattr(updater_module, "install_location_writable", lambda *a: False)
+        called = []
+        monkeypatch.setattr(updater_module, "check_for_update",
+                            lambda *a, **k: called.append("check"))
+        result = api.start_update("https://github.com/Sharpened-Banana/postmortem/releases/download/alpha-desktop-9/Postmortem-windows.zip")
+        assert result["ok"] is False
+        assert "can't update itself" in result["error"]
+        assert called == [] and events == []
+
     def _wait_for(self, events, event_type, timeout=5.0):
         import time as _time
 
@@ -1683,6 +1768,30 @@ class TestAutoUpdate:
         assert applied == [new_install]
         assert any(e["type"] == "downloading" and e["written"] == 50 for e in events)
         assert any(e["type"] == "applying" for e in events)
+
+    def test_an_unreadable_published_checksum_fails_the_update(
+        self, api, events, monkeypatch,
+    ):
+        # The release lists a SHA256SUMS file that could not be read. That
+        # used to degrade to "no digest" and install unverified.
+        monkeypatch.setattr(api_module.sys, "frozen", True, raising=False)
+        url = "https://github.com/Sharpened-Banana/postmortem/releases/download/alpha-desktop-9/Postmortem-macos.zip"
+        called = []
+        monkeypatch.setattr(updater_module, "perform_update",
+                            lambda *a, **k: called.append(a))
+        # Stubbed so a regression here can never hand the real swap helper
+        # this test process's own interpreter as "the install".
+        monkeypatch.setattr(updater_module, "apply_update_and_relaunch",
+                            lambda *a, **k: called.append(a))
+        monkeypatch.setattr(
+            updater_module, "check_for_update",
+            lambda *a, **k: {"tag": "alpha-desktop-9", "download_url": url, "notes": "",
+                             "sha256": None, "sha256_error": "could not download SHA256SUMS-macOS.txt"},
+        )
+        assert api.start_update(url) == {"ok": True}
+        failed = self._wait_for(events, "failed")
+        assert "checksum" in failed["error"]
+        assert called == []
 
     def test_start_update_re_resolves_on_the_configured_channel(
         self, api, events, monkeypatch, tmp_path,

@@ -288,6 +288,9 @@ class DesktopAPI:
         self._watch_worker: Optional[threading.Thread] = None
         self._watch_stop_sentinel: Optional[object] = None
         self._watch_thread: Optional[threading.Thread] = None
+        # A deferred stop (see stop_watch) and a second Stop press can both
+        # try to clear the same watch; this makes "stopped" fire once.
+        self._watch_state_lock = threading.Lock()
         # Pending snapshot builds, one timer per keybind marker seen while
         # watching (docs/SNAPSHOT.md §3); cancelled by stop_watch.
         self._snapshot_timers: dict[tuple[str, float], threading.Timer] = {}
@@ -739,6 +742,13 @@ class DesktopAPI:
             groupmate_url = _upload.duplicate_of(result, target)
             if groupmate_url:
                 result["url"] = groupmate_url
+            if result.get("ok") or groupmate_url:
+                # Record it exactly as Watch Live does. Only the watch path
+                # ever did, so a key uploaded from the report screen stayed
+                # "not uploaded" in History, and Watch Live's catch-up
+                # (already_processed) re-analyzed and re-uploaded it on the
+                # next start.
+                self._mark_report_uploaded(report)
             return result
         except Exception as exc:  # noqa: BLE001
             # upload_report() is documented never to raise, and now does
@@ -746,6 +756,17 @@ class DesktopAPI:
             # an exception is a raw traceback in the interface rather than
             # a message. Belt and braces at the boundary that has to hold.
             return {"ok": False, "error": str(exc)}
+
+    @staticmethod
+    def _mark_report_uploaded(report: dict) -> None:
+        """Best-effort ``mark_uploaded`` for a report in the configured
+        history database -- a failure to record never undoes an upload."""
+        try:
+            run = (report or {}).get("run") or {}
+            db_path = _config.resolve_history_db_path(_config.load_settings())
+            _mark_uploaded(db_path, run.get("zone"), run.get("start_ts"))
+        except Exception:  # noqa: BLE001
+            pass
 
     # -- live watch mode (auto-analyze + auto-upload every run) -------------
     #
@@ -1085,19 +1106,42 @@ class DesktopAPI:
             # so a SECOND recorder could tail the same log and duplicate
             # every slice, analysis and upload (2026-09-11).
             #
-            # Keep the handles, report honestly, and let the next Stop
-            # finish the job once the thread notices.
+            # Keep the handles, report honestly, and finish the job once
+            # the thread notices. That used to wait for a SECOND Stop
+            # press, so "stopped" never arrived on its own and the
+            # interface (which ignored "stopping" and flipped to idle at
+            # once) looked stopped while keys were still being uploaded.
             self._emit_watch_event({
                 "type": "stopping",
                 "detail": "finishing the run it is on -- this can take a few minutes",
             })
+            thread = self._watch_thread
+            threading.Thread(
+                target=self._finish_stop_when_exited, args=(thread,),
+                name="postmortem-watch-stopper", daemon=True,
+            ).start()
             return {"ok": True, "stopping": True}
-        self._watch_recorder = None
-        self._watch_thread = None
-        self._watch_queue = None
-        self._watch_worker = None
-        self._emit_watch_event({"type": "stopped"})
+        self._clear_watch_state(self._watch_thread)
         return {"ok": True}
+
+    def _finish_stop_when_exited(self, thread: threading.Thread) -> None:
+        """Wait out a watch thread that was still busy when Stop was
+        pressed, then clear its state and emit "stopped"."""
+        thread.join()
+        self._clear_watch_state(thread)
+
+    def _clear_watch_state(self, thread: Optional[threading.Thread]) -> None:
+        """Drop the watch handles and emit "stopped" -- once, and only
+        while ``thread`` is still the current watch (a later Stop press
+        or a new watch may have got there first)."""
+        with self._watch_state_lock:
+            if self._watch_thread is not thread:
+                return
+            self._watch_recorder = None
+            self._watch_thread = None
+            self._watch_queue = None
+            self._watch_worker = None
+        self._emit_watch_event({"type": "stopped"})
 
     # -- default routes ---------------------------------------------------------
 
@@ -1582,6 +1626,11 @@ class DesktopAPI:
             return {"ok": False, "error": "auto-update only works in a packaged build"}
         if not _updater._is_trusted_download_url(download_url):
             return {"ok": False, "error": "refusing to download from an untrusted source"}
+        # Before downloading anything: an install this account can't
+        # replace (Program Files) used to download, report success, and
+        # relaunch the old build unchanged -- every single time.
+        if not _updater.install_location_writable():
+            return {"ok": False, "error": _updater.unwritable_install_message()}
 
         def run_update() -> None:
             try:
@@ -1605,6 +1654,16 @@ class DesktopAPI:
                     self._emit_update_event({
                         "type": "failed",
                         "error": "this update no longer matches the published release",
+                    })
+                    return
+                if available.get("sha256_error"):
+                    # The release publishes a checksum that could not be
+                    # read. Installing anyway would skip the one check
+                    # standing between a substituted archive and a relaunch.
+                    self._emit_update_event({
+                        "type": "failed",
+                        "error": ("could not verify this update's published checksum ("
+                                  f"{available['sha256_error']}) -- try again later"),
                     })
                     return
                 new_install = _updater.perform_update(
