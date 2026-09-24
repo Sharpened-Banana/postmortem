@@ -193,7 +193,11 @@ class TestHistoryCharts:
         html = render_index(rows)
         assert "chartsSection" in html
         assert "sparklineChart" in html
-        assert "<h2>Trends</h2>" in html
+        assert '<details class="trends"${trendsOpen ? " open" : ""}>' in html
+        assert '<span class="trends-title">Trends</span>' in html
+        # the flat cumulative timed-rate line is gone; key level replaced it
+        assert "Timed rate (cumulative)" not in html
+        assert 'title: "Key level"' in html
         assert 'class="charts"' in html
         assert "chart-svg" in html
 
@@ -268,6 +272,46 @@ class TestHistoryChartsRuntime:
         assert filtered_b.count("not enough data") == 2
         assert filtered_b != unfiltered
 
+    def test_trends_strip_open_without_a_phone_viewport(self, tmp_path):
+        # node has no window/matchMedia: that is the desktop default
+        out = _run_chart_js(tmp_path, [_row()])
+        assert '<details class="trends" open>' in out
+
+    def test_trends_strip_folds_on_a_phone_viewport(self, tmp_path):
+        out = _run_chart_js(tmp_path, [_row()], extra_js=(
+            "trendsOpen = false;\n"))
+        assert '<details class="trends">' in out
+        assert out.count("<svg") == 4  # still built, just folded
+
+    def test_phone_media_query_starts_folded(self, tmp_path):
+        html = render_index([_row()])
+        script = _extract_inline_script(html)
+        harness = (
+            "class El { constructor() { this.innerHTML = ''; this.textContent = '[]'; }"
+            " addEventListener() {} }\n"
+            "const __els = { 'runs-data': new El(), 'app': new El() };\n"
+            "global.document = { getElementById: id => __els[id] };\n"
+            "global.window = { matchMedia: q => ({ matches: q === '(max-width:720px)' }) };\n"
+            + script + "\nconsole.log(String(trendsOpen));\n"
+        )
+        js = tmp_path / "phone.js"
+        js.write_text(harness, encoding="utf-8")
+        result = subprocess.run([NODE, str(js)], capture_output=True, text=True, timeout=30)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "false"
+
+    def test_key_level_chart_colors_each_run_by_result(self, tmp_path):
+        rows = [
+            _row(start_ts=1, level=8, margin_ms=60_000, file="a.json"),
+            _row(start_ts=2, level=9, timed=False, threshold=0, margin_ms=-30_000, file="b.json"),
+            _row(start_ts=3, level=10, completed=False, timed=None, file="c.json"),
+        ]
+        out = _run_chart_js(tmp_path, rows)
+        assert 'fill="var(--good)"' in out
+        assert 'fill="var(--warn)"' in out
+        assert 'fill="var(--dim)"' in out
+        assert '<span class="chart-value">+10</span>' in out
+
     def test_missing_values_do_not_crash_runtime(self, tmp_path):
         rows = [
             _row(start_ts=1_700_000_000, adherence_pct=None, kick_efficiency_pct=None),
@@ -314,27 +358,58 @@ class TestLeaderboardRuntime:
     def test_rank_is_per_dungeon_level_fastest_first(self, tmp_path):
         out = _run_chart_js(tmp_path, self._rows())
         # a.json fastest -> rank 1, b.json -> rank 2, incomplete c -> "—"
-        assert '<div class="rank">1</div>' in out
-        assert '<div class="rank">2</div>' in out
-        assert '<div class="rank none">—</div>' in out
+        assert ('<div class="rank" title="#1 fastest of 2 completed +21 runs'
+                ' of this dungeon">1</div>') in out
+        assert ('<div class="rank" title="#2 fastest of 2 completed +21 runs'
+                ' of this dungeon">2</div>') in out
+        assert ('<div class="rank none" title="Not ranked: key not completed">'
+                '—</div>') in out
 
-    def test_dungeon_abbreviation_and_full_name_on_hover(self, tmp_path):
+    def test_headers_explain_themselves(self, tmp_path):
         out = _run_chart_js(tmp_path, self._rows())
-        assert 'title="Ara-Kara, City of Echoes">AKC</div>' in out
-        assert 'title="The Rookery">R</div>' in out
+        assert '>Lvl rank' in out
+        assert 'title="Fastest-first position among completed runs of the same dungeon' in out
+        assert '>Kick eff.' in out and '>Route %' in out
+        assert 'data-sort="margin_ms"' in out and '>Result' in out
+        assert '>Kicks<' not in out
+
+    def test_dungeon_full_name_with_phone_abbreviation(self, tmp_path):
+        out = _run_chart_js(tmp_path, self._rows())
+        assert ('title="Ara-Kara, City of Echoes"><span class="dn-full">'
+                'Ara-Kara, City of Echoes</span><span class="dn-abbr">AKC</span></div>') in out
+        assert ('title="The Rookery"><span class="dn-full">The Rookery</span>'
+                '<span class="dn-abbr">R</span></div>') in out
 
     def test_stars_and_over_time_styling(self, tmp_path):
         out = _run_chart_js(tmp_path, self._rows())
-        assert '<span class="stars">★★★</span>' in out       # threshold 3
-        assert 'class="level over">+21<span class="stars"></span>' in out  # threshold 0
-        assert 'class="level dnf">+12' in out                 # incomplete
+        # timed: margin under par, chest stars inside the badge
+        assert ('<span class="badge timed" title="Timed with 0:48 to spare · key upgrades +3">'
+                '+0:48<span class="stars">★★★</span></span>') in out
+        # over: the margin past par, amber, no stars
+        assert ('<span class="badge over" title="1:30 over the timer">−1:30</span>') in out
+        # incomplete
+        assert '<span class="badge abandoned" title="Key not completed">abandoned</span>' in out
+        assert '<div class="level">+21</div>' in out
         assert 'class="time over">31:55' in out
 
     def test_stars_fall_back_to_timed_flag_without_threshold(self, tmp_path):
         rows = [_row(threshold=None, timed=True), _row(threshold=None, timed=False, start_ts=5)]
         out = _run_chart_js(tmp_path, rows)
-        assert '<span class="stars">★</span>' in out
-        assert 'class="level over">' in out
+        # no margin in these reports: the badge says it in words
+        assert '<span class="badge timed" title="Timed · key upgrades +1">timed<span class="stars">★</span></span>' in out
+        assert '<span class="badge over" title="Over the timer">over</span>' in out
+
+    def test_margin_decides_the_badge_state(self, tmp_path):
+        # a report whose margin and flag disagree must not show a green "-"
+        rows = [_row(timed=True, threshold=1, margin_ms=-5_000),
+                _row(completed=True, timed=None, threshold=None, margin_ms=None, start_ts=7),
+                _row(margin_ms="soon", timed=True, threshold=2, start_ts=9)]
+        out = _run_chart_js(tmp_path, rows)
+        assert '<span class="badge over" title="0:05 over the timer">−0:05</span>' in out
+        assert '>done</span>' in out
+        # a non-number margin falls back to the stars, never prints the text
+        assert 'soon' not in out.split('runs-data')[0]
+        assert '>timed<span class="stars">★★</span>' in out
 
     def test_affix_chips_with_names_on_hover(self, tmp_path):
         out = _run_chart_js(tmp_path, self._rows())
@@ -348,7 +423,7 @@ class TestLeaderboardRuntime:
     def test_party_split_by_role_and_class_colored(self, tmp_path):
         out = _run_chart_js(tmp_path, self._rows())
         # realm stripped, class color applied
-        assert 'style="color:#C41E3A" title="Zimengdk-Realm · Death Knight">Zimengdk</span>' in out
+        assert 'style="color:#D55D71" title="Zimengdk-Realm · Death Knight">Zimengdk</span>' in out
         assert 'style="color:#F48CBA" title="Bbpaladin-Realm · Paladin">Bbpaladin</span>' in out
         assert 'style="color:#3FC7EB" title="Qing-Realm · Mage">Qing</span>' in out
         # unknown class/role: uncolored, still listed (after DPS), not dropped
