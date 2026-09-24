@@ -18,6 +18,7 @@ from .pulls import DEFAULT_PULL_GAP_S, detect_pulls
 from .spell_damage import SpellDamageData, update_from_stats
 from .stats import PET_BUCKET, compute_stats
 from .stealable import StealableData
+from .verdict import build_verdict
 from .tank_death import (
     TankKnowledge, annotate_deaths, load_bundled_tank_defensives,
 )
@@ -728,4 +729,7 @@ def analyze_run(
         )
         player["dps_wall"] = round(player["damage_done"] / wall, 1) if wall > 0 else 0.0
         player["hps_wall"] = round(healing / wall, 1) if wall > 0 else 0.0
+
+    # Last, so it reads the finished report: "where the key was lost".
+    report["verdict"] = build_verdict(report)
     return report

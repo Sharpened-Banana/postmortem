@@ -41,7 +41,7 @@ def test_index_has_one_chip_per_section_pointing_at_it(real_report):  # noqa: F8
 
 def test_timeline_has_a_row_per_pull(real_report):  # noqa: F811
     out = _rendered(real_report)
-    assert out.count('<div class="tl-srow">') == len(real_report["pulls"])
+    assert out.count('<div class="tl-srow" data-pull=') == len(real_report["pulls"])
     assert '<div class="tl-row">' in out  # the desktop strip stays
 
 

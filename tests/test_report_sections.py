@@ -80,7 +80,10 @@ def test_section_ids_are_slugged_titles_and_unique(real_report):  # noqa: F811
 def test_collapse_all_and_expand_all_sit_above_the_sections(real_report):  # noqa: F811
     out = _rendered(real_report)
     assert _parse(out).controls == ["collapse", "expand"]
-    assert out.index('class="sec-controls"') < out.index('class="sec-index"')
+    # the phone index sits right under the verdict, ahead of the numbers;
+    # the controls sit between the numbers and the first section
+    assert out.index('class="verdict') < out.index('class="sec-index"') < out.index('class="kpis"')
+    assert out.index('class="kpis"') < out.index('class="sec-controls"') < out.index('<details class="sec"')
     assert ">Collapse all</button>" in out and ">Expand all</button>" in out
 
 
