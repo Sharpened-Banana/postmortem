@@ -180,6 +180,80 @@ local function UnregisterRunEvents()
   trackerFrame:UnregisterEvent("CHALLENGE_MODE_DEATH_COUNT_UPDATED")
 end
 
+-- ---------------------------------------------------------------------------
+-- Leaving a key without finishing it
+--
+-- Leaving the group, hearthing out or being kicked ends your part in a key
+-- without CHALLENGE_MODE_COMPLETED or _RESET ever reaching this client. The
+-- only events it gets are a loading screen (PLAYER_ENTERING_WORLD). Before
+-- this, nothing noticed: MA.state.active stayed true for the rest of the
+-- session, the HUD froze on the last numbers, and CombatLogging's 2 s
+-- re-assert ticker kept forcing combat logging back ON wherever the player
+-- went next (2026-09-23 audit).
+--
+-- The fix treats "we think a key is running but the client has no active
+-- challenge map" as the key having ended, and dispatches a synthetic
+-- CHALLENGE_MODE_RESET through MA:DispatchKeyEvent -- the same path a real
+-- reset takes, so every module (logging, HUD, run history, ...) cleans up
+-- exactly as it would for an abandoned key.
+--
+-- It must NOT fire on a loading screen back INTO the same key: straight
+-- after PLAYER_ENTERING_WORLD the challenge-mode API is not always
+-- populated yet (see CheckForActiveKeyAfterReload's comment), so a single
+-- nil proves nothing. The map ID has to stay missing for KEY_GONE_GRACE_S
+-- before the run is ended; any non-nil answer in between clears it. The
+-- grace also covers the short window at the very end of a key in which the
+-- client can drop the challenge a moment before CHALLENGE_MODE_COMPLETED
+-- arrives (see Bootstrap.lua's IsKeyActive comment) -- that real event
+-- always lands well inside it and ends the run properly first.
+local KEY_GONE_GRACE_S = 10
+-- How often the run-long watchdog re-checks while a key is active, so the
+-- run also ends when no loading screen happens to follow.
+local KEY_WATCHDOG_INTERVAL_S = 5
+
+-- GetTime() when the active challenge was first seen missing while
+-- MA.state.active was still true; nil while it is present.
+local keyMissingSince = nil
+local keyWatchdog = nil
+
+local function CancelKeyWatchdog()
+  if keyWatchdog then
+    keyWatchdog:Cancel()
+    keyWatchdog = nil
+  end
+end
+
+local function CheckForAbandonedKey()
+  if not MA.state.active then
+    keyMissingSince = nil
+    return
+  end
+  -- Debug mode runs every module with no real key underneath on purpose.
+  if MA:IsDebugMode() or IsKeyActive() then
+    keyMissingSince = nil
+    return
+  end
+  local now = GetTime()
+  if not keyMissingSince then
+    keyMissingSince = now
+    MA:Debug("Tracker: no active challenge while a run is live -- ending it in %ds unless it comes back", KEY_GONE_GRACE_S)
+    return
+  end
+  if now - keyMissingSince >= KEY_GONE_GRACE_S then
+    keyMissingSince = nil
+    MA:Debug("Tracker: the key is gone (left group / hearthed / kicked) -- ending the run as a reset")
+    if MA.DispatchKeyEvent then
+      MA:DispatchKeyEvent("CHALLENGE_MODE_RESET")
+    end
+  end
+end
+
+local function StartKeyWatchdog()
+  CancelKeyWatchdog()
+  keyMissingSince = nil
+  keyWatchdog = C_Timer.NewTicker(KEY_WATCHDOG_INTERVAL_S, CheckForAbandonedKey)
+end
+
 -- Shared start path for both a real CHALLENGE_MODE_START and the soft-start
 -- recovery from PLAYER_ENTERING_WORLD (reload mid-key).
 local function StartRun()
@@ -187,6 +261,7 @@ local function StartRun()
   MA.state = NewState()
   MA.state.active = true
   RegisterRunEvents()
+  StartKeyWatchdog()
   -- Populate immediately instead of waiting for the next 1s Blizzard tick,
   -- so the overlay has real numbers (not just zeros) the moment it shows.
   MA:Tracker_OnTick()
@@ -221,6 +296,8 @@ local function EndRun(event)
 
   MA.state.active = false
   UnregisterRunEvents()
+  CancelKeyWatchdog()
+  keyMissingSince = nil
   MA:Debug("Tracker: run ended (%s) -- final elapsed %ss, deaths %d, forces %.1f%%",
     tostring(event), tostring(MA.state.elapsed), MA.state.deaths or 0,
     (MA.state.forces and MA.state.forces.percent) or 0)
@@ -302,7 +379,13 @@ trackerFrame:SetScript("OnEvent", function(self, event, ...)
   elseif event == "SCENARIO_CRITERIA_UPDATE" or event == "CHALLENGE_MODE_DEATH_COUNT_UPDATED" then
     MA:Tracker_OnTick()
   elseif event == "PLAYER_ENTERING_WORLD" then
+    -- Abandoned-key check first: it only acts on a run that was already
+    -- live before this loading screen, never on one recovered just below.
+    CheckForAbandonedKey()
     CheckForActiveKeyAfterReload()
-    C_Timer.After(10, CheckForActiveKeyAfterReload)
+    C_Timer.After(10, function()
+      CheckForAbandonedKey()
+      CheckForActiveKeyAfterReload()
+    end)
   end
 end)

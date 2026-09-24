@@ -1,5 +1,23 @@
 # Postmortem addon
 
+## 0.3.6 (2026-09-23)
+
+Fixes.
+
+- Leaving a key without finishing it (leaving the group, hearthing out,
+  being kicked) now ends it like an abandoned key. Before, combat logging
+  stayed forced on for the rest of the session and the HUD froze on the
+  last numbers. A loading screen back into the same key does not end it.
+- Pressing "Mark a snapshot" in the last second of a key can no longer
+  leave combat logging off at the moment the key finishes, which lost the
+  line that says the key was completed.
+- A `/reload` within a few seconds of finishing a key no longer leaves
+  combat logging on indefinitely.
+- The avoidable-damage spell list is gathered once per key instead of
+  twice, and no longer keeps re-reading the damage meter every half second
+  for the rest of the session afterwards. Damage from an earlier key still
+  held by the meter is no longer counted again.
+
 ## 0.3.5 (2026-09-23)
 
 For tanks.

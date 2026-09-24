@@ -238,6 +238,29 @@ Advance(2)
 assert(#calls == 2, "toggles kept running after the key ended: " .. #calls)
 print("ok: key end cancels the rest of the sequence")
 
+-- --- 8b. a key ending while logging is toggled OFF restores it --------
+-- Dropping the pending ONs is not enough: an OFF already applied would
+-- leave logging off when the client writes CHALLENGE_MODE_END. The
+-- CombatLogging end handler runs first in load order, and must also see
+-- (and record) logging as ON.
+local combatFrame
+for _, f in ipairs(frames) do
+  if f.events["CHALLENGE_MODE_START"] and f.handler and f ~= snapshotFrame then combatFrame = f end
+end
+assert(combatFrame, "CombatLogging.lua registered no key-event frame")
+Advance(6)
+ResetCalls()
+Postmortem_SnapshotMark()
+Advance(0.3) -- second OFF (0.25) applied, its ON (0.35) still pending
+assert(loggingOn == false, "harness: expected logging to be mid-burst OFF")
+combatFrame.handler(combatFrame, "CHALLENGE_MODE_COMPLETED")
+assert(loggingOn == true, "a key ending mid-burst left combat logging OFF")
+assert(MA.state.combatLogWasOn == true, "the recap would say the key was not logged")
+snapshotFrame.handler(snapshotFrame, "CHALLENGE_MODE_COMPLETED")
+Advance(2)
+assert(loggingOn == true, "logging did not stay ON after the key ended mid-burst")
+print("ok: key end mid-burst restores logging")
+
 -- --- 9. a new key resets the cooldown -------------------------------
 ResetCalls()
 snapshotFrame.handler(snapshotFrame, "CHALLENGE_MODE_START")

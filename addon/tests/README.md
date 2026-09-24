@@ -56,7 +56,9 @@ breaks a pasted URL.
 press must toggle combat logging off/on exactly N times for the presser's
 role (2 healer / 3 tank / 4 other), 0.25 s apart, ending ON, record one
 capped `snapshotMarks` entry, honour the 5 s cooldown, and do nothing but
-print when no key is active or logging is off. `LoggingCombat` is stubbed
+print when no key is active or logging is off. A key ending mid-burst must put
+logging straight back ON (an OFF already applied would otherwise swallow
+the CHALLENGE_MODE_END line). `LoggingCombat` is stubbed
 as a call recorder and `C_Timer.After` as a hand-advanced scheduler; the
 real `CombatLogging.lua` is loaded underneath so its state rules apply.
 
@@ -77,3 +79,21 @@ all WoW globals and expected).
 the client refuses as table keys (simulated by overriding `rawset`/`rawget`),
 `canaccessvalue()` as a secrecy signal, and the "keep last good values"
 behaviour on a bad tick.
+
+`key_abandoned.lua` covers leaving a key without finishing it (leave
+group, hearth, kicked): no COMPLETED/RESET arrives, so `Tracker.lua` must
+notice the challenge is gone and dispatch a synthetic
+`CHALLENGE_MODE_RESET`, which is what stops `CombatLogging.lua` forcing
+logging back on. A loading screen back into the same key must not end it.
+
+`avoidable_harvest.lua` covers `AvoidableDatabase.lua`: one harvest per
+key even when COMPLETED and RESET both arrive, no harvest ticker left
+running afterwards, and only the amount a key added on top of the Overall
+session's key-start snapshot is recorded (a meter reset in between makes
+the whole session this key's).
+
+`logging_stop_reload.lua` covers `CombatLogging.lua`'s post-key stop
+across a `/reload`: the 5 s grace timer is file-local, so its due time is
+persisted in `PostmortemDB.global.stopLoggingAt` and finished on load
+(overdue: at once; stale by more than 5 min: cleared, not acted on; a new
+key: cancelled). Each session reloads the files into a fresh addon table.

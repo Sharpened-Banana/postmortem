@@ -42,9 +42,13 @@
 -- can include earlier keys (Details owns the reset; we never reset it).
 -- For the spell list itself that doesn't matter -- an avoidable spell is
 -- avoidable wherever it was seen -- but the per-spell dungeon tag would
--- be wrong for a spell carried over from a previous dungeon, so spells
--- already present when the key STARTS are remembered and only tagged
--- with this key's dungeon if they weren't.
+-- be wrong for a spell carried over from a previous dungeon, and the
+-- per-spell totals would count the earlier keys' damage again. So the
+-- amount per spell already present when the key STARTS is remembered,
+-- and only what was added on top of it is attributed to this key: a spell
+-- that grew is recorded (and tagged with this dungeon), one that didn't is
+-- left alone. If the session is smaller at the end than at the start, the
+-- meter was reset in between and the whole session is this key's.
 
 local ADDON_NAME, MA = ...
 
@@ -134,13 +138,30 @@ local function ForEachAvoidableSpell(session, fn)
   return true
 end
 
--- Spell ids already in the Overall session when this key started (see the
--- header's note on scope). nil = couldn't read at start; tag nothing.
+-- Spell id -> amount already in the Overall session when this key
+-- started (see the header's note on scope), plus the session total then.
+-- nil = couldn't read at start; the whole session is taken as this key's.
 local seenBeforeKey = nil
+local totalBeforeKey = nil
 local keyMapID = nil
 local pollTicker = nil
 
+-- Generation guard, same pattern as DeathTagging.lua: C_Timer.After has no
+-- cancel, so every scheduled callback captures the generation it was
+-- started under and bails (cancelling its own ticker) once it changed.
+-- Without it, COMPLETED followed by RESET started two polls; the second
+-- overwrote pollTicker, the first ticker's CancelPoll() then cancelled the
+-- wrong one, and the survivor re-harvested every 0.5 s forever -- adding
+-- the whole session to every spell's total twice a second.
+local pollGeneration = 0
+
+-- True from CHALLENGE_MODE_START until this key's harvest has been
+-- started, so a key is harvested once: a RESET arriving after COMPLETED
+-- (or a second end event of any kind) finds it false and does nothing.
+local harvestPending = false
+
 local function CancelPoll()
+  pollGeneration = pollGeneration + 1
   if pollTicker then
     pollTicker:Cancel()
     pollTicker = nil
@@ -182,16 +203,27 @@ local function Harvest()
   end)
   if not complete then return false end
 
+  -- A session smaller than it was at key start means the meter was reset
+  -- since (Details owns that reset); everything in it is then this key's.
+  local before = seenBeforeKey
+  local sessionTotal = session.totalAmount
+  if before and totalBeforeKey and type(sessionTotal) == "number"
+      and sessionTotal < totalBeforeKey then
+    before = nil
+  end
+
   local newSpells, knownSpells = 0, 0
   for spellID, amount in pairs(found) do
-    local carriedOver = seenBeforeKey ~= nil and seenBeforeKey[spellID]
-    -- Tag with this key's dungeon only when the spell can be attributed
-    -- to it: either it wasn't in the meter when the key started, or we
-    -- couldn't read the meter at start (seenBeforeKey == nil) and the
-    -- session is assumed to be this key's.
-    local mapID = (not carriedOver) and keyMapID or nil
-    if db[spellID] then knownSpells = knownSpells + 1 else newSpells = newSpells + 1 end
-    RecordSpell(db, spellID, amount, mapID)
+    -- Only what this key added. A spell that was already in the session
+    -- and didn't grow was not taken this key: it is neither counted again
+    -- nor tagged with this dungeon. A spell that grew was hit here, so it
+    -- is tagged even if an earlier key had seen it too.
+    local added = amount - ((before and before[spellID]) or 0)
+    if before == nil or before[spellID] == nil or added > 0 then
+      if added < 0 then added = 0 end
+      if db[spellID] then knownSpells = knownSpells + 1 else newSpells = newSpells + 1 end
+      RecordSpell(db, spellID, added, keyMapID)
+    end
   end
   MA:Debug("Avoidable DB: harvested %d spells from the meter (%d new, %d already known)",
     newSpells + knownSpells, newSpells, knownSpells)
@@ -200,23 +232,36 @@ end
 
 local function StartHarvestPolling()
   CancelPoll()
+  local gen = pollGeneration
   local tries = 0
   C_Timer.After(INITIAL_DELAY_S, function()
-    pollTicker = C_Timer.NewTicker(POLL_INTERVAL_S, function()
-      tries = tries + 1
-      local ok, done = pcall(Harvest)
-      if not ok then
-        MA:Debug("Avoidable DB: harvest errored (%s) -- giving up on this key", tostring(done))
-        CancelPoll()
+    if gen ~= pollGeneration then return end -- superseded while waiting
+    local ticker
+    ticker = C_Timer.NewTicker(POLL_INTERVAL_S, function()
+      -- Self-cancelling: this ticker only ever stops itself, never
+      -- whatever pollTicker happens to point at by now.
+      if gen ~= pollGeneration then
+        ticker:Cancel()
         return
       end
-      if done then
-        CancelPoll()
+      tries = tries + 1
+      local ok, done = pcall(Harvest)
+      local stop = false
+      if not ok then
+        MA:Debug("Avoidable DB: harvest errored (%s) -- giving up on this key", tostring(done))
+        stop = true
+      elseif done then
+        stop = true
       elseif tries >= POLL_MAX_TRIES then
         MA:Debug("Avoidable DB: meter still secret after %ds -- giving up on this key", POLL_MAX_TRIES * POLL_INTERVAL_S)
-        CancelPoll()
+        stop = true
+      end
+      if stop then
+        ticker:Cancel()
+        if pollTicker == ticker then pollTicker = nil end
       end
     end)
+    pollTicker = ticker
   end)
 end
 
@@ -225,29 +270,39 @@ end
 -- effort: if the meter is secret right now, seenBeforeKey stays nil.
 local function SnapshotAtKeyStart()
   seenBeforeKey = nil
+  totalBeforeKey = nil
   keyMapID = C_ChallengeMode and C_ChallengeMode.GetActiveChallengeMapID and C_ChallengeMode.GetActiveChallengeMapID() or nil
   local ok, session = pcall(GetAvoidableSession)
   if not ok or not session then return end
   local snapshot = {}
-  local walked, complete = pcall(ForEachAvoidableSpell, session, function(spellID)
-    snapshot[spellID] = true
+  local walked, complete = pcall(ForEachAvoidableSpell, session, function(spellID, amount)
+    snapshot[spellID] = (snapshot[spellID] or 0) + amount
   end)
-  if walked and complete then seenBeforeKey = snapshot end
+  if walked and complete then
+    seenBeforeKey = snapshot
+    if type(session.totalAmount) == "number" then totalBeforeKey = session.totalAmount end
+  end
 end
 
 function MA:AvoidableDB_OnChallengeModeStart()
   CancelPoll()
+  harvestPending = false
   if not ApiAvailable() then
     MA:Debug("Avoidable DB: C_DamageMeter avoidable-damage meter not available on this client")
     return
   end
   SnapshotAtKeyStart()
+  harvestPending = true
   local n = 0
   for _ in pairs(MA:GetAvoidableDB() or {}) do n = n + 1 end
   MA:Debug("Avoidable DB: key started (map %s), %d spells known so far", tostring(keyMapID), n)
 end
 
 function MA:AvoidableDB_OnChallengeModeEnd()
+  -- Once per key: COMPLETED harvests, a RESET after it (or any repeat end
+  -- event, or an end with no start this session) finds nothing pending.
+  if not harvestPending then return end
+  harvestPending = false
   if not ApiAvailable() then return end
   StartHarvestPolling()
 end
