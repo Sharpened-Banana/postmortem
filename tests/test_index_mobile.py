@@ -20,8 +20,7 @@ def test_phone_rules_live_under_one_media_query():
         '.run-head > div.static { display:none; }',
         '.run-row .score:nth-last-child(2)::before { content:"Kick eff."; }',
         '.run-row .score:last-child::before { content:"Route"; }',
-        '.run-row .dungeon .dn-full { display:none; }',
-        '.run-row .dungeon .dn-abbr { display:inline; }',
+        '.run-row .dungeon .dn-full { white-space:normal; overflow:visible; max-width:none; }',
         '.run-row .result { grid-area:result; justify-self:end; }',
         '.run-row .party { grid-column:1 / -1;',
         '.board { min-width:0; }',
@@ -32,8 +31,9 @@ def test_phone_rules_live_under_one_media_query():
 def test_desktop_board_keeps_its_minimum_width_rule():
     css = _css(render_index([]))
     assert ".board { min-width:1040px; }" in css
-    # full dungeon names on desktop; the abbreviation only shows on phones
+    # full dungeon names everywhere; the abbreviation span is never shown
     assert css.index(".run-row .dungeon .dn-abbr { display:none; }") < css.index("@media (max-width:720px)")
+    assert ".dn-full { display:none; }" not in css
 
 
 def test_phone_body_size_and_viewport_fit():

@@ -361,8 +361,9 @@ a.ability:hover { color:var(--accent); border-bottom-color:var(--accent); }
   .run-row .rank { grid-area:rank; align-self:start; font-size:18px;
     line-height:1.2; }
   .run-row .dungeon { grid-area:dungeon; font-size:15px; }
-  .run-row .dungeon .dn-full { display:none; }
-  .run-row .dungeon .dn-abbr { display:inline; }
+  /* Phones show the full name too: a card has the room, and a title
+     tooltip is no help on touch. It wraps instead of truncating. */
+  .run-row .dungeon .dn-full { white-space:normal; overflow:visible; max-width:none; }
   .run-row .level { grid-area:level; }
   .run-row .result { grid-area:result; justify-self:end; }
   .run-row .time { grid-area:time; text-align:right; }
