@@ -178,9 +178,12 @@ _INDEX_TEMPLATE = """<!DOCTYPE html>
 body { margin:0; background:var(--bg); color:var(--muted);
   font:14px/1.65 var(--mono); padding:24px;
   -webkit-font-smoothing:antialiased; }
+/* The title gets real air above it: on the site the shared header sits
+   directly over this page, and a bare 0 top margin jammed the two
+   together. */
 h1 { font-family:var(--display); font-size:34px; font-weight:700;
   letter-spacing:.04em; text-transform:uppercase; line-height:1;
-  margin:0 0 18px; color:var(--text); }
+  margin:16px 0 22px; color:var(--text); }
 h2 { font-size:12px; font-weight:600; margin:34px 0 12px;
   text-transform:uppercase; letter-spacing:.16em; color:var(--accent);
   border-bottom:1px solid var(--line); padding-bottom:8px; }
@@ -204,8 +207,25 @@ td.num,th.num { text-align:right; font-variant-numeric:tabular-nums; }
 .over { color:var(--warn); } .dnf { color:var(--bad); }
 a { color:var(--accent); text-decoration:none; }
 a:hover { color:#E0BC48; text-decoration:underline; }
-select { background:var(--panel); color:var(--text); border:1px solid var(--line);
-  border-radius:6px; padding:6px 10px; margin-bottom:12px; }
+/* Dungeon filter: the native control restyled onto the brand tokens.
+   The caret is a text glyph on the wrapper, not a background image --
+   the site's CSP allows no image sources beyond its own. */
+.filter { display:inline-flex; align-items:center; gap:12px; margin:4px 0 14px; }
+.filter-label { font-size:10.5px; color:var(--dim); text-transform:uppercase;
+  letter-spacing:.12em; }
+.select-wrap { position:relative; display:inline-block; }
+.select-wrap::after { content:"▾"; position:absolute; right:12px; top:50%;
+  transform:translateY(-50%); color:var(--accent); font-size:12px;
+  pointer-events:none; }
+select { -webkit-appearance:none; appearance:none; margin:0; min-width:230px;
+  min-height:38px; padding:8px 34px 8px 12px; background:var(--panel);
+  color:var(--text); border:1px solid var(--line); border-radius:6px;
+  font:13px/1.3 var(--mono); cursor:pointer;
+  transition:border-color .12s ease, box-shadow .12s ease; }
+select:hover { border-color:#3D372F; }
+select:focus { outline:none; border-color:var(--accent);
+  box-shadow:0 0 0 3px rgba(201,162,39,.28); }
+select option { background:var(--panel); color:var(--text); }
 .dim { color:var(--dim); }
 .charts { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
   gap:12px; margin-bottom:16px; }
@@ -282,7 +302,10 @@ a.ability:hover { color:var(--accent); border-bottom-color:var(--accent); }
    them. Nothing above 720px changes. */
 @media (max-width:720px) {
   body { padding:16px; font-size:15px; }
-  h1 { font-size:28px; }
+  h1 { font-size:28px; margin:10px 0 18px; }
+  .filter { display:flex; }
+  .select-wrap { flex:1; min-width:0; }
+  select { width:100%; min-width:0; min-height:42px; font-size:14px; }
   .board { min-width:0; }
   .wrap { padding:0; }
   .run-head { display:flex; flex-wrap:wrap; align-items:center; gap:6px;
@@ -710,10 +733,11 @@ function render() {
     ${stat(completed ? Math.round(100 * timed / completed) + "%" : "—", "timed rate")}
     ${stat(deaths, "total deaths")}
   </div>
-  <select id="dungeon-filter">
+  <label class="filter"><span class="filter-label">Dungeon</span>
+    <span class="select-wrap"><select id="dungeon-filter">
     <option value="">All dungeons</option>
     ${dungeons.map(d => `<option ${d === dungeon ? "selected" : ""} value="${attr(d)}">${esc(d)}</option>`).join("")}
-  </select>
+  </select></span></label>
   ${chartsSection(chartRows)}
   <div class="wrap"><div class="board">
     <div class="run-head">
