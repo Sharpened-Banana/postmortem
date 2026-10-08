@@ -4,7 +4,7 @@ import json
 import textwrap
 from pathlib import Path
 
-from conftest import TANK, LogBuilder, build_run_log
+from conftest import HEALER, TANK, LogBuilder, build_run_log
 
 from postmortem import bundled as bundled_module
 from postmortem.analysis.interruptibility import InterruptibilityData
@@ -806,6 +806,44 @@ class TestRecorderRunBoundaries:
 
 
 class TestRecorder:
+    @staticmethod
+    def _deaths(tmp_path, b):
+        log = tmp_path / "WoWCombatLog.txt"
+        log.write_text(b.text(), encoding="utf-8")
+        rec = Recorder(log_path=log, out_dir=tmp_path / "runs", from_start=True,
+                       echo=lambda s: None)
+        (run,) = rec.watch(stop_after_runs=1)
+        return run.player_deaths
+
+    def test_spirit_of_redemption_counts_as_a_live_death(self, tmp_path):
+        # Restitution revive: the aura comes and goes, no UNIT_DIED at all.
+        b = LogBuilder()
+        b.start(0)
+        b.aura(50, HEALER, HEALER, 27827, "Spirit of Redemption")
+        b.aura_removed(65, HEALER, HEALER, 27827, "Spirit of Redemption")
+        b.end(90)
+        assert self._deaths(tmp_path, b) == 1
+
+    def test_feign_death_is_not_a_live_death(self, tmp_path):
+        # UNIT_DIED's last field is unconsciousOnDeath: 1 = Feign Death,
+        # which the report already skips (real Altar of Fangs, 2026-10-08:
+        # live "death #3", report 0).
+        b = LogBuilder()
+        b.start(0)
+        b.unit_died(50, TANK[0], TANK[1], TANK[2], unconscious=1)
+        b.end(90)
+        assert self._deaths(tmp_path, b) == 0
+
+    def test_unit_died_after_the_angel_form_is_not_a_second_death(self, tmp_path):
+        b = LogBuilder()
+        b.start(0)
+        b.aura(50, HEALER, HEALER, 27827, "Spirit of Redemption")
+        b.aura_removed(72.5, HEALER, HEALER, 27827, "Spirit of Redemption")
+        b.unit_died(80.9, HEALER[0], HEALER[1], HEALER[2])
+        b.unit_died(200, HEALER[0], HEALER[1], HEALER[2])  # a later, real one
+        b.end(220)
+        assert self._deaths(tmp_path, b) == 2
+
     def test_records_run_slice(self, tmp_path):
         log = tmp_path / "WoWCombatLog.txt"
         log.write_text(build_run_log().text(), encoding="utf-8")

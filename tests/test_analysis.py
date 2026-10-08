@@ -1807,3 +1807,89 @@ class TestUnplannedPulls:
 
         payload = json.loads(json.dumps(report))
         assert payload["unplanned_pulls"]["pulls"][0]["actual_pull"] == 2
+
+
+class TestSpiritOfRedemptionDeaths:
+    """A Holy Priest's death goes through Spirit of Redemption (27827): the
+    log shows the aura applied, and then either nothing more (the
+    Restitution talent revives them -- no UNIT_DIED at all) or a UNIT_DIED
+    up to several seconds after the aura ends. The key's death counter and
+    timer penalty count it once either way (real Kings' Rest +17,
+    2026-10-07: the priest's Restitution death was missing from the
+    report)."""
+
+    BIG_HIT = 900002
+    SOR = 27827
+
+    def _stats(self, b):
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        self.start_ts = run.events[0].ts
+        return compute_stats(run.events, detect_pulls(run.events))
+
+    def _lethal_hit(self, b, npc, t):
+        b.npc_damage(t, npc, "Felwyrm", HEALER, self.BIG_HIT, "Big Hit",
+                     500000, hp=0)
+        b.aura(t, HEALER, HEALER, self.SOR, "Spirit of Redemption")
+
+    def _log(self):
+        b = LogBuilder()
+        npc = b.npc_guid(FELWYRM, "0001")
+        b.start(0)
+        b.combatant(0.5, HEALER)
+        return b, npc
+
+    def test_restitution_revive_without_unit_died_is_a_death(self):
+        b, npc = self._log()
+        self._lethal_hit(b, npc, 50)
+        b.aura_removed(65, HEALER, HEALER, self.SOR, "Spirit of Redemption")
+        b.end(90)
+
+        stats = self._stats(b)
+        (death,) = stats.deaths
+        assert death.player_guid == HEALER[0]
+        assert death.ts - self.start_ts == pytest.approx(50)
+        assert death.killing_blow["spell_id"] == self.BIG_HIT
+        assert stats.players[HEALER[0]].death_count == 1
+
+    def test_unit_died_after_the_angel_form_is_the_same_death(self):
+        # Real shape (2026-10-02 log): aura removed 22.5s after it was
+        # applied, UNIT_DIED 8.4s after that.
+        b, npc = self._log()
+        self._lethal_hit(b, npc, 50)
+        b.aura_removed(72.5, HEALER, HEALER, self.SOR, "Spirit of Redemption")
+        b.unit_died(80.9, HEALER[0], HEALER[1], HEALER[2])
+        b.end(100)
+
+        stats = self._stats(b)
+        (death,) = stats.deaths
+        # timed at the lethal hit, not when the angel form ran out
+        assert death.ts - self.start_ts == pytest.approx(50)
+        assert death.killing_blow["spell_id"] == self.BIG_HIT
+        assert stats.players[HEALER[0]].death_count == 1
+
+    def test_lethal_hit_logged_after_the_aura_in_the_same_ms(self):
+        # Real line order (Kings' Rest +17, 23:01:32.010): the aura line,
+        # then the Honored Raptor hit that caused it, same timestamp.
+        b, npc = self._log()
+        b.aura(50, HEALER, HEALER, self.SOR, "Spirit of Redemption")
+        b.npc_damage(50, npc, "Felwyrm", HEALER, self.BIG_HIT, "Big Hit",
+                     500000, hp=0)
+        b.aura_removed(65, HEALER, HEALER, self.SOR, "Spirit of Redemption")
+        b.end(90)
+
+        (death,) = self._stats(b).deaths
+        assert death.killing_blow["spell_id"] == self.BIG_HIT
+        assert death.ts - self.start_ts == pytest.approx(50)
+
+    def test_a_later_real_death_after_a_revive_still_counts(self):
+        b, npc = self._log()
+        self._lethal_hit(b, npc, 50)
+        b.aura_removed(65, HEALER, HEALER, self.SOR, "Spirit of Redemption")
+        b.npc_damage(200, npc, "Felwyrm", HEALER, self.BIG_HIT, "Big Hit",
+                     500000, hp=0)
+        b.unit_died(200.5, HEALER[0], HEALER[1], HEALER[2])
+        b.end(220)
+
+        stats = self._stats(b)
+        assert len(stats.deaths) == 2
+        assert stats.players[HEALER[0]].death_count == 2
