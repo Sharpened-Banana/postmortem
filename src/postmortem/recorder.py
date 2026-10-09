@@ -48,6 +48,14 @@ from .combatlog.parser import parse_line
 _START_RE = re.compile(r"  CHALLENGE_MODE_START,")
 _END_RE = re.compile(r"  CHALLENGE_MODE_END,")
 _DEATH_RE = re.compile(r"  UNIT_DIED,")
+_PLAYER_DIED_RE = re.compile(r"UNIT_DIED,[^,]*,[^,]*,[^,]*,[^,]*,(Player-[^,]*),")
+# A Holy Priest's death is Spirit of Redemption on them, with or without a
+# UNIT_DIED after it -- the same rule as analysis/stats.py
+# (SPIRIT_OF_REDEMPTION_ID / SPIRIT_DEATH_GRACE_S), applied to raw lines.
+_SPIRIT_RE = re.compile(
+    r"  SPELL_AURA_(APPLIED|REMOVED),[^,]*,[^,]*,[^,]*,[^,]*,"
+    r"(Player-[^,]*),[^,]*,[^,]*,[^,]*,27827,")
+_SPIRIT_DEATH_GRACE_S = 15.0
 # WoW writes one of these every time combat logging is switched on. The
 # addon's snapshot keybind switches it off/on N times inside ~1.5 s to
 # plant a marker whose header COUNT is the presser's role -- see
@@ -665,13 +673,29 @@ class Recorder:
 
         self._track_marker(line)
 
-        if _DEATH_RE.search(line):
-            # crude but cheap live counter; the real analysis is authoritative
-            if re.search(r'UNIT_DIED,[^,]*,[^,]*,[^,]*,[^,]*,Player-', line):
-                self._current.player_deaths += 1
-                self.echo(f"  death #{self._current.player_deaths}")
-                if self.obs_replay_on_death and self._obs is not None:
-                    self._obs_call(self._obs.save_replay_buffer, "SaveReplayBuffer")
+        # crude but cheap live counter; the real analysis is authoritative
+        spirit = _SPIRIT_RE.search(line)
+        if spirit:
+            event = parse_line(line)
+            guid = spirit.group(2)
+            if spirit.group(1) == "APPLIED":
+                self._spirit_until[guid] = None
+                self._count_player_death()
+            elif guid in self._spirit_until and event is not None:
+                self._spirit_until[guid] = event.ts + _SPIRIT_DEATH_GRACE_S
+        elif _DEATH_RE.search(line):
+            died = _PLAYER_DIED_RE.search(line)
+            if died and line.rstrip().endswith(",1"):
+                died = None  # unconsciousOnDeath: Feign Death, not a death
+            if died:
+                guid = died.group(1)
+                if guid in self._spirit_until:
+                    until = self._spirit_until.pop(guid)
+                    event = parse_line(line)
+                    if until is None or (event is not None and event.ts <= until):
+                        died = None  # counted when Spirit of Redemption began
+            if died:
+                self._count_player_death()
 
         if _END_RE.search(line):
             if _is_phantom_end(line):
@@ -692,7 +716,15 @@ class Recorder:
             return run
         return None
 
+    def _count_player_death(self) -> None:
+        self._current.player_deaths += 1
+        self.echo(f"  death #{self._current.player_deaths}")
+        if self.obs_replay_on_death and self._obs is not None:
+            self._obs_call(self._obs.save_replay_buffer, "SaveReplayBuffer")
+
     def _start_run(self, line: str) -> None:
+        # player guid -> when their Spirit of Redemption ended (None: still up)
+        self._spirit_until: dict[str, Optional[float]] = {}
         m = _START_FIELDS_RE.search(line)
         zone = m.group(1) if m else "unknown"
         level = None

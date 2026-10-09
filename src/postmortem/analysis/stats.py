@@ -161,6 +161,17 @@ class PlayerStats:
 # See the UNIT_DIED branch: how far back a death recap looks, in seconds.
 DEATH_RECAP_WINDOW_S = 10.0
 
+# A Holy Priest "dies" into Spirit of Redemption: the log shows only this
+# aura on the priest. Then either the Restitution talent revives them and
+# no UNIT_DIED is ever written, or the angel form runs out and UNIT_DIED
+# follows -- 0.3s to 8.4s after the aura ended in real logs (2026-10-02).
+# The key's death counter (and its timer penalty) counts it once either
+# way, at the lethal hit. A real Kings' Rest +17 (2026-10-07) lost the
+# priest's Restitution death entirely because only UNIT_DIED was counted.
+SPIRIT_OF_REDEMPTION_ID = 27827
+# How long after the aura ends a UNIT_DIED still belongs to the same death.
+SPIRIT_DEATH_GRACE_S = 15.0
+
 def _top(counter: Counter, n: int) -> list[dict[str, Any]]:
     return [
         {"spell_id": sid, "name": sname, "total": total}
@@ -272,6 +283,13 @@ def compute_stats(
     recent_damage: dict[str, deque] = {}
     locator = _PullLocator(pulls)
     killed_guids: set[str] = set()
+    # player guid -> when their Spirit of Redemption ended (None while it is
+    # still up); a UNIT_DIED inside that window is the death already counted
+    spirit_until: dict[str, Optional[float]] = {}
+    # Spirit of Redemption deaths waiting for their timestamp to finish:
+    # the lethal hit is logged AFTER the aura line, in the same millisecond
+    # (real +17, 2026-10-07), so recording at the aura line would miss it.
+    pending_spirit: dict[str, tuple[float, str, Optional[int]]] = {}
     # (source_guid, spell_id, kind) -> ts of the last observed hit, so
     # multi-target hits/applications within a short window count as one cast
     last_obs_hit: dict[tuple[str, int, str], float] = {}
@@ -505,12 +523,56 @@ def compute_stats(
             return get_player(PET_BUCKET, "Pets & Guardians")
         return None
 
+    def record_death(guid: str, name: str, ts: float, pull_idx) -> None:
+        player = get_player(guid, name)
+        player.death_count += 1
+        # Window the buffer, then empty it. Both matter, for
+        # different reasons.
+        #
+        # The buffer is a rolling deque that was never reset at
+        # death, so a player who died, was battle-rezzed and died
+        # again much later reported a "biggest hit" and a recap
+        # line from the PREVIOUS life -- a reproduction had a death
+        # at t=400 to a 1,234 hit reporting biggest_hit=500,000
+        # from a Doom Bolt 380 seconds and one life earlier, shown
+        # verbatim in both the HTML and text reports (2026-09-11).
+        # Draining it is what stops that.
+        #
+        # The window additionally trims chip damage from earlier in
+        # the SAME life, which draining cannot reach -- a recap is
+        # meant to answer "what killed them", not "what touched
+        # them in the last several minutes".
+        #
+        # Note killing_blow can now legitimately be None, for a
+        # death whose killing blow was not a parsed damage event.
+        # That is the honest answer; it used to be whatever hit
+        # happened to be left in the buffer.
+        buf = recent_damage.get(guid)
+        recap = [r for r in (buf or ())
+                 if r["ts"] >= ts - DEATH_RECAP_WINDOW_S]
+        if buf is not None:
+            buf.clear()
+        killing = recap[-1] if recap else None
+        stats.deaths.append(DeathRecord(
+            ts=ts,
+            player_guid=guid,
+            player_name=player.name or name,
+            pull_index=pull_idx,
+            killing_blow=killing,
+            recap=recap,
+        ))
+
     for event in events:
         name = event.name
         params = event.params
 
         if pending_removals:
             flush_pending_removals(event.ts)
+        if pending_spirit:
+            for guid, (ts, who, pidx) in list(pending_spirit.items()):
+                if event.ts > ts:
+                    del pending_spirit[guid]
+                    record_death(guid, who, ts, pidx)
 
         if name == "COMBATANT_INFO" and params:
             guid = params[0]
@@ -571,49 +633,27 @@ def compute_stats(
 
         pull_idx = locator.locate(event.ts)
 
+        if name in ("SPELL_AURA_APPLIED", "SPELL_AURA_REMOVED") \
+                and is_group_player(dst_flags):
+            sp = spell_info(event)
+            if sp is not None and sp.spell_id == SPIRIT_OF_REDEMPTION_ID:
+                if name == "SPELL_AURA_APPLIED":
+                    pending_spirit[dst_guid] = (event.ts, dst_name, pull_idx)
+                    spirit_until[dst_guid] = None
+                elif dst_guid in spirit_until:
+                    spirit_until[dst_guid] = event.ts + SPIRIT_DEATH_GRACE_S
+
         if name == "UNIT_DIED":
             unconscious = params[-1] == "1" if len(params) > 8 else False
             g = parse_guid(dst_guid)
             if g.is_player and is_group_player(dst_flags):
                 if unconscious:
                     continue  # feign death
-                player = get_player(dst_guid, dst_name)
-                player.death_count += 1
-                # Window the buffer, then empty it. Both matter, for
-                # different reasons.
-                #
-                # The buffer is a rolling deque that was never reset at
-                # death, so a player who died, was battle-rezzed and died
-                # again much later reported a "biggest hit" and a recap
-                # line from the PREVIOUS life -- a reproduction had a death
-                # at t=400 to a 1,234 hit reporting biggest_hit=500,000
-                # from a Doom Bolt 380 seconds and one life earlier, shown
-                # verbatim in both the HTML and text reports (2026-09-11).
-                # Draining it is what stops that.
-                #
-                # The window additionally trims chip damage from earlier in
-                # the SAME life, which draining cannot reach -- a recap is
-                # meant to answer "what killed them", not "what touched
-                # them in the last several minutes".
-                #
-                # Note killing_blow can now legitimately be None, for a
-                # death whose killing blow was not a parsed damage event.
-                # That is the honest answer; it used to be whatever hit
-                # happened to be left in the buffer.
-                buf = recent_damage.get(dst_guid)
-                recap = [r for r in (buf or ())
-                         if r["ts"] >= event.ts - DEATH_RECAP_WINDOW_S]
-                if buf is not None:
-                    buf.clear()
-                killing = recap[-1] if recap else None
-                stats.deaths.append(DeathRecord(
-                    ts=event.ts,
-                    player_guid=dst_guid,
-                    player_name=player.name or dst_name,
-                    pull_index=pull_idx,
-                    killing_blow=killing,
-                    recap=recap,
-                ))
+                if dst_guid in spirit_until:
+                    until = spirit_until.pop(dst_guid)
+                    if until is None or event.ts <= until:
+                        continue  # counted when Spirit of Redemption began
+                record_death(dst_guid, dst_name, event.ts, pull_idx)
             elif g.is_npc and dst_guid not in killed_guids:
                 killed_guids.add(dst_guid)
                 close_enemy_cast(dst_guid, "expired", event.ts)
@@ -1040,6 +1080,9 @@ def compute_stats(
     # tagged debuffs still up when the run ends were never dispelled, and
     # any held removal no dispel ever claimed ran out
     flush_pending_removals(run_end_ts, force=True)
+    for guid, (ts, who, pidx) in pending_spirit.items():
+        record_death(guid, who, ts, pidx)
+    pending_spirit.clear()
     for (_guid, spell_id) in list(open_debuffs.keys()):
         stats.dispel_outcomes[spell_id]["expired"] += 1
     open_debuffs.clear()
