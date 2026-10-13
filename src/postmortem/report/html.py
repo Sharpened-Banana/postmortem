@@ -418,7 +418,11 @@ const mmss = s => { if (s == null || s === "") return "?"; s = Math.round(Number
   return sign + (m >= 60 ? `${Math.floor(m/60)}:${String(m%60).padStart(2,"0")}:${String(sec).padStart(2,"0")}`
                          : `${m}:${String(sec).padStart(2,"0")}`); };
 const npcs = list => (list||[]).map(e =>
-  `${plain(e.n)}x ${esc(e.name || ("npc:"+e.npc_id))}`).join(", ");
+  `${plain(e.n)}x ${esc(e.name || ("npc:"+e.npc_id))}` + pulledBy(e.pulled_by)).join(", ");
+// an off-route entry's openers (see pulls.UnitEngagement.opened_by)
+const pulledBy = list => (list||[]).length ? ` <span class="dim">(` + list.map(o =>
+  (list.length > 1 ? `${plain(o.n)}x ` : "")
+  + (o.how === "enemy" ? "aggroed on " : "pulled by ") + who(o.name || "?")).join("; ") + `)</span>` : "";
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 
 // Affix id -> name/short/kind tables, shared with the Browse Runs feed

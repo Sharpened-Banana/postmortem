@@ -84,8 +84,23 @@ def _npcs(entries: list[dict[str, Any]]) -> str:
     parts = []
     for e in entries:
         name = e.get("name") or f"npc:{e.get('npc_id')}"
-        parts.append(f"{e['n']}x {name}")
+        part = f"{e['n']}x {name}"
+        if e.get("pulled_by"):
+            part += f" ({_pulled_by(e['pulled_by'])})"
+        parts.append(part)
     return ", ".join(parts)
+
+
+def _pulled_by(openers: list[dict[str, Any]]) -> str:
+    """An off-route entry's openers: "pulled by X" when the group hit it
+    first, "aggroed on X" when it came at X on its own (see
+    pulls.UnitEngagement.opened_by)."""
+    out = []
+    for o in openers:
+        verb = "aggroed on" if o.get("how") == "enemy" else "pulled by"
+        count = f"{o['n']}x " if len(openers) > 1 else ""
+        out.append(f"{count}{verb} {o.get('name') or '?'}")
+    return "; ".join(out)
 
 
 def render_text(report: dict[str, Any]) -> str:
