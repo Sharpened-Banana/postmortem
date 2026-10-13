@@ -506,7 +506,7 @@ function render() {
     timeline(), playersTable(), avoidableDamage(),
     (R.comparison && !R.comparison.error) ? comparison()
       : (R.route ? `<h2>Route</h2><div class="dim">${esc((R.comparison||{}).error || "")}</div>` + routeOnly() : ""),
-    mapSection(), pullsTable(), enemyCasts(), dispelEfficiency(), encounters(),
+    nonTankPulls(), mapSection(), pullsTable(), enemyCasts(), dispelEfficiency(), encounters(),
     deaths(), closeCalls(), utility(), downtime(),
   ].filter(Boolean).map(section);
   // DOM order puts the (phone-only) index straight under the verdict,
@@ -1030,6 +1030,27 @@ function mapSection() {
         + '<span class="chip"><i class="line" style="background:var(--blue)"></i>player paths</span>' : ""}
       ${image ? '<span class="chip">map art from your MDT install</span>' : ""}
       ${floors.length > 1 ? `<span class="chip">floor ${primaryFloor} of ${floors.length} · other floors not drawn</span>` : ""}</div>`;
+}
+
+// Pulls someone other than the tank started (see analysis/pull_openers.py).
+function nonTankPulls() {
+  const n = R.non_tank_pulls;
+  if (!n) return "";
+  if (!(n.flagged||[]).length)
+    return `<h2>Pulls started by a non-tank</h2><div class="ok">None: ${who(n.tank)} started every pull.</div>`;
+  const opened = e => (e.how === "enemy" ? "aggroed on " : "pulled by ") + who(e.opener || "?");
+  const lead = e => e.tank_lead_s == null ? `<span class="dev-off">tank never engaged</span>`
+    : `${Number.isFinite(+e.tank_lead_s) ? (+e.tank_lead_s).toFixed(1) : "?"}s before the tank`;
+  const people = (n.by_player||[]).map(r => `${who(r.name)} <span class="dim">(${[
+    r.pulled ? `${plain(r.pulled)} pulled` : "", r.aggroed ? `${plain(r.aggroed)} aggroed on them` : "",
+  ].filter(Boolean).join(", ")})</span>`).join(" · ");
+  const rows = n.flagged.map(e => `<tr><td class="num">${plain(e.pull)}</td>
+    <td>${mmss(e.t)}</td><td>${opened(e)}</td><td>${lead(e)}</td>
+    <td>${e.boss ? `<b>${esc(e.boss)}</b>` : ""}</td></tr>`).join("");
+  return `<h2>Pulls started by a non-tank (${plain(n.flagged.length)} of ${plain(n.pull_count)})</h2>
+    <div class="dim">Tank: ${who(n.tank)}. Started by: ${people}</div>
+    <div class="wrap"><table><tr><th class="num">#</th><th>At</th><th>Started</th>
+    <th>Lead</th><th>Boss</th></tr>${rows}</table></div>`;
 }
 
 function pullsTable() {

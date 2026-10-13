@@ -14,6 +14,7 @@ from .gamedata import spec_info
 from .compare import compare_route
 from .interruptibility import KNOWN_UNINTERRUPTIBLE_SPELL_IDS, InterruptibilityData
 from .mapping import build_map_report, collect_map_bounds
+from .pull_openers import non_tank_pulls_summary, pull_openers
 from .pulls import DEFAULT_PULL_GAP_S, detect_pulls
 from .spell_damage import SpellDamageData, update_from_stats
 from .stats import PET_BUCKET, compute_stats
@@ -641,6 +642,17 @@ def analyze_run(
             if g in stats.players
         },
     }
+    tank = next((p for p in stats.players.values()
+                 if not p.guid.startswith("_") and spec_info(p.spec_id)[2] == "tank"), None)
+    if tank is not None:
+        openers = pull_openers(pulls, tank.guid)
+        by_pull = {e["pull"]: e for e in openers}
+        for entry in report["pulls"]:
+            o = by_pull.get(entry["pull"])
+            if o is not None:
+                entry["opener"] = {k: o[k] for k in ("opener", "how", "tank_lead_s", "flagged")}
+        report["non_tank_pulls"] = non_tank_pulls_summary(openers, tank.name or tank.guid)
+
     for player in report["players"]:
         uptimes = stats.buff_uptimes.get(player["guid"])
         if uptimes:
@@ -697,6 +709,8 @@ def analyze_run(
                 "cast_timeline", "consumables", "close_calls"):
         _relativize(report[key], start)
     _relativize(report["encounters"], start, key="start_ts")
+    if "non_tank_pulls" in report:
+        _relativize(report["non_tank_pulls"]["flagged"], start, key="start_ts")
     _relativize(report["forces"]["timeline"], start)
     _relativize(report["downtime"]["windows"], start, key="start_ts")
     _relativize(report["cc"]["events"], start, key="start_ts", target="t_start")

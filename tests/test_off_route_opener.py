@@ -222,3 +222,144 @@ class TestEndToEnd:
                    json.dumps(report), extra="render();")
         cell = out[out.index("off-route: 1x Shadeling"):][:400]
         assert "pulled by " in cell and ">Zappyboi<" in cell, cell
+
+
+# --- pulls started by someone other than the tank --------------------------
+
+from postmortem.analysis.pull_openers import (
+    TANK_GRACE_S,
+    non_tank_pulls_summary,
+    pull_openers,
+)
+
+
+def _touched(unit, **touches):
+    unit.first_touch = dict(touches)
+    return unit
+
+
+class TestNonTankPulls:
+    def test_tank_opening_is_not_flagged(self):
+        pull = ActualPull(index=1, units=[
+            _touched(_unit(OGRE, 1, 10.0, "Tank", OPENED_BY_GROUP), Tank=10.0, Mage=10.2)])
+        (e,) = pull_openers([pull], "Tank")
+        assert e["opener"] == "Tank" and not e["flagged"]
+
+    def test_dps_opening_well_before_the_tank_is_flagged(self):
+        pull = ActualPull(index=1, units=[
+            _touched(_unit(OGRE, 1, 10.0, "Mage", OPENED_BY_GROUP), Mage=10.0, Tank=12.0)])
+        (e,) = pull_openers([pull], "Tank")
+        assert e["flagged"] and e["tank_lead_s"] == 2.0
+
+    def test_dps_landing_with_the_tank_is_not_flagged(self):
+        t = 10.0 + TANK_GRACE_S
+        pull = ActualPull(index=1, units=[
+            _touched(_unit(OGRE, 1, 10.0, "Mage", OPENED_BY_GROUP), Mage=10.0),
+            _touched(_unit(OGRE, 2, t, "Tank", OPENED_BY_GROUP), Tank=t)])
+        (e,) = pull_openers([pull], "Tank")
+        assert e["opener"] == "Mage" and not e["flagged"]
+
+    def test_mob_running_at_a_dps_first_is_a_flagged_aggro(self):
+        pull = ActualPull(index=1, units=[
+            _touched(_unit(OGRE, 1, 10.0, "Priest", OPENED_BY_ENEMY), Priest=10.0, Tank=13.0)])
+        (e,) = pull_openers([pull], "Tank")
+        assert e["flagged"] and e["how"] == OPENED_BY_ENEMY
+
+    def test_mob_running_at_the_tank_is_fine(self):
+        pull = ActualPull(index=1, units=[
+            _touched(_unit(OGRE, 1, 10.0, "Tank", OPENED_BY_ENEMY), Tank=10.0)])
+        (e,) = pull_openers([pull], "Tank")
+        assert not e["flagged"]
+
+    def test_tank_never_touching_the_pull_is_flagged(self):
+        pull = ActualPull(index=1, units=[
+            _touched(_unit(OGRE, 1, 10.0, "Mage", OPENED_BY_GROUP), Mage=10.0)])
+        (e,) = pull_openers([pull], "Tank")
+        assert e["flagged"] and e["tank_lead_s"] is None
+
+    def test_summary_counts_per_player(self):
+        entries = [
+            {"pull": 1, "start_ts": 0, "boss": None, "opener": "Mage", "how": "group",
+             "tank_lead_s": 2.0, "flagged": True},
+            {"pull": 2, "start_ts": 0, "boss": None, "opener": "Mage", "how": "enemy",
+             "tank_lead_s": 1.0, "flagged": True},
+            {"pull": 3, "start_ts": 0, "boss": None, "opener": "Tank", "how": "group",
+             "tank_lead_s": None, "flagged": False},
+        ]
+        s = non_tank_pulls_summary(entries, "Tank")
+        assert s["pull_count"] == 3 and [e["pull"] for e in s["flagged"]] == [1, 2]
+        assert s["by_player"] == [{"name": "Mage", "pulled": 1, "aggroed": 1}]
+
+    def test_early_units_say_who_pulled_them(self):
+        route = Route(name="t", dungeon_idx=3, week=None, difficulty=None,
+                      pulls=[Pull(index=1, enemies={1: [1, 2]}), Pull(index=2, enemies={2: [1, 2]}),
+                             Pull(index=3, enemies={2: [3]})])
+        actual = [
+            ActualPull(index=1, units=[
+                _unit(OGRE, 1, 0.0, "Tank", OPENED_BY_GROUP),
+                _unit(OGRE, 2, 0.1, "Tank", OPENED_BY_GROUP),
+                _unit(GOBLIN, 3, 3.0, "Rogue", OPENED_BY_ENEMY)]),
+            ActualPull(index=2, units=[
+                _unit(GOBLIN, 4, 30.0, "Tank", OPENED_BY_GROUP),
+                _unit(GOBLIN, 5, 30.1, "Tank", OPENED_BY_GROUP)]),
+        ]
+        rows = compare_route(route, actual, _dungeon()).summary(_dungeon())["pulls"]
+        (early,) = rows[0]["pulled_early"]
+        assert early["pulled_by"] == [{"name": "Rogue", "how": "enemy", "n": 1}]
+
+    def test_report_section_end_to_end(self, dungeon_data_file):
+        from conftest import ROUTE_PRESET, build_run_log
+
+        from postmortem.analysis.run_analyzer import analyze_run
+        from postmortem.combatlog.segmenter import segment_runs
+        from postmortem.mdt.dungeon_data import DungeonDataStore
+
+        (run,) = list(segment_runs(iter_events(build_run_log().lines)))
+        report = analyze_run(run, route=Route.from_preset(ROUTE_PRESET),
+                             store=DungeonDataStore.load(dungeon_data_file))
+        ntp = report["non_tank_pulls"]
+        # conftest's run: the mage opens every Felwyrm hit half a second
+        # ahead of the tank (inside the grace), and the boss a full second
+        assert ntp["tank"] == TANK[1]
+        assert [e["pull"] for e in ntp["flagged"]] == [3]
+        assert ntp["flagged"][0]["opener"] == DPS1[1]
+        assert report["pulls"][0]["opener"]["flagged"] is False
+        text = render_text(report)
+        assert f"pulled by {DPS1[1]} (1.0s before the tank)" in text
+
+    def test_html_section(self, dungeon_data_file):
+        import json
+        import shutil
+
+        import pytest
+        from conftest import ROUTE_PRESET, build_run_log
+        from test_report_escaping import _extract_script, _run
+
+        from postmortem.analysis.run_analyzer import analyze_run
+        from postmortem.combatlog.segmenter import segment_runs
+        from postmortem.mdt.dungeon_data import DungeonDataStore
+        from postmortem.report.html import render_html
+
+        if shutil.which("node") is None:
+            pytest.skip("needs node to run the page's own JS")
+        (run,) = list(segment_runs(iter_events(build_run_log().lines)))
+        report = analyze_run(run, route=Route.from_preset(ROUTE_PRESET),
+                             store=DungeonDataStore.load(dungeon_data_file))
+        out = _run(_extract_script(render_html(report)), "report-data",
+                   json.dumps(report), extra="render();")
+        assert "Pulls started by a non-tank (1 of 3)" in out
+        assert "1.0s before the tank" in out
+
+    def test_no_tank_no_section(self):
+        from conftest import build_run_log
+
+        from postmortem.analysis.run_analyzer import analyze_run
+        from postmortem.combatlog.segmenter import segment_runs
+
+        b = build_run_log()
+        # drop COMBATANT_INFO: no specs, so no tank to measure against
+        b.lines = [line for line in b.lines if "COMBATANT_INFO" not in line]
+        (run,) = list(segment_runs(iter_events(b.lines)))
+        report = analyze_run(run)
+        assert "non_tank_pulls" not in report
+        assert all("opener" not in p for p in report["pulls"])

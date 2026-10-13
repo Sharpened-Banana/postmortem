@@ -106,6 +106,9 @@ class UnitEngagement:
     opener_guid: Optional[str] = None
     opener_name: Optional[str] = None
     opened_by: Optional[str] = None
+    # group member GUID (pets folded into their owner) -> when they first
+    # interacted with this engagement, either way round
+    first_touch: dict[str, float] = field(default_factory=dict)
 
     @property
     def killed(self) -> bool:
@@ -278,8 +281,10 @@ def collect_engagements(
                 first_map_id=map_id,
                 opener_guid=group_guid,
                 opened_by=opened_by,
+                first_touch={group_guid: event.ts},
             )
         else:
+            eng.first_touch.setdefault(group_guid, event.ts)
             if eng.first_pos is None and pos is not None:
                 eng.first_pos = pos
                 eng.first_map_id = map_id
@@ -288,12 +293,19 @@ def collect_engagements(
 
     # Credit openers by name only now: a pet's owner and the owner's name
     # may first appear in the log after the pet's opening hit.
+    def credited(guid: str) -> str:
+        owner = pet_owner.get(guid)
+        return owner if owner is not None and owner in group_names else guid
+
     for eng in engagements.values():
+        touches: dict[str, float] = {}
+        for guid, ts in eng.first_touch.items():
+            who = credited(guid)
+            touches[who] = min(ts, touches.get(who, ts))
+        eng.first_touch = touches
         if eng.opener_guid is None:
             continue
-        owner = pet_owner.get(eng.opener_guid)
-        if owner is not None and owner in group_names:
-            eng.opener_guid = owner
+        eng.opener_guid = credited(eng.opener_guid)
         eng.opener_name = group_names.get(eng.opener_guid) or None
     return engagements
 
