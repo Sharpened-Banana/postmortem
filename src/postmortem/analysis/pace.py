@@ -75,6 +75,13 @@ def progress_points(report: dict, total_bosses: Optional[int] = None) -> list[di
             if t is not None and f is not None:
                 timeline.append((t, f))
         timeline.sort()
+        # A finished key had 100% forces in game. When the dungeon data's
+        # counts fall short of that (real Kings' Rest +17: 96.5%), the
+        # run's own final total is what 100% was.
+        if _dict(report.get("run")).get("completed") is True and timeline:
+            final = max(f for _, f in timeline)
+            if 0 < final < required:
+                required = final
     else:
         required = None
 

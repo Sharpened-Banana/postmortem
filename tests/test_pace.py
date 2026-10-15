@@ -172,3 +172,20 @@ def test_no_progress_source_means_no_pace():
 
 def test_no_timer_and_no_benchmark_means_no_pace():
     assert build_pace(_report(timer={})) is None
+
+
+def test_a_completed_run_reaches_full_forces_even_when_the_data_counts_short():
+    # Real Kings' Rest +17 (2026-10-07): the bundled counts summed to 96.5%
+    # of required, but a finished key always had 100% in game.
+    r = _report()
+    r["forces"]["timeline"][-1]["forces"] = 96.5
+    pts = progress_points(r)
+    assert pts[-1]["progress"] == pytest.approx(1.0)
+    assert pts[1]["progress"] == pytest.approx(0.5 * 50 / 96.5 + 0.5 * 0.5)
+
+
+def test_an_unfinished_run_keeps_the_data_count():
+    r = _report(run={"completed": False})
+    r["forces"]["timeline"][-1]["forces"] = 96.5
+    assert progress_points(r, total_bosses=2)[-1]["progress"] == pytest.approx(
+        0.5 * 0.965 + 0.5)
