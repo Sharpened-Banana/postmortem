@@ -11,6 +11,7 @@ import json
 import math
 from typing import Any
 
+from ..analysis.pace import build_pace
 from ..analysis.verdict import build_verdict
 from .affixes import affix_js
 
@@ -1283,6 +1284,14 @@ def render_html(report: dict[str, Any]) -> str:
     # the fields they already carry (see analysis/verdict.py).
     if not isinstance(report.get("verdict"), dict):
         report = {**report, "verdict": build_verdict(report)}
+    # Same for the pace line (analysis/pace.py): no history here, so a
+    # report without one is paced against the timer.
+    if not isinstance(report.get("pace"), dict):
+        try:
+            pace = build_pace(report)
+        except Exception:
+            pace = None
+        report = {**report, "pace": pace}
     run = report.get("run", {})
     title = f"{run.get('zone') or report.get('dungeon', {}).get('name', 'M+')}" \
             f" +{run.get('keystone_level', '?')} — post-mortem"

@@ -49,6 +49,7 @@ from ..combatlog.segmenter import segment_runs
 from ..mdt.decode import MDTDecodeError, decode_mdt_string
 from ..mdt.extract import write_dungeon_data
 from ..mdt.route import Route
+from ..history.benchmark import attach_pace
 from ..history.store import has_run as _has_run
 from ..history.store import has_uploaded_run as _has_uploaded_run
 from ..history.store import mark_uploaded as _mark_uploaded
@@ -525,6 +526,7 @@ class DesktopAPI:
             pull_gap_seconds=float(params.get("pull_gap_seconds", DEFAULT_PULL_GAP_S)),
         )
 
+        attach_pace(report, _config.resolve_history_db_path(_config.load_settings()))
         html = render_html(report)
         saved = self._save_report_locally(report, html)
         self._last_report = report
@@ -676,6 +678,10 @@ class DesktopAPI:
                     report = json.load(fh)
             if not isinstance(report, dict):
                 return {"ok": False, "error": "that run's saved report could not be found"}
+            if not isinstance(report.get("pace"), dict) and kind == "db":
+                # stored before the pace line existed: pace it now against
+                # the same history (the run itself is never its benchmark)
+                attach_pace(report, location)
             run = report.get("run") or {}
             level = run.get("keystone_level")
             label = " ".join(
@@ -1463,6 +1469,7 @@ class DesktopAPI:
             # embed the floor's map art from the user's MDT install into the
             # local report (best-effort; upload.py strips it before the site)
             enrich=lambda r: mapart.attach_map_backgrounds(r, mdt_dir, store),
+            history_db_path=history_db_path,
         )
         if report is None:
             self._emit_watch_event({
