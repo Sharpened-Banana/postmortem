@@ -5,8 +5,9 @@ maths).
 Order: same dungeon, timed, not this run -> same key level -> nearest key
 level (a higher one first at equal distance: matching a harder key's pace
 is a fair bar) -> fastest. A candidate whose stored report cannot give
-pace points (an old report without forces or encounters) is passed over
-for the next one; with none left the timer is the benchmark.
+pace points (an old report without forces or encounters), or measures
+progress differently from this run (forces in one, not the other), is
+passed over for the next one; with none left the timer is the benchmark.
 
 Best-effort throughout: attaching pace must never cost a run its reports,
 so any failure leaves the timer pace (or none) and is not raised.
@@ -18,7 +19,7 @@ import math
 from pathlib import Path
 from typing import Any, Optional
 
-from ..analysis.pace import build_pace, progress_points
+from ..analysis.pace import build_pace, has_forces, progress_points
 
 #: Two runs of one dungeon starting within this many seconds are the same run.
 _SAME_RUN_S = 1.0
@@ -66,6 +67,8 @@ def attach_pace(report: dict, db_path: Optional[str | Path]) -> dict:
                     candidate = store.get_report(run_id)
                     if not isinstance(candidate, dict) or not progress_points(candidate):
                         continue
+                    if has_forces(candidate) != has_forces(report):
+                        continue  # measured differently: not comparable
                     benchmark = candidate
                     info = {
                         "level": row.get("level"),

@@ -51,6 +51,14 @@ def _kills(report: dict) -> list[tuple[float, Any]]:
     return out
 
 
+def has_forces(report: dict) -> bool:
+    """Whether the report can measure forces (it was analysed with dungeon
+    data). Two runs are only compared when both can, or neither: a
+    forces+bosses run against a bosses-only benchmark biases every delta."""
+    required = _num(_dict(report.get("forces")).get("required"))
+    return required is not None and required > 0
+
+
 def boss_count(report: dict) -> Optional[int]:
     """Distinct bosses killed, but only for a completed run -- where that
     is every boss the dungeon has. None when unknown."""

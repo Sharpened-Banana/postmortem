@@ -77,3 +77,33 @@ def test_recorded_reports_carry_pace(tmp_path):
     saved = json.loads(Path(f"{run.path.with_suffix('')}.json").read_text(encoding="utf-8"))
     assert report["pace"] is not None
     assert saved["pace"] == report["pace"]
+
+
+def test_upload_never_ships_own_best_pace(monkeypatch):
+    # The uploader's own history must not reach the public site, where
+    # "vs your best +17" would also read as the viewer's best (final
+    # review, 2026-10-15). The site paces anonymous runs against the timer.
+    import io
+    import urllib.request
+
+    from postmortem import upload
+
+    report = {**_prior_murder_row(1_000_000.0),
+              "pace": {"version": 1, "benchmark": {"kind": "own_best", "level": 17},
+                       "points": [{"pull": 1, "t_end": 1.0, "delta_s": 0.0}]}}
+    sent = {}
+
+    class _Resp(io.BytesIO):
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def getcode(self): return 200
+
+    def fake_urlopen(request, timeout=None, context=None):
+        sent["body"] = json.loads(request.data.decode("utf-8"))
+        return _Resp(b'{"ok": true, "run_id": 1, "url": "/runs/1"}')
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    upload.upload_report(report, "https://example.test", token="t")
+    assert "pace" not in sent["body"]
+    assert report["pace"]["benchmark"]["kind"] == "own_best"  # local copy keeps it

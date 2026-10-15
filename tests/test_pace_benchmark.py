@@ -105,3 +105,14 @@ def test_attach_never_raises_on_a_broken_database(tmp_path):
     bad.write_text("not a database")
     report = attach_pace(_run(17, 1800, DAY), bad)
     assert report["pace"]["benchmark"]["kind"] == "timer"
+
+
+def test_a_benchmark_measured_differently_is_passed_over(tmp_path):
+    # The fastest +17 was analysed without dungeon data (no forces), so its
+    # progress is bosses-only while this run's is forces + bosses: comparing
+    # the two biased every delta (final review, 2026-10-15).
+    no_forces = _run(17, 1400, DAY)
+    no_forces["forces"] = {"required": None}
+    db = _db(tmp_path, no_forces, _run(17, 1600, DAY + 1e5))
+    report = attach_pace(_run(17, 1800, DAY + 9e5), db)
+    assert report["pace"]["benchmark"]["duration_s"] == 1600
