@@ -187,12 +187,15 @@ details.sec:not([open]) > summary .sec-toggle::before { content: "\\25B8"; }
 .affix.harsh { color: var(--warn); border-color: var(--warn); }
 /* The pace line: ahead of the benchmark above the zero line, behind below. */
 .pace-cap { margin: 0 0 8px; }
-.pace svg { width: 100%; height: 170px; display: block; }
+.pace-plot { position: relative; padding-left: 92px; }
+.pace svg { width: 100%; height: 170px; display: block; overflow: visible; }
+.pace-y { position: absolute; left: 0; font-size: 11px; color: var(--dim); }
+.pace-y.top { top: 0; } .pace-y.bottom { bottom: 0; }
 .pace-zero { stroke: var(--line); stroke-width: 1; }
 .pace-line { fill: none; stroke: var(--accent); stroke-width: 2; }
 .pace-chest { fill: none; stroke: var(--dim); stroke-width: 1; stroke-dasharray: 4 4; }
-.pace-dot { fill: var(--accent); }
-.pace-dot.behind { fill: var(--bad); }
+.pace-dot { stroke: var(--accent); stroke-width: 9; stroke-linecap: round; }
+.pace-dot.behind { stroke: var(--bad); }
 .pace-key { font-size: 12px; margin-top: 4px; }
 /* The verdict band: where the key was lost, directly under the title.
    Its colour is the outcome's -- timed green, over amber, abandoned red. */
@@ -1086,31 +1089,42 @@ function paceSection() {
   const chest = f => pts.map(x => finite(x.bench_s) ? f * Number(x.bench_s) : null);
   const two = timer ? chest(0.2) : [], three = timer ? chest(0.4) : [];
   const all = bank.concat(two, three, [0]).filter(v => v != null);
-  const top = Math.max(...all, 10), bottom = Math.min(...all, -10);
+  // the extremes are labelled; the drawing gets 8% headroom so the
+  // highest and lowest dots are not cut off at the edge
+  const hi = Math.max(...bank, 0), lo = Math.min(...bank, 0);
+  const rawTop = Math.max(...all, 10), rawBottom = Math.min(...all, -10);
+  const pad = 0.08 * (rawTop - rawBottom);
+  const top = rawTop + pad, bottom = rawBottom - pad;
   const W = 600, H = 160, span = Math.max(...pts.map(x => Number(x.t_end)), 1);
   const X = t => (W * Number(t) / span).toFixed(1);
   const Y = v => (H * (top - v) / (top - bottom)).toFixed(1);
   const line = (vals, cls) => {
     const xy = pts.map((x, i) => vals[i] == null ? null : `${X(x.t_end)},${Y(vals[i])}`).filter(Boolean);
-    return xy.length ? `<polyline class="${cls}" points="0,${Y(0)} ${xy.join(" ")}"/>` : "";
+    return xy.length ? `<polyline class="${cls}" vector-effect="non-scaling-stroke" points="0,${Y(0)} ${xy.join(" ")}"/>` : "";
   };
   const dots = pts.map((x, i) => {
     const d = Math.round(Number(x.delta_s));
     const where = d > 0 ? `${d}s behind` : d < 0 ? `${-d}s ahead` : "on pace";
     const c = finite(x.change_s) ? Math.round(Number(x.change_s)) : null;
     const moved = c == null || c === 0 ? "" : c > 0 ? ` (lost ${c}s)` : ` (gained ${-c}s)`;
-    return `<circle class="pace-dot${d > 0 ? " behind" : ""}" cx="${X(x.t_end)}" cy="${Y(bank[i])}" r="4">`
-      + `<title>${esc(`Pull ${plain(x.pull)}: ${where}${moved}`)}</title></circle>`;
+    // a zero-length round-capped line, not a circle: the svg stretches
+    // to its box and a circle would stretch into an ellipse with it
+    const cx = X(x.t_end), cy = Y(bank[i]);
+    return `<line class="pace-dot${d > 0 ? " behind" : ""}" vector-effect="non-scaling-stroke" x1="${cx}" x2="${cx}" y1="${cy}" y2="${cy}">`
+      + `<title>${esc(`Pull ${plain(x.pull)}: ${where}${moved}`)}</title></line>`;
   }).join("");
   const last = Math.round(-bank[bank.length - 1]);
   const end = last > 0 ? `${last}s behind` : last < 0 ? `${-last}s ahead` : "on pace";
   return `<h2>Pace</h2><div class="pace">
     <div class="dim pace-cap">${esc(paceCaption(bench))} · after the last pull: ${esc(end)}</div>
+    <div class="pace-plot">
+    <span class="pace-y top">${esc(mmss(hi))} ahead</span>
+    <span class="pace-y bottom">${esc(mmss(-lo))} behind</span>
     <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Pace after each pull">
-      <line class="pace-zero" x1="0" x2="${W}" y1="${Y(0)}" y2="${Y(0)}"/>
+      <line class="pace-zero" vector-effect="non-scaling-stroke" x1="0" x2="${W}" y1="${Y(0)}" y2="${Y(0)}"/>
       ${timer ? line(two, "pace-chest pace-chest-2") + line(three, "pace-chest pace-chest-3") : ""}
       ${line(bank, "pace-line")}${dots}
-    </svg>
+    </svg></div>
     <div class="dim pace-key">Above the line: ahead. Below: behind.${timer ? " Dashed: the lead a +2 and a +3 need." : ""}</div>
   </div>`;
 }

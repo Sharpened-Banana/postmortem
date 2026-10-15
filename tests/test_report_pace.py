@@ -85,3 +85,14 @@ def test_hostile_pace_is_escaped(real_report):  # noqa: F811
     out = _rendered(_with_pace(real_report, bench, points))
     assert "<img" not in out
     assert "onerror=alert" not in out.replace("onerror=alert(1)&gt;", "")
+
+
+def test_chart_dots_stay_round_and_the_scale_is_labelled(real_report):  # noqa: F811
+    out = _rendered(_with_pace(real_report, OWN_17))
+    chart = out[out.index('class="pace"'):]
+    # the svg stretches to its box, so marks must not scale with it
+    assert "<circle" not in chart.split("</svg>")[0]
+    assert chart.count('vector-effect="non-scaling-stroke"') >= 3
+    # extremes labelled: best lead (21s behind is the worst, 0 the best here)
+    assert re.search(r'class="pace-y top"[^>]*>[^<]*0:00 ahead', chart)
+    assert re.search(r'class="pace-y bottom"[^>]*>[^<]*0:21 behind', chart)
