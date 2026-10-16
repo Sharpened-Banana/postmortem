@@ -11,6 +11,7 @@ import json
 import math
 from typing import Any
 
+from ..analysis.pace import build_pace
 from ..analysis.verdict import build_verdict
 from .affixes import affix_js
 
@@ -184,6 +185,18 @@ details.sec:not([open]) > summary .sec-toggle::before { content: "\\25B8"; }
 .affix.base { color: var(--text); }
 .affix.season { color: var(--accent); border-color: var(--accent); }
 .affix.harsh { color: var(--warn); border-color: var(--warn); }
+/* The pace line: ahead of the benchmark above the zero line, behind below. */
+.pace-cap { margin: 0 0 8px; }
+.pace-plot { position: relative; padding-left: 92px; }
+.pace svg { width: 100%; height: 170px; display: block; overflow: visible; }
+.pace-y { position: absolute; left: 0; font-size: 11px; color: var(--dim); }
+.pace-y.top { top: 0; } .pace-y.bottom { bottom: 0; }
+.pace-zero { stroke: var(--line); stroke-width: 1; }
+.pace-line { fill: none; stroke: var(--accent); stroke-width: 2; }
+.pace-chest { fill: none; stroke: var(--dim); stroke-width: 1; stroke-dasharray: 4 4; }
+.pace-dot { stroke: var(--accent); stroke-width: 9; stroke-linecap: round; }
+.pace-dot.behind { stroke: var(--bad); }
+.pace-key { font-size: 12px; margin-top: 4px; }
 /* The verdict band: where the key was lost, directly under the title.
    Its colour is the outcome's -- timed green, over amber, abandoned red. */
 .verdict { --vc: var(--muted); background: var(--panel); border: 1px solid var(--line);
@@ -499,7 +512,7 @@ function render() {
   collapsed = loadCollapsed();
   phoneLayout = narrowScreen();
   const sections = [
-    timeline(), playersTable(), avoidableDamage(),
+    paceSection(), timeline(), playersTable(), avoidableDamage(),
     (R.comparison && !R.comparison.error) ? comparison()
       : (R.route ? `<h2>Route</h2><div class="dim">${esc((R.comparison||{}).error || "")}</div>` + routeOnly() : ""),
     mapSection(), pullsTable(), enemyCasts(), dispelEfficiency(), encounters(),
@@ -1028,6 +1041,94 @@ function mapSection() {
       ${floors.length > 1 ? `<span class="chip">floor ${primaryFloor} of ${floors.length} · other floors not drawn</span>` : ""}</div>`;
 }
 
+// The pace line (analysis/pace.py): how far ahead of or behind a benchmark
+// the key was after every pull. On the site the points come from an
+// anonymous upload, so each value is checked before it is drawn or shown.
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function pacePoints() {
+  const p = R.pace;
+  if (!p || typeof p !== "object" || !Array.isArray(p.points)) return [];
+  return p.points.filter(x => x && typeof x === "object" && finite(x.t_end) && finite(x.delta_s));
+}
+
+// pull number -> seconds that pull lost (+) or gained (-); null without pace
+function paceChanges() {
+  const out = {};
+  let any = false;
+  pacePoints().forEach(x => {
+    if (finite(x.change_s)) { out[String(x.pull)] = Number(x.change_s); any = true; }
+  });
+  return any ? out : null;
+}
+
+function paceCaption(b) {
+  b = (b && typeof b === "object") ? b : {};
+  if (b.kind !== "own_best") return "vs the timer (no timed run of this dungeon yet)";
+  const level = finite(b.level) ? "+" + plain(b.level) : "run";
+  if (b.same_level !== true) {
+    return `vs your best ${level} (no timed +${plain((R.run || {}).keystone_level)} yet)`;
+  }
+  const bits = [];
+  if (finite(b.duration_s)) bits.push(mmss(b.duration_s));
+  const d = typeof b.date === "string" ? b.date.split("-") : [];
+  if (d.length === 3 && finite(d[1]) && finite(d[2]) && MONTHS[Number(d[1]) - 1]) {
+    bits.push(`${MONTHS[Number(d[1]) - 1]} ${Number(d[2])}`);
+  }
+  return `vs your best ${level}${bits.length ? ` (${bits.join(", ")})` : ""}`;
+}
+
+function paceSection() {
+  const pts = pacePoints();
+  if (!pts.length) return "";
+  const bench = (R.pace.benchmark && typeof R.pace.benchmark === "object") ? R.pace.benchmark : {};
+  const timer = bench.kind !== "own_best";
+  // y is the time bank: positive = ahead. The +2 / +3 lines are the lead
+  // those chests need at that point (20% / 40% of the timer budget).
+  const bank = pts.map(x => -Number(x.delta_s));
+  const chest = f => pts.map(x => finite(x.bench_s) ? f * Number(x.bench_s) : null);
+  const two = timer ? chest(0.2) : [], three = timer ? chest(0.4) : [];
+  const all = bank.concat(two, three, [0]).filter(v => v != null);
+  // the extremes are labelled; the drawing gets 8% headroom so the
+  // highest and lowest dots are not cut off at the edge
+  const hi = Math.max(...bank, 0), lo = Math.min(...bank, 0);
+  const rawTop = Math.max(...all, 10), rawBottom = Math.min(...all, -10);
+  const pad = 0.08 * (rawTop - rawBottom);
+  const top = rawTop + pad, bottom = rawBottom - pad;
+  const W = 600, H = 160, span = Math.max(...pts.map(x => Number(x.t_end)), 1);
+  const X = t => (W * Number(t) / span).toFixed(1);
+  const Y = v => (H * (top - v) / (top - bottom)).toFixed(1);
+  const line = (vals, cls) => {
+    const xy = pts.map((x, i) => vals[i] == null ? null : `${X(x.t_end)},${Y(vals[i])}`).filter(Boolean);
+    return xy.length ? `<polyline class="${cls}" vector-effect="non-scaling-stroke" points="0,${Y(0)} ${xy.join(" ")}"/>` : "";
+  };
+  const dots = pts.map((x, i) => {
+    const d = Math.round(Number(x.delta_s));
+    const where = d > 0 ? `${d}s behind` : d < 0 ? `${-d}s ahead` : "on pace";
+    const c = finite(x.change_s) ? Math.round(Number(x.change_s)) : null;
+    const moved = c == null || c === 0 ? "" : c > 0 ? ` (lost ${c}s)` : ` (gained ${-c}s)`;
+    // a zero-length round-capped line, not a circle: the svg stretches
+    // to its box and a circle would stretch into an ellipse with it
+    const cx = X(x.t_end), cy = Y(bank[i]);
+    return `<line class="pace-dot${d > 0 ? " behind" : ""}" vector-effect="non-scaling-stroke" x1="${cx}" x2="${cx}" y1="${cy}" y2="${cy}">`
+      + `<title>${esc(`Pull ${plain(x.pull)}: ${where}${moved}`)}</title></line>`;
+  }).join("");
+  const last = Math.round(-bank[bank.length - 1]);
+  const end = last > 0 ? `${last}s behind` : last < 0 ? `${-last}s ahead` : "on pace";
+  return `<h2>Pace</h2><div class="pace">
+    <div class="dim pace-cap">${esc(paceCaption(bench))} · after the last pull: ${esc(end)}</div>
+    <div class="pace-plot">
+    <span class="pace-y top">${esc(mmss(hi))} ahead</span>
+    <span class="pace-y bottom">${esc(mmss(-lo))} behind</span>
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Pace after each pull">
+      <line class="pace-zero" vector-effect="non-scaling-stroke" x1="0" x2="${W}" y1="${Y(0)}" y2="${Y(0)}"/>
+      ${timer ? line(two, "pace-chest pace-chest-2") + line(three, "pace-chest pace-chest-3") : ""}
+      ${line(bank, "pace-line")}${dots}
+    </svg></div>
+    <div class="dim pace-key">Above the line: ahead. Below: behind.${timer ? " Dashed: the lead a +2 and a +3 need." : ""}</div>
+  </div>`;
+}
+
 function pullsTable() {
   // The pack list keeps to about two lines; the rest opens in place.
   const pack = list => {
@@ -1035,19 +1136,28 @@ function pullsTable() {
     if (list.length <= 4) return npcs(list);
     return `${npcs(list.slice(0, 3))}, <details class="more"><summary>+${list.length - 3} more</summary>${npcs(list.slice(3))}</details>`;
   };
+  const change = paceChanges();
+  const paceCell = p => {
+    if (!change) return "";
+    const c = change[String(p.pull)];
+    if (c == null) return `<td class="num"></td>`;
+    const s = Math.round(c);
+    return s > 0 ? `<td class="num dev-off">+${s}s</td>`
+      : s < 0 ? `<td class="num ok">−${-s}s</td>` : `<td class="num">0s</td>`;
+  };
   const rows = (R.pulls||[]).map(p => `<tr${p.player_deaths ? ' class="died"' : ""}>
     <td class="num">${plain(p.pull)}</td>
     <td>${mmss(p.t_start)}–${mmss(p.t_end)}</td>
     <td class="num">${p.duration_s}s</td>
     <td class="num">${p.mob_count}</td>
     <td class="num">${p.forces ? "+" + num(p.forces) : ""}</td>
-    <td class="num">${num(p.group_damage)}</td>
+    <td class="num">${num(p.group_damage)}</td>${paceCell(p)}
     <td class="num${p.player_deaths ? ' dev-off' : ''}">${p.player_deaths || ""}</td>
     <td>${p.boss ? `<b>${esc(p.boss)}</b>` : ""}</td>
     <td class="txt dim">${pack(p.npcs)}</td></tr>`).join("");
   return `<h2>Pulls</h2><div class="wrap"><table>
     <tr><th class="num">#</th><th>Window</th><th class="num">Length</th>
-    <th class="num">Mobs</th><th class="num">Forces</th><th class="num">Group dmg</th>
+    <th class="num">Mobs</th><th class="num">Forces</th><th class="num">Group dmg</th>${change ? '<th class="num">Pace</th>' : ""}
     <th class="num">Deaths</th><th>Boss</th><th>Pack</th></tr>${rows}</table></div>`;
 }
 
@@ -1283,6 +1393,14 @@ def render_html(report: dict[str, Any]) -> str:
     # the fields they already carry (see analysis/verdict.py).
     if not isinstance(report.get("verdict"), dict):
         report = {**report, "verdict": build_verdict(report)}
+    # Same for the pace line (analysis/pace.py): no history here, so a
+    # report without one is paced against the timer.
+    if not isinstance(report.get("pace"), dict):
+        try:
+            pace = build_pace(report)
+        except Exception:
+            pace = None
+        report = {**report, "pace": pace}
     run = report.get("run", {})
     title = f"{run.get('zone') or report.get('dungeon', {}).get('name', 'M+')}" \
             f" +{run.get('keystone_level', '?')} — post-mortem"

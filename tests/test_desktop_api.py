@@ -624,6 +624,19 @@ class TestListHistory:
         assert opened["label"].startswith("Murder Row")
         assert "<html" in opened["html"].lower()
 
+    def test_an_old_db_run_gets_its_pace_from_history_when_opened(
+        self, api, log_file, route_string, dungeon_data_file, tmp_path,
+    ):
+        db_path = tmp_path / "runs.db"
+        report = self._analyzed(api, log_file, route_string, dungeon_data_file)
+        report.pop("pace", None)  # stored before the pace line existed
+        history_ingest(report, db_path)
+        ref = api.list_history(db_path=str(db_path))["rows"][0]["html"][len("pm-run:"):]
+
+        opened = api.open_history_run(ref)
+        # the only history row is this run, which is never its own benchmark
+        assert opened["report"]["pace"]["benchmark"]["kind"] == "timer"
+
     def test_a_folder_run_opens_from_its_own_json_even_in_a_subfolder(
         self, api, log_file, route_string, dungeon_data_file, tmp_path,
     ):

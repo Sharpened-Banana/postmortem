@@ -178,7 +178,13 @@ def upload_report(
     # (see mapart.py). Stripped here, at the one choke point every upload
     # path goes through, rather than trusting each caller to remember.
     from .mapart import strip_backgrounds
-    payload = json.dumps(strip_backgrounds(report)).encode("utf-8")
+    shared = strip_backgrounds(report)
+    # Nor the pace line: it is measured against the uploader's own history
+    # ("vs your best +17 ..."), which is theirs, not the site's -- and on a
+    # public page it would read as the viewer's best. The site paces runs
+    # itself (against the timer for anonymous uploads).
+    shared = {k: v for k, v in shared.items() if k != "pace"}
+    payload = json.dumps(shared).encode("utf-8")
     try:
         # Inside the try on purpose: Request() itself raises ValueError for
         # a URL it cannot make sense of, and this function's whole contract
