@@ -116,3 +116,32 @@ def test_a_benchmark_measured_differently_is_passed_over(tmp_path):
     db = _db(tmp_path, no_forces, _run(17, 1600, DAY + 1e5))
     report = attach_pace(_run(17, 1800, DAY + 9e5), db)
     assert report["pace"]["benchmark"]["duration_s"] == 1600
+
+
+def test_pace_against_takes_any_run_source():
+    # The site has no local history file: it hands over its own rows (the
+    # signed-in account's uploads) and a loader for their reports.
+    from postmortem.history.benchmark import pace_against
+
+    stored = {7: _run(17, 1600, DAY), 8: _run(17, 1500, DAY + 1e5, data=False)}
+    rows = [(7, {"zone": KR, "level": 17, "timed": True, "duration_ms": 1_600_000,
+                 "start_ts": DAY, "date": "2026-10-01 20:00"}),
+            (8, {"zone": KR, "level": 17, "timed": True, "duration_ms": 1_500_000,
+                 "start_ts": DAY + 1e5, "date": "2026-10-02 20:00"})]
+    report = _run(17, 1800, DAY + 9e5)
+    pace = pace_against(report, rows, stored.get)
+    # run 8 is faster but has no progress data, so run 7 is the benchmark
+    assert pace["benchmark"]["kind"] == "own_best"
+    assert pace["benchmark"]["duration_s"] == 1600
+    assert pace["benchmark"]["date"] == "2026-10-01"
+
+
+def test_pace_against_survives_a_loader_that_raises():
+    from postmortem.history.benchmark import pace_against
+
+    def boom(_run_id):
+        raise RuntimeError("db gone")
+
+    rows = [(7, {"zone": KR, "level": 17, "timed": True, "duration_ms": 1_600_000,
+                 "start_ts": DAY, "date": "2026-10-01 20:00"})]
+    assert pace_against(_run(17, 1800, DAY + 9e5), rows, boom)["benchmark"]["kind"] == "timer"
