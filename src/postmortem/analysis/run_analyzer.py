@@ -454,6 +454,48 @@ def bundled_par_ms(challenge_map_id: Any) -> Optional[int]:
         return None
 
 
+#: Xal'atath's Guile, the +12 affix: deaths cost 15s instead of 5s.
+GUILE_AFFIX_ID = 147
+#: Seconds the keystone timer loses per death, without / with Guile.
+#: Measured 2026-10-17 over 78 completed keys from real logs: in-game time
+#: - wall time - deaths x penalty sat at -8.4s (the start countdown) for
+#: 73 of them with this rule. The old flat 15s overcharged every low-key
+#: death by 10s, in the verdict, the death-cost tile and the pace line.
+DEATH_PENALTY_S = 5.0
+GUILE_DEATH_PENALTY_S = 15.0
+
+
+def death_penalty_for(affixes: Any) -> float:
+    """The timer penalty per death for a key with these affix ids."""
+    if isinstance(affixes, list) and any(
+            a == GUILE_AFFIX_ID and not isinstance(a, bool) for a in affixes):
+        return GUILE_DEATH_PENALTY_S
+    return DEATH_PENALTY_S
+
+
+def _correct_death_cost(report: dict[str, Any]) -> None:
+    """Reports analysed before 2026-10-17 charged a flat 15s per death.
+    Where the affixes say the key had no Guile, the stored cost is
+    recomputed at 5s; any other stored value (a Guile key, or a penalty
+    someone chose with --death-penalty) is left alone, as is a report that
+    does not record its affixes."""
+    run = report.get("run")
+    cost = report.get("death_cost")
+    if not isinstance(run, dict) or not isinstance(cost, dict):
+        return
+    affixes = run.get("affixes")
+    if not isinstance(affixes, list) or cost.get("per_death_s") != GUILE_DEATH_PENALTY_S:
+        return
+    per = death_penalty_for(affixes)
+    if per == GUILE_DEATH_PENALTY_S:
+        return
+    deaths = cost.get("deaths")
+    if not isinstance(deaths, int) or isinstance(deaths, bool):
+        deaths = len(report["deaths"]) if isinstance(report.get("deaths"), list) else 0
+    cost["per_death_s"] = per
+    cost["total_s"] = round(deaths * per, 1)
+
+
 def apply_timed_verdict(report: dict[str, Any], par_ms: Optional[int] = None) -> dict[str, Any]:
     """Set ``run.timed`` from the dungeon's timer, in place.
 
@@ -467,8 +509,10 @@ def apply_timed_verdict(report: dict[str, Any], par_ms: Optional[int] = None) ->
     Idempotent, and safe on a stored report: the site and the history
     store call it on reports analyzed before this existed, whose
     ``timed`` is the old wrong value. Adds the ``timer`` block when the
-    report has none.
+    report has none. Also corrects a stored flat-15s death cost (see
+    ``_correct_death_cost``), since every stored-report reader comes here.
     """
+    _correct_death_cost(report)
     run = report.get("run")
     if not isinstance(run, dict) or not run.get("completed"):
         return report
@@ -524,7 +568,7 @@ def analyze_run(
     stealable: Optional[StealableData] = None,
     pull_gap_seconds: float = DEFAULT_PULL_GAP_S,
     full_cast_timeline: bool = True,
-    death_penalty_s: float = 15.0,
+    death_penalty_s: Optional[float] = None,
     par_ms: Optional[int] = None,
     spell_damage_history_path: Optional[str | Path] = None,
     community_spell_damage: Optional[SpellDamageData] = None,
@@ -563,6 +607,8 @@ def analyze_run(
     if dispel_data is None:
         dispel_data = DispelData.load_bundled()
 
+    if death_penalty_s is None:
+        death_penalty_s = death_penalty_for(segment.affixes)
     pulls = detect_pulls(segment.events, gap_seconds=pull_gap_seconds)
     stats = compute_stats(
         segment.events, pulls, data, full_cast_timeline=full_cast_timeline,

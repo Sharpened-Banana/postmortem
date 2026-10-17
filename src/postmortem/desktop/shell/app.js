@@ -328,7 +328,7 @@ async function onAnalyze() {
     log_path: logPath,
     run_selector: na.runSelect.value || "last",
     pull_gap_seconds: parseFloatOr(na.pullGap.value, 1.5),
-    death_penalty_s: parseFloatOr(na.deathPenalty.value, 15.0),
+    death_penalty_s: parseFloatOr(na.deathPenalty.value, null),
   };
   const route = na.routeText.value.trim();
   if (route) params.route = route;

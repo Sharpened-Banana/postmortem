@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from postmortem.analysis.pace import boss_count, build_pace, progress_points
+from postmortem.analysis.pace import TIMER_START_DELAY_S, boss_count, build_pace, progress_points
 
 PAR_MS = 1_800_000
 
@@ -69,8 +69,18 @@ def test_unfinished_run_without_total_drops_bosses():
 def test_game_time_adds_the_death_penalty_so_far():
     r = _report(deaths=[{"t": 100.0}, {"t": 500.0}, {"t": 600.0}])
     pts = progress_points(r)
-    assert pts[0]["game_s"] == pytest.approx(120.0 + 15)
-    assert pts[1]["game_s"] == pytest.approx(560.0 + 30)  # the 600s death is later
+    d = TIMER_START_DELAY_S
+    assert pts[0]["game_s"] == pytest.approx(120.0 - d + 15)
+    assert pts[1]["game_s"] == pytest.approx(560.0 - d + 30)  # the 600s death is later
+
+
+def test_game_time_starts_after_the_countdown():
+    # 73 of 78 real keys: in-game = wall - 8.4s - deaths x penalty
+    assert TIMER_START_DELAY_S == pytest.approx(8.4)
+    r = _report(pulls=[{"pull": 1, "t_end": 5.0}, {"pull": 2, "t_end": 120.0}])
+    pts = progress_points(r)
+    assert pts[0]["game_s"] == 0.0  # never negative
+    assert pts[1]["game_s"] == pytest.approx(120.0 - 8.4)
 
 
 def test_timer_pace():
@@ -78,7 +88,7 @@ def test_timer_pace():
     assert pace["benchmark"]["kind"] == "timer"
     p2 = _point(pace, 2)  # progress 0.5, game 560
     assert p2["bench_s"] == pytest.approx(900.0)
-    assert p2["delta_s"] == pytest.approx(-340.0)
+    assert p2["delta_s"] == pytest.approx(560.0 - TIMER_START_DELAY_S - 900.0)
 
 
 def test_change_is_the_difference_between_deltas():
@@ -120,7 +130,9 @@ def test_own_best_interpolates_including_the_endpoints():
     assert pace["benchmark"]["level"] == 10
     assert pace["benchmark"]["date"] == "2026-09-28"
     assert pace["benchmark"]["same_level"] is True
-    assert _point(pace, 1)["bench_s"] == pytest.approx(900.0)   # halfway 600..1200
+    # halfway between the benchmark's pulls, which end at 600 and 1200 on
+    # the wall clock -- 8.4s less each on the in-game timer
+    assert _point(pace, 1)["bench_s"] == pytest.approx(900.0 - TIMER_START_DELAY_S)
     assert _point(pace, 2)["bench_s"] == pytest.approx(1500.0)  # the final endpoint
 
 

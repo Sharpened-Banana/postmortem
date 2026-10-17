@@ -946,8 +946,9 @@ class TestAnalyzeRun:
         # no --interrupt-data passed to analyze_run(): every spell falls
         # back to the unchanged heuristic, tagged interruptible: None
         assert through["Dark Bolt"]["interruptible"] is None
-        assert payload["death_cost"] == {"deaths": 1, "per_death_s": 15.0,
-                                         "total_s": 15.0}
+        # the fixture key's affixes [160, 9, 10] have no Xal'atath's Guile
+        assert payload["death_cost"] == {"deaths": 1, "per_death_s": 5.0,
+                                         "total_s": 5.0}
         assert payload["deaths"][0]["biggest_hit"] == 250000
         assert payload["deaths"][0]["damage_last_5s"] == 400000
         assert payload["encounters"][0]["kill"] is True
