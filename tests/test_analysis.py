@@ -140,7 +140,8 @@ class TestRouteComparison:
         pulls = detect_pulls(run_segment.events)
         summary = compare_route(route, pulls, dungeon).summary(dungeon)
         early = summary["pulls"][0]["pulled_early"]
-        assert early == [{"npc_id": DUSKBLADE, "n": 1, "name": "Duskblade"}]
+        assert early == [{"npc_id": DUSKBLADE, "n": 1, "name": "Duskblade",
+                          "pulled_by": [{"name": DPS1[1], "how": "group", "n": 1}]}]
 
     def test_match_confidence(self, run_segment, route, dungeon):
         pulls = detect_pulls(run_segment.events)

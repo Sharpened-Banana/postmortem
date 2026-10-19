@@ -84,8 +84,32 @@ def _npcs(entries: list[dict[str, Any]]) -> str:
     parts = []
     for e in entries:
         name = e.get("name") or f"npc:{e.get('npc_id')}"
-        parts.append(f"{e['n']}x {name}")
+        part = f"{e['n']}x {name}"
+        if e.get("pulled_by"):
+            part += f" ({_pulled_by(e['pulled_by'])})"
+        parts.append(part)
     return ", ".join(parts)
+
+
+def _pulled_by(openers: list[dict[str, Any]]) -> str:
+    """An off-route entry's openers: "pulled by X" when the group hit it
+    first, "aggroed on X" when it came at X on its own (see
+    pulls.UnitEngagement.opened_by)."""
+    out = []
+    for o in openers:
+        verb = "aggroed on" if o.get("how") == "enemy" else "pulled by"
+        count = f"{o['n']}x " if len(openers) > 1 else ""
+        out.append(f"{count}{verb} {o.get('name') or '?'}")
+    return "; ".join(out)
+
+
+def _opener(e: dict[str, Any]) -> str:
+    """A flagged pull opener (see analysis/pull_openers.py)."""
+    name = e.get("opener") or "?"
+    what = f"aggroed on {name}" if e.get("how") == "enemy" else f"pulled by {name}"
+    lead = e.get("tank_lead_s")
+    return what + (f" ({lead:.1f}s before the tank)" if lead is not None
+                   else " (tank never engaged)")
 
 
 def render_text(report: dict[str, Any]) -> str:
@@ -198,6 +222,25 @@ def render_text(report: dict[str, Any]) -> str:
         add("")
         add(f"Route comparison unavailable: {comparison['error']}")
 
+    # --- pulls a non-tank started ---
+    ntp = report.get("non_tank_pulls")
+    if ntp:
+        add("")
+        add("-- PULLS STARTED BY A NON-TANK " + "-" * 41)
+        if not ntp["flagged"]:
+            add(f"None: {ntp['tank']} started every pull.")
+        else:
+            add(f"{len(ntp['flagged'])} of {ntp['pull_count']} pulls started by someone"
+                f" other than {ntp['tank']}:")
+            for r in ntp["by_player"]:
+                counts = [f"{r['pulled']} pulled"] if r["pulled"] else []
+                if r["aggroed"]:
+                    counts.append(f"{r['aggroed']} aggroed on them")
+                add(f"    {r['name']}: {', '.join(counts)}")
+            for e in ntp["flagged"]:
+                boss = f"  [BOSS: {e['boss']}]" if e.get("boss") else ""
+                add(f"  Pull {e['pull']:>3}  {_fmt_time(e.get('t'))}  {_opener(e)}{boss}")
+
     # --- pulls ---
     add("")
     add("-- PULLS " + "-" * 63)
@@ -205,9 +248,11 @@ def render_text(report: dict[str, Any]) -> str:
         boss = f"  [BOSS: {p['boss']}]" if p.get("boss") else ""
         deaths = f"  deaths:{p['player_deaths']}" if p.get("player_deaths") else ""
         forces_s = f"  +{p['forces']:.0f} forces" if p.get("forces") else ""
+        opener = p.get("opener") or {}
+        started = f"  ! {_opener(opener)}" if opener.get("flagged") else ""
         add(f"Pull {p['pull']:>3}  {_fmt_time(p['t_start'])}-{_fmt_time(p['t_end'])}"
             f" ({p['duration_s']:.0f}s)  {p['mob_count']} mobs"
-            f"{forces_s}{deaths}{boss}")
+            f"{forces_s}{deaths}{boss}{started}")
 
     # --- deaths ---
     deaths = report.get("deaths") or []

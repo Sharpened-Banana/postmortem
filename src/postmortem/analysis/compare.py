@@ -86,6 +86,11 @@ class PullMatch:
     # that went to primary_plan_pull or a chained plan pull. None when
     # nothing matched at all (a pull that's purely off-route/untracked).
     match_confidence: Optional[float] = None
+    # npc -> (opener name, OPENED_BY_*) -> n, for the off-route units (see
+    # _off_route_openers). Opener name is None when the log never named it.
+    off_route_openers: dict[int, Counter] = field(default_factory=dict)
+    # the same for the units pulled early (from a later plan pull)
+    early_openers: dict[int, Counter] = field(default_factory=dict)
 
     @property
     def deviation_count(self) -> int:
@@ -121,6 +126,13 @@ class RouteComparison:
                 out.append(entry)
             return out
 
+        def with_openers(counter: Counter, openers: dict[int, Counter]) -> list[dict[str, Any]]:
+            return [
+                {**entry, "pulled_by": _pulled_by(openers[entry["npc_id"]])}
+                if openers.get(entry["npc_id"]) else entry
+                for entry in npc_list(counter)
+            ]
+
         return {
             "adherence_pct": self.adherence_pct,
             "plan_forces": self.plan_forces,
@@ -135,9 +147,9 @@ class RouteComparison:
                         for plan_idx, counter in sorted(m.matched.items())
                     },
                     "chained": list(m.chained),
-                    "pulled_early": npc_list(m.early),
+                    "pulled_early": with_openers(m.early, m.early_openers),
                     "picked_up_late": npc_list(m.late),
-                    "off_route": npc_list(m.off_route),
+                    "off_route": with_openers(m.off_route, m.off_route_openers),
                     "extra": npc_list(m.extra),
                     "untracked": npc_list(m.untracked),
                     "deviations": m.deviation_count,
@@ -408,6 +420,12 @@ def compare_route(
                 dp_matches, dp_missed, dp_matched_units, dp_off_route_units,
             )
 
+    for match, pull in zip(matches, actual_pulls):
+        match.off_route_openers = _unit_openers(
+            match.off_route, pull, count_engaged_only_if_killed)
+        match.early_openers = _unit_openers(
+            match.early, pull, count_engaged_only_if_killed)
+
     plan_forces = route.total_forces(data)
     required = data.total_count.get("normal")
     # An "on plan" unit matched its actual pull's primary planned pull (or
@@ -431,6 +449,44 @@ def compare_route(
         adherence_pct=adherence,
         npc_names=npc_names,
     )
+
+
+def _unit_openers(
+    deviating: Counter, pull: ActualPull, only_killed: bool,
+) -> dict[int, Counter]:
+    """Who opened each deviating (off-route or early) unit of ``pull``;
+    ``deviating`` is npc -> how many units of it deviated.
+
+    Matching works on per-npc counts, so when only some units of an npc
+    deviated it doesn't say which. Those are taken to be the last ones
+    engaged: the planned pack is what the group went for, and units of the
+    same npc that joined after it are the ones it walked into or dragged
+    along.
+    """
+    out: dict[int, Counter] = {}
+    for npc_id, n in deviating.items():
+        units = sorted(
+            (u for u in pull.units
+             if u.npc_id == npc_id and (u.killed or not only_killed)),
+            key=lambda u: u.first_ts,
+        )
+        openers: Counter = Counter()
+        for unit in units[-n:] if n else ():
+            if unit.opened_by is not None:
+                openers[(unit.opener_name, unit.opened_by)] += 1
+        if openers:
+            out[npc_id] = openers
+    return out
+
+
+def _pulled_by(openers: Optional[Counter]) -> list[dict[str, Any]]:
+    """[{"name", "how", "n"}], most units first; "how" is
+    pulls.OPENED_BY_GROUP or pulls.OPENED_BY_ENEMY."""
+    return [
+        {"name": name, "how": how, "n": n}
+        for (name, how), n in sorted(
+            (openers or {}).items(), key=lambda kv: (-kv[1], kv[0][0] or "", kv[0][1]))
+    ]
 
 
 def _find_plan_pull(

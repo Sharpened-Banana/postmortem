@@ -18,6 +18,7 @@ from ..combatlog.events import (
     is_group_owned,
     is_group_player,
     is_hostile_npc,
+    is_combat_event,
     advanced_info,
 )
 from ..combatlog.guid import parse_guid
@@ -75,6 +76,10 @@ AFFIX_NPC_IDS: dict[int, str] = {
 ENGAGEMENT_RESET_GAP_S = 30.0
 
 
+OPENED_BY_GROUP = "group"
+OPENED_BY_ENEMY = "enemy"
+
+
 @dataclass
 class UnitEngagement:
     guid: str
@@ -89,6 +94,21 @@ class UnitEngagement:
     # route map's calibration is per sub-map (see mapping.calibrate_maps),
     # so a position without its map is not usable as an anchor.
     first_map_id: Optional[int] = None
+    # Who started this engagement: the group member on the other end of
+    # its first interaction (a pet or guardian is credited to its owner),
+    # and which way that interaction went -- OPENED_BY_GROUP when the
+    # group acted on the enemy first, OPENED_BY_ENEMY when the enemy acted
+    # on the group first (it ran in on its own: a body pull, a linked
+    # pack, a patrol). The log has no aggro event, so an enemy that
+    # aggroed from proximity only shows up once it reaches someone: with
+    # OPENED_BY_ENEMY, the opener is who it went for, not necessarily who
+    # walked too close.
+    opener_guid: Optional[str] = None
+    opener_name: Optional[str] = None
+    opened_by: Optional[str] = None
+    # group member GUID (pets folded into their owner) -> when they first
+    # interacted with this engagement, either way round
+    first_touch: dict[str, float] = field(default_factory=dict)
 
     @property
     def killed(self) -> bool:
@@ -166,8 +186,21 @@ def collect_engagements(
     # interaction is a new engagement however soon it comes
     reset_since: set[str] = set()
     in_encounter = False
+    # group unit GUID -> name, and pet/guardian GUID -> owner GUID, so an
+    # engagement a pet opened is credited to the player who owns it
+    group_names: dict[str, str] = {}
+    pet_owner: dict[str, str] = {}
     for event in events:
         name = event.name
+        # only combat events carry the source/dest layout: COMBATANT_INFO
+        # starts with a player GUID too, then a faction number, not a name
+        if len(event.params) >= 8 and is_combat_event(name):
+            if event.source_guid not in group_names and is_group_owned(event.source_flags):
+                group_names[event.source_guid] = event.source_name
+            if event.dest_guid not in group_names and is_group_owned(event.dest_flags):
+                group_names[event.dest_guid] = event.dest_name
+            if name == "SPELL_SUMMON" and is_group_owned(event.source_flags):
+                pet_owner.setdefault(event.dest_guid, event.source_guid)
         if name == "ENCOUNTER_START":
             in_encounter = True
             continue
@@ -194,10 +227,12 @@ def collect_engagements(
         enemy_flags = 0
         if is_group_owned(src_flags) and is_hostile_npc(dst_flags):
             enemy_guid, enemy_name, enemy_flags = event.dest_guid, event.dest_name, dst_flags
+            group_guid, opened_by = event.source_guid, OPENED_BY_GROUP
         elif is_hostile_npc(src_flags) and (
             is_group_player(dst_flags) or is_group_owned(dst_flags)
         ):
             enemy_guid, enemy_name, enemy_flags = event.source_guid, event.source_name, src_flags
+            group_guid, opened_by = event.dest_guid, OPENED_BY_ENEMY
         if enemy_guid is None:
             continue
         g = parse_guid(enemy_guid)
@@ -219,6 +254,9 @@ def collect_engagements(
         if adv is not None and adv.info_guid == enemy_guid and adv.pos_x:
             pos = (adv.pos_x, adv.pos_y)
             map_id = adv.ui_map_id or None
+        if (adv is not None and adv.info_guid == group_guid
+                and adv.owner_guid.strip("0") and adv.owner_guid != group_guid):
+            pet_owner.setdefault(group_guid, adv.owner_guid)
 
         key = latest.get(enemy_guid)
         eng = engagements.get(key) if key is not None else None
@@ -241,13 +279,34 @@ def collect_engagements(
                 last_ts=event.ts,
                 first_pos=pos,
                 first_map_id=map_id,
+                opener_guid=group_guid,
+                opened_by=opened_by,
+                first_touch={group_guid: event.ts},
             )
         else:
+            eng.first_touch.setdefault(group_guid, event.ts)
             if eng.first_pos is None and pos is not None:
                 eng.first_pos = pos
                 eng.first_map_id = map_id
             if eng.died_at is None:
                 eng.last_ts = event.ts
+
+    # Credit openers by name only now: a pet's owner and the owner's name
+    # may first appear in the log after the pet's opening hit.
+    def credited(guid: str) -> str:
+        owner = pet_owner.get(guid)
+        return owner if owner is not None and owner in group_names else guid
+
+    for eng in engagements.values():
+        touches: dict[str, float] = {}
+        for guid, ts in eng.first_touch.items():
+            who = credited(guid)
+            touches[who] = min(ts, touches.get(who, ts))
+        eng.first_touch = touches
+        if eng.opener_guid is None:
+            continue
+        eng.opener_guid = credited(eng.opener_guid)
+        eng.opener_name = group_names.get(eng.opener_guid) or None
     return engagements
 
 
