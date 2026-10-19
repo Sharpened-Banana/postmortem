@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from ..analysis.pace import build_pace, has_forces, progress_points
 
@@ -53,34 +53,51 @@ def rank_candidates(report: dict, rows: list[tuple[int, dict]]) -> list[tuple[in
     return [(run_id, row) for _, run_id, row in usable]
 
 
-def attach_pace(report: dict, db_path: Optional[str | Path]) -> dict:
-    """Set ``report["pace"]`` against the best usable history run, else the
-    timer, and return the report. Never raises."""
+def pace_against(report: dict, rows: list[tuple[int, dict]],
+                 load_report: Callable[[int], Any]) -> Optional[dict]:
+    """The report's pace against the best usable run among ``rows`` (index
+    rows with their ids, from any run store), loading each candidate's
+    report with ``load_report(run_id)``; the timer when none is usable.
+    Never raises."""
     benchmark, info = None, None
+    try:
+        run = report.get("run") if isinstance(report.get("run"), dict) else {}
+        for run_id, row in rank_candidates(report, rows):
+            candidate = load_report(run_id)
+            if not isinstance(candidate, dict) or not progress_points(candidate):
+                continue
+            if has_forces(candidate) != has_forces(report):
+                continue  # measured differently: not comparable
+            date = row.get("date")
+            benchmark = candidate
+            info = {
+                "level": row.get("level"),
+                "duration_s": row["duration_ms"] / 1000.0,
+                "date": date if isinstance(date, str) else None,
+                "same_level": row.get("level") == run.get("keystone_level"),
+            }
+            break
+    except Exception:
+        benchmark, info = None, None
+    try:
+        return build_pace(report, benchmark, info)
+    except Exception:
+        return None
+
+
+def attach_pace(report: dict, db_path: Optional[str | Path]) -> dict:
+    """Set ``report["pace"]`` against the best usable run in the local
+    history store at ``db_path``, else the timer, and return the report.
+    Never raises."""
     try:
         if db_path is not None and Path(db_path).is_file():
             from .store import Store
 
-            run = report.get("run") if isinstance(report.get("run"), dict) else {}
             with Store(db_path) as store:
-                for run_id, row in rank_candidates(report, store.query_runs_with_ids()):
-                    candidate = store.get_report(run_id)
-                    if not isinstance(candidate, dict) or not progress_points(candidate):
-                        continue
-                    if has_forces(candidate) != has_forces(report):
-                        continue  # measured differently: not comparable
-                    benchmark = candidate
-                    info = {
-                        "level": row.get("level"),
-                        "duration_s": row["duration_ms"] / 1000.0,
-                        "date": row.get("date") if isinstance(row.get("date"), str) else None,
-                        "same_level": row.get("level") == run.get("keystone_level"),
-                    }
-                    break
+                report["pace"] = pace_against(
+                    report, store.query_runs_with_ids(), store.get_report)
+                return report
     except Exception:
-        benchmark, info = None, None
-    try:
-        report["pace"] = build_pace(report, benchmark, info)
-    except Exception:
-        report["pace"] = None
+        pass
+    report["pace"] = pace_against(report, [], lambda _run_id: None)
     return report
