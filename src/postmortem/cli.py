@@ -2266,8 +2266,9 @@ def build_parser() -> argparse.ArgumentParser:
                         f"(default {DEFAULT_PULL_GAP_S})")
     p.add_argument("--no-cast-timeline", action="store_true",
                    help="omit the full per-cast timeline from JSON output")
-    p.add_argument("--death-penalty", type=float, default=15.0,
-                   help="seconds the keystone timer loses per death (default 15)")
+    p.add_argument("--death-penalty", type=float, default=None,
+                   help="seconds the keystone timer loses per death (default: from "
+                        "the key's affixes -- 15 with Xal'atath's Guile, else 5)")
     p.add_argument("--raiderio", metavar="REGION",
                    help="enrich players with Raider.io scores (us/eu/kr/tw/cn); "
                         "needs internet access")

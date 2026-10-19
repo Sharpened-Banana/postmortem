@@ -14,8 +14,9 @@ and pull orders line up fairly:
 * **progress** = 0.5 x forces done + 0.5 x bosses killed / total bosses.
   A half that is unknown (no dungeon data for forces; no boss total for an
   unfinished run) is dropped and the other half counts fully.
-* **game time** = seconds since the key started + the death penalty for
-  every death so far -- what the in-game timer read.
+* **game time** = seconds since the timer started (the key's start line
+  plus the countdown) + the death penalty for every death so far -- what
+  the in-game timer read.
 * **benchmark** = the player's own best timed run (its own points,
   interpolated) or, without one, the timer spread evenly over progress.
 
@@ -30,6 +31,11 @@ from typing import Any, Optional
 from .verdict import _dict, _int, _list, _num
 
 PACE_VERSION = 1
+
+#: The keystone timer starts this long after CHALLENGE_MODE_START (the
+#: start countdown). Measured 2026-10-17: in-game time = wall time - 8.4s
+#: - deaths x penalty for 73 of 78 completed keys in real logs.
+TIMER_START_DELAY_S = 8.4
 
 
 def _kills(report: dict) -> list[tuple[float, Any]]:
@@ -124,7 +130,7 @@ def progress_points(report: dict, total_bosses: Optional[int] = None) -> list[di
             "pull": number,
             "t_end": round(t_end, 1),
             "progress": sum(halves) / len(halves),
-            "game_s": t_end + died * per_death,
+            "game_s": max(0.0, t_end - TIMER_START_DELAY_S) + died * per_death,
         })
     out.sort(key=lambda p: p["t_end"])
     return out

@@ -267,6 +267,16 @@ def _already_uploaded(db_path, zone, start_ts) -> bool:
         return False
 
 
+
+def _optional_float(value: Any) -> Optional[float]:
+    """A number from the UI, or None when the field was left empty/auto."""
+    if value is None or value == "" or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
 class DesktopAPI:
     """Bridge object exposed to the desktop app's JS runtime (typically
     as ``window.pywebview.api``). Construct one instance and hand it to
@@ -377,7 +387,8 @@ class DesktopAPI:
           ``raiderio_region``, for a live Raider.io static-data par-time
           fetch.
         - ``pull_gap_seconds`` (float, default analysis.pulls.DEFAULT_PULL_GAP_S).
-        - ``death_penalty_s`` (float, default 15.0).
+        - ``death_penalty_s`` (float, optional; default from the key's
+          affixes: 15 with Xal'atath's Guile, else 5).
         - ``full_cast_timeline`` (bool, default True) -- include the
           full per-cast timeline in the report (CLI default; the CLI's
           ``--no-cast-timeline`` flag flips this off).
@@ -484,7 +495,7 @@ class DesktopAPI:
             stealable=stealable,
             pull_gap_seconds=float(params.get("pull_gap_seconds", DEFAULT_PULL_GAP_S)),
             full_cast_timeline=bool(params.get("full_cast_timeline", True)),
-            death_penalty_s=float(params.get("death_penalty_s", 15.0)),
+            death_penalty_s=_optional_float(params.get("death_penalty_s")),
             par_ms=par_ms,
             spell_damage_history_path=_config.resolve_learned_spell_damage_path(
                 _config.load_settings()),
