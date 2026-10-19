@@ -49,6 +49,7 @@ from ..combatlog.segmenter import segment_runs
 from ..mdt.decode import MDTDecodeError, decode_mdt_string
 from ..mdt.extract import write_dungeon_data
 from ..mdt.route import Route
+from ..history.benchmark import attach_pace
 from ..history.store import has_run as _has_run
 from ..history.store import has_uploaded_run as _has_uploaded_run
 from ..history.store import mark_uploaded as _mark_uploaded
@@ -266,6 +267,16 @@ def _already_uploaded(db_path, zone, start_ts) -> bool:
         return False
 
 
+
+def _optional_float(value: Any) -> Optional[float]:
+    """A number from the UI, or None when the field was left empty/auto."""
+    if value is None or value == "" or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
 class DesktopAPI:
     """Bridge object exposed to the desktop app's JS runtime (typically
     as ``window.pywebview.api``). Construct one instance and hand it to
@@ -376,7 +387,8 @@ class DesktopAPI:
           ``raiderio_region``, for a live Raider.io static-data par-time
           fetch.
         - ``pull_gap_seconds`` (float, default analysis.pulls.DEFAULT_PULL_GAP_S).
-        - ``death_penalty_s`` (float, default 15.0).
+        - ``death_penalty_s`` (float, optional; default from the key's
+          affixes: 15 with Xal'atath's Guile, else 5).
         - ``full_cast_timeline`` (bool, default True) -- include the
           full per-cast timeline in the report (CLI default; the CLI's
           ``--no-cast-timeline`` flag flips this off).
@@ -483,7 +495,7 @@ class DesktopAPI:
             stealable=stealable,
             pull_gap_seconds=float(params.get("pull_gap_seconds", DEFAULT_PULL_GAP_S)),
             full_cast_timeline=bool(params.get("full_cast_timeline", True)),
-            death_penalty_s=float(params.get("death_penalty_s", 15.0)),
+            death_penalty_s=_optional_float(params.get("death_penalty_s")),
             par_ms=par_ms,
             spell_damage_history_path=_config.resolve_learned_spell_damage_path(
                 _config.load_settings()),
@@ -525,6 +537,7 @@ class DesktopAPI:
             pull_gap_seconds=float(params.get("pull_gap_seconds", DEFAULT_PULL_GAP_S)),
         )
 
+        attach_pace(report, _config.resolve_history_db_path(_config.load_settings()))
         html = render_html(report)
         saved = self._save_report_locally(report, html)
         self._last_report = report
@@ -676,6 +689,10 @@ class DesktopAPI:
                     report = json.load(fh)
             if not isinstance(report, dict):
                 return {"ok": False, "error": "that run's saved report could not be found"}
+            if not isinstance(report.get("pace"), dict) and kind == "db":
+                # stored before the pace line existed: pace it now against
+                # the same history (the run itself is never its benchmark)
+                attach_pace(report, location)
             run = report.get("run") or {}
             level = run.get("keystone_level")
             label = " ".join(
@@ -1463,6 +1480,7 @@ class DesktopAPI:
             # embed the floor's map art from the user's MDT install into the
             # local report (best-effort; upload.py strips it before the site)
             enrich=lambda r: mapart.attach_map_backgrounds(r, mdt_dir, store),
+            history_db_path=history_db_path,
         )
         if report is None:
             self._emit_watch_event({

@@ -21,6 +21,7 @@ from .clips import DEFAULT_PAD_S, FfmpegNotFoundError, clip_specs_for_chapters, 
 from .combatlog.events import extra_spell_info, is_hostile_npc, spell_info
 from .combatlog.parser import parse_file
 from .combatlog.segmenter import RunSegment, segment_runs
+from .history.benchmark import attach_pace
 from .mdt.decode import MDTDecodeError, decode_mdt_string
 from .mdt.dungeon_data import DungeonDataStore
 from .mdt.extract import LuaLiteralParser, LuaParseError, _find_assignment, write_dungeon_data
@@ -1422,6 +1423,10 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     attach_snapshots(report, segment, store=store, avoidable=avoidable,
                      interrupt_data=interrupt_data, stealable=stealable,
                      dispel_data=dispel_data, pull_gap_seconds=args.pull_gap)
+    # The pace line, against the player's own best run in --history-db
+    # (else the timer) -- before any output, so the JSON, the HTML and the
+    # history row all carry the same one.
+    attach_pace(report, args.history_db)
     if args.raiderio:
         from .raiderio import _default_fetcher, enrich_report
 
@@ -1747,7 +1752,7 @@ def cmd_index(args: argparse.Namespace) -> int:
 def _write_recorded_reports(
     run, route, store, pull_gap_seconds: float = DEFAULT_PULL_GAP_S, avoidable=None,
     interrupt_data=None, stealable=None, learned_path=None, enrich=None,
-    spell_damage_history_path=None, tank_knowledge=None,
+    spell_damage_history_path=None, tank_knowledge=None, history_db_path=None,
 ) -> Optional[dict]:
     """Analyze one recorded run's log slice and write its JSON/HTML/text
     reports, plus the chapters sidecars (``<run>.chapters.json`` /
@@ -1828,6 +1833,9 @@ def _write_recorded_reports(
     attach_snapshots(report, segments[-1], store=store, avoidable=avoidable,
                      interrupt_data=interrupt_data, stealable=stealable,
                      pull_gap_seconds=pull_gap_seconds)
+    # Pace against the player's own best run in ``history_db_path`` (else
+    # the timer); best-effort inside, like the snapshots above.
+    attach_pace(report, history_db_path)
     Path(f"{base}.json").write_text(json.dumps(report, indent=1),
                                     encoding="utf-8")
     Path(f"{base}.html").write_text(render_html(report), encoding="utf-8")
@@ -2258,8 +2266,9 @@ def build_parser() -> argparse.ArgumentParser:
                         f"(default {DEFAULT_PULL_GAP_S})")
     p.add_argument("--no-cast-timeline", action="store_true",
                    help="omit the full per-cast timeline from JSON output")
-    p.add_argument("--death-penalty", type=float, default=15.0,
-                   help="seconds the keystone timer loses per death (default 15)")
+    p.add_argument("--death-penalty", type=float, default=None,
+                   help="seconds the keystone timer loses per death (default: from "
+                        "the key's affixes -- 15 with Xal'atath's Guile, else 5)")
     p.add_argument("--raiderio", metavar="REGION",
                    help="enrich players with Raider.io scores (us/eu/kr/tw/cn); "
                         "needs internet access")
